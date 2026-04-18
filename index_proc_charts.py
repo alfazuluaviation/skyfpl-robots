@@ -17,6 +17,7 @@ import boto3
 import signal
 import threading
 import re
+from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -56,13 +57,23 @@ HEADERS_REST = {
 
 def init_s3():
     if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
-        log.warning("⚠️ R2_ACCESS_KEY_ID/SECRET/ENDPOINT não configurado. Telemetria desativada.")
+        log.error("❌ Credenciais R2 incompletas nos Secrets!")
         return None
-    return boto3.client('s3',
+    
+    # Configuração de timeout agressiva para o S3
+    config = Config(
+        connect_timeout=5,
+        read_timeout=10,
+        retries={'max_attempts': 2}
+    )
+    
+    return boto3.client(
+        's3',
         endpoint_url=R2_ENDPOINT,
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        region_name='auto'
+        region_name='auto',
+        config=config
     )
 
 def upload_telemetry(snapshot):
@@ -79,7 +90,8 @@ def upload_telemetry(snapshot):
                 "Content-Type": "application/json",
                 "x-upsert": "true"
             },
-            data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8')
+            data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
+            timeout=10
         )
     except Exception as e:
         log.error(f"❌ Falha fatal na telemetria: {e}")
@@ -112,7 +124,7 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
     
     try:
         # Download do original (DECEA)
-        resp = requests.get(url, timeout=30, stream=True)
+        resp = requests.get(url, timeout=10, stream=True)
         if not resp.ok:
             log.error(f"[{icao}] Erro download PDF: {url} -> {resp.status_code}")
             return '', 0
@@ -137,7 +149,7 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
 
 def fetch_all_icao_codes() -> list[str]:
     R2_NAVDATA_URL = 'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json'
-    resp = requests.get(R2_NAVDATA_URL, timeout=60)
+    resp = requests.get(R2_NAVDATA_URL, timeout=10)
     resp.raise_for_status()
     payload = resp.json()
     points = payload.get('data', [])
@@ -155,7 +167,7 @@ def fetch_charts_for_icao(icao: str, retries=3) -> list[dict]:
             EDGE_FUNCTION_URL,
             json={'icaoCode': icao},
             headers=HEADERS_EDGE,
-            timeout=25,
+            timeout=10,
         )
         
         # Erro 429 (Rate Limit)
