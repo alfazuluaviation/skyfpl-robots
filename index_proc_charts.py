@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 6.0 - Estabilidade Supabase)
+SkyFPL - Robô de Indexação de Cartas (Versão 7.0 - Telemetria Inteligente)
 ========================================================================
 Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            otimizada (Low-Payload) para o Supabase Storage.
+            em tempo real com acúmulo de histórico no Dashboard.
 """
 
 import os
@@ -105,8 +105,8 @@ def add_telemetry_log(telemetry, message):
     log.info(message)
     with telemetry_lock:
         telemetry['logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        if len(telemetry['logs']) > 5:
-            telemetry['logs'] = telemetry['logs'][:5]
+        if len(telemetry['logs']) > 20:
+            telemetry['logs'] = telemetry['logs'][:20]
 
 telemetry_lock = threading.Lock()
 
