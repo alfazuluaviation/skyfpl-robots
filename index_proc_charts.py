@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 5.0 - Telemetria Non-Blocking)
+SkyFPL - Robô de Indexação de Cartas (Versão 6.0 - Estabilidade Supabase)
 ========================================================================
 Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            em tempo real (Fast-Polling) para o Supabase Storage.
+            otimizada (Low-Payload) para o Supabase Storage.
 """
 
 import os
@@ -105,8 +105,8 @@ def add_telemetry_log(telemetry, message):
     log.info(message)
     with telemetry_lock:
         telemetry['logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        if len(telemetry['logs']) > 20:
-            telemetry['logs'].pop()
+        if len(telemetry['logs']) > 5:
+            telemetry['logs'] = telemetry['logs'][:5]
 
 telemetry_lock = threading.Lock()
 
@@ -313,7 +313,7 @@ def main():
     parser.add_argument('--icao', help='ICAO específico (ex: SBSV) ou lista CSV (ex: SBSV,SBGR)')
     parser.add_argument('--dry-run', default='False', help='Simulação (True/False)')
     parser.add_argument('--airac', help='Ciclo AIRAC (ex: 2404)')
-    parser.add_argument('--workers', type=int, default=5, help='Número de threads paralelas')
+    parser.add_argument('--workers', type=int, default=10, help='Número de threads paralelas')
     args = parser.parse_args()
 
     # Conversão de string para booleano (GitHub envia como string)
@@ -365,7 +365,7 @@ def main():
     def heartbeat_loop():
         while not stop_heartbeat.is_set():
             upload_telemetry(telemetry)
-            time.sleep(3)
+            time.sleep(10)
 
     heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
     heartbeat_thread.start()
