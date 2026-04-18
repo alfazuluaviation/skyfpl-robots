@@ -1,0 +1,52 @@
+name: 🤖 SkyFPL - Robô Indexador de Cartas IFR/VFR
+
+on:
+  workflow_dispatch:
+    inputs:
+      icao_code:
+        description: 'ICAO específico (vazio = todos)'
+        required: false
+        default: ''
+      airac_cycle:
+        description: 'Ciclo AIRAC (vazio = automático)'
+        required: false
+        default: ''
+      dry_run:
+        description: 'Simulação (True/False)'
+        required: false
+        default: 'False'
+      workers:
+        description: 'Número de Workers (1-50)'
+        required: false
+        default: '5'
+
+jobs:
+  index_charts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar Robô Indexador
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+        run: |
+          python index_proc_charts.py \
+            --icao "${{ github.event.inputs.icao_code }}" \
+            --airac "${{ github.event.inputs.airac_cycle }}" \
+            --dry-run "${{ github.event.inputs.dry_run }}" \
+            --workers "${{ github.event.inputs.workers }}"
