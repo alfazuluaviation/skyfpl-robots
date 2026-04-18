@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 10.0 - Fila Única Global)
+SkyFPL - Robô de Indexação de Cartas (Versão 11.0 - Full Visibility)
 ========================================================================
-Estratégia: Prioridade para estabilidade. Processamento em fila única
-            com delay aleatório para evitar bloqueios no DECEA.
+Estratégia: Motor V10 (Fila Única) + Telemetria Restaurada (Fast-Timeout).
 """
 
 import os
@@ -64,6 +63,11 @@ HEADERS_REST = {
     'apikey': SUPABASE_SERVICE_ROLE_KEY,
     'Prefer': 'resolution=merge-duplicates',
 }
+HEADERS_STORAGE = {
+    'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
+    'x-upsert': 'true',
+    'Content-Type': 'application/json'
+}
 
 # ─── Gerenciamento de Telemetria ──────────────────────────────────────────────
 
@@ -94,20 +98,17 @@ def upload_telemetry(snapshot):
         snapshot['updated_at'] = time.time()
         # Endereço do Bucket 'robots-telemetry' no Supabase
         url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
+        upload_url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
+        json_data = json.dumps(snapshot, ensure_ascii=False).encode('utf-8')
         
-        res = telemetry_session.post(
-            url,
-            headers={
-                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-                "Content-Type": "application/json",
-                "x-upsert": "true"
-            },
-            data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
-            timeout=5
+        telemetry_session.put(
+            upload_url,
+            data=json_data,
+            headers=HEADERS_STORAGE,
+            timeout=2
         )
-    except Exception:
-        # Silencioso: Se a telemetria falhar, o robô ignora totalmente.
-        pass
+    except Exception as e:
+        log.error(f"Erro ao enviar telemetria: {e}")
 
 def add_telemetry_log(telemetry, message):
     log.info(message)
