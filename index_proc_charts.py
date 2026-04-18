@@ -1,0 +1,411 @@
+#!/usr/bin/env python3
+"""
+SkyFPL - Robô de Indexação de Cartas Aeronáuticas IFR/VFR (Versão Telemetria)
+========================================================================
+Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
+            em tempo real para o Dashboard Admin através do Cloudflare R2.
+"""
+
+import os
+import sys
+import json
+import time
+import argparse
+import logging
+import requests
+import boto3
+import signal
+import threading
+import re
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
+
+# ─── Configuração de Log Local ────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
+log = logging.getLogger('RoboCartas')
+
+# ─── Variáveis de Ambiente ────────────────────────────────────────────────────
+SUPABASE_URL              = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+EDGE_FUNCTION_URL         = f"{SUPABASE_URL}/functions/v1/fetch-charts"
+TABLE_URL                 = f"{SUPABASE_URL}/rest/v1/charts_procedural"
+
+# R2 Cloudflare (Telemetria)
+R2_ACCESS_KEY_ID     = os.environ.get('R2_ACCESS_KEY_ID')
+R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY')
+R2_ENDPOINT          = os.environ.get('R2_ENDPOINT')
+R2_BUCKET            = "skyfpl-charts"
+
+HEADERS_EDGE = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
+    'apikey': SUPABASE_SERVICE_ROLE_KEY,
+}
+HEADERS_REST = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
+    'apikey': SUPABASE_SERVICE_ROLE_KEY,
+    'Prefer': 'resolution=merge-duplicates',
+}
+
+# ─── Gerenciamento de Telemetria ──────────────────────────────────────────────
+
+def init_s3():
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
+        log.warning("⚠️ R2_ACCESS_KEY_ID/SECRET/ENDPOINT não configurado. Telemetria desativada.")
+        return None
+    return boto3.client('s3',
+        endpoint_url=R2_ENDPOINT,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name='auto'
+    )
+
+def upload_telemetry(s3, telemetry):
+    if not s3: return
+    try:
+        # Cria um snapshot para evitar race conditions durante o JSON dumps
+        with telemetry_lock:
+            snapshot = telemetry.copy()
+            snapshot['logs'] = list(telemetry['logs'])
+            snapshot['failed_airports'] = list(telemetry['failed_airports'])
+        
+        snapshot['updated_at'] = time.time()
+        
+        # Configuração de timeout explícito para evitar que a thread de telemetria trave o processo
+        from botocore.config import Config
+        config = Config(connect_timeout=5, read_timeout=5, retries={'max_attempts': 0})
+        
+        s3.put_object(
+            Bucket=R2_BUCKET,
+            Key='procedural/telemetry.json',
+            Body=json.dumps(snapshot, ensure_ascii=False),
+            ContentType='application/json'
+        )
+    except Exception as e:
+        log.error(f"❌ Falha ao subir telemetria para R2: {e}")
+
+def add_telemetry_log(telemetry, message):
+    log.info(message)
+    with telemetry_lock:
+        telemetry['logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+        if len(telemetry['logs']) > 60:
+            telemetry['logs'].pop()
+
+telemetry_lock = threading.Lock()
+
+# ─── Utilitários ─────────────────────────────────────────────────────────────
+
+def sanitize_filename(text: str) -> str:
+    """Limpa o nome da carta para um formato seguro de arquivo."""
+    # Remove acentos e caracteres especiais, converte espaços para underscore
+    text = text.replace(' & ', '_AND_').replace(' | ', '_OR_')
+    text = re.sub(r'[^\w\s-]', '', text).strip()
+    text = re.sub(r'[-\s]+', '_', text)
+    return text.upper()
+
+def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) -> tuple[str, int]:
+    """Baixa o PDF do DECEA e sobe para o R2 no diretório do ciclo AIRAC."""
+    if not url or not s3: return '', 0
+    
+    clean_name = sanitize_filename(name)
+    r2_key = f"procedural/charts/{airac}/{icao}/{tipo}_{clean_name}.pdf"
+    
+    try:
+        # Download do original (DECEA)
+        resp = requests.get(url, timeout=30, stream=True)
+        if not resp.ok:
+            log.error(f"[{icao}] Erro download PDF: {url} -> {resp.status_code}")
+            return '', 0
+        
+        content = resp.content
+        size = len(content)
+        
+        # Upload para R2
+        s3.put_object(
+            Bucket=R2_BUCKET,
+            Key=r2_key,
+            Body=content,
+            ContentType='application/json'
+        )
+        url_r2 = f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{r2_key}"
+        return url_r2, size
+    except Exception as e:
+        log.error(f"[{icao}] Falha no espelhamento {name}: {e}")
+        return '', 0
+
+# ─── Funções Principais ───────────────────────────────────────────────────────
+
+def fetch_all_icao_codes() -> list[str]:
+    R2_NAVDATA_URL = 'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json'
+    resp = requests.get(R2_NAVDATA_URL, timeout=60)
+    resp.raise_for_status()
+    payload = resp.json()
+    points = payload.get('data', [])
+    icao_set = set()
+    for p in points:
+        ptype = p.get('type', '')
+        icao  = (p.get('icao') or '').strip().upper()
+        if ptype in ('airport', 'heliport', 'ICA:airport', 'ICA:heliport') and len(icao) == 4:
+            icao_set.add(icao)
+    return sorted(icao_set)
+
+def fetch_charts_for_icao(icao: str, retries=3) -> list[dict]:
+    try:
+        resp = requests.post(
+            EDGE_FUNCTION_URL,
+            json={'icaoCode': icao},
+            headers=HEADERS_EDGE,
+            timeout=25,
+        )
+        
+        # Erro 429 (Rate Limit)
+        if resp.status_code == 429:
+            log.warning(f"[{icao}] Rate limit (429) — aguardando 60s...")
+            time.sleep(60)
+            return fetch_charts_for_icao(icao, retries)
+            
+        # Erro 503 (Boot Error/Overload) - Tentamos novamente com backoff
+        if resp.status_code == 503 and retries > 0:
+            wait_time = (4 - retries) * 5
+            log.warning(f"[{icao}] Erro 503 (Boot) — Tentando novamente em {wait_time}s... ({retries} restantes)")
+            time.sleep(wait_time)
+            return fetch_charts_for_icao(icao, retries - 1)
+
+        if not resp.ok:
+            log.error(f"[{icao}] Erro API {resp.status_code}: {resp.text[:200]}")
+            return []
+            
+        data = resp.json()
+        return data.get('charts', []) if data.get('success') else []
+        
+    except Exception as e:
+        if retries > 0:
+            log.warning(f"[{icao}] Falha de conexão: {e}. Retentando... ({retries})")
+            time.sleep(5)
+            return fetch_charts_for_icao(icao, retries - 1)
+        log.error(f"[{icao}] Falha crítica no fetch após retentativas: {e}")
+        return []
+
+def upsert_charts(s3, icao: str, charts: list[dict], airac: str, dry_run: bool, telemetry: dict) -> int:
+    if not charts or dry_run: return len(charts)
+    records = []
+    mirrored_count = 0
+    
+    for c in charts:
+        carta_nome = c.get('nome', 'CARTA')
+        add_telemetry_log(telemetry, f"☁️ [{icao}] Espelhando: {carta_nome} ({c.get('tipo', 'UNKN')})...")
+        
+        # Espelhamento REAL (Download DECEA -> Upload R2)
+        url_r2, size = mirror_pdf_to_r2(s3, icao, c.get('tipo', 'UNKN'), carta_nome, c.get('link', ''), airac)
+        
+        if url_r2:
+            with telemetry_lock:
+                telemetry['mirrored_charts'] = telemetry.get('mirrored_charts', 0) + 1
+                telemetry['mirrored_bytes'] = telemetry.get('mirrored_bytes', 0) + size
+            mirrored_count += 1
+        else:
+            with telemetry_lock:
+                telemetry['failed_airports'].append({
+                    'icao': icao,
+                    'error': f"Falha no download DECEA: {carta_nome}",
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+            
+        records.append({
+            'icao': icao,
+            'tipo': c.get('tipo', 'UNKN'),
+            'nome_procedimento': c.get('nome', 'Carta Sem Nome'),
+            'url_decea': c.get('link', ''),
+            'url_r2': url_r2,
+            'airac_cycle': airac,
+            'data_carta': c.get('dt', ''),
+            'source': 'api'
+        })
+    try:
+        upsert_url = f"{TABLE_URL}?on_conflict=icao,tipo,nome_procedimento"
+        resp = requests.post(upsert_url, json=records, headers=HEADERS_REST, timeout=30)
+        if not resp.ok:
+            error_msg = f"[{icao}] Falha DB: {resp.status_code} - {resp.text[:80]}"
+            log.error(error_msg)
+            with telemetry_lock:
+                add_telemetry_log(telemetry, error_msg)
+                telemetry['failed_airports'].append({
+                    'icao': icao,
+                    'error': f"DB Erro {resp.status_code}",
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+            return 0
+        return len(records)
+    except Exception as e:
+        error_msg = f"[{icao}] Erro ao upsert: {e}"
+        log.error(error_msg)
+        with telemetry_lock:
+            add_telemetry_log(telemetry, error_msg)
+        return 0
+
+def export_master_json(s3, airac_cycle: str):
+    all_records = []
+    page_size = 1000
+    offset = 0
+    while True:
+        resp = requests.get(f"{TABLE_URL}?select=*&limit={page_size}&offset={offset}", headers=HEADERS_REST, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data: break
+        all_records.extend(data)
+        offset += page_size
+        if len(data) < page_size: break
+    
+    log.info(f"📊 Exportação: {len(all_records)} registros recuperados para o Master JSON.")
+    payload = {
+        'metadata': {'generated_at': datetime.now(timezone.utc).isoformat(), 'airac_cycle': airac_cycle, 'total_charts': len(all_records)},
+        'data': all_records
+    }
+    
+    content = json.dumps(payload, ensure_ascii=False, indent=2)
+    filename = 'latest_proc_charts.json'
+    
+    with open(filename, 'w', encoding='utf-8') as f:
+        f.write(content)
+        
+    # Upload Master JSON para a CDN R2 (Raiz, para compatibilidade com o App Tablet)
+    if s3:
+        try:
+            log.info(f"📤 Subindo Master JSON para o R2 ({len(content)} bytes)...")
+            s3.put_object(
+                Bucket=R2_BUCKET,
+                Key=filename,
+                Body=content,
+                ContentType='application/json'
+            )
+            return len(content.encode('utf-8'))
+        except Exception as e:
+            log.error(f"❌ Falha ao subir Master JSON: {e}")
+            return 0
+    return 0
+
+# ─── Execução ─────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--icao', type=str)
+    parser.add_argument('--dry-run', action='store_true')
+    parser.add_argument('--airac', type=str, default='')
+    parser.add_argument('--workers', type=int, default=5)
+    args = parser.parse_args()
+
+    s3 = init_s3()
+    airac_cycle = args.airac or datetime.now(timezone.utc).strftime('%y%m')
+    
+    telemetry = {
+        'status': 'initializing',
+        'current_icao': '',
+        'progress': 0,
+        'total_airports': 0,
+        'total_charts': 0,
+        'mirrored_charts': 0,
+        'mirrored_bytes': 0,
+        'logs': [],
+        'failed_airports': [] # Novo: Relatório de aeródromos recusados
+    }
+
+    # Handler para interrupção graciosa (Cancelamento no GitHub)
+    def handle_stop(signum, frame):
+        log.warning("🛑 Sinal de interrupção recebido. Finalizando telemetria...")
+        telemetry['status'] = 'stopped'
+        add_telemetry_log(telemetry, "🛑 Robô interrompido pelo usuário.")
+        upload_telemetry(s3, telemetry)
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_stop)
+    signal.signal(signal.SIGINT, handle_stop)
+    add_telemetry_log(telemetry, f"🤖 Robô Iniciado | Ciclo {airac_cycle} | DryRun: {args.dry_run}")
+    upload_telemetry(s3, telemetry)
+
+    # Suporte a lista de ICAOs separados por vírgula (ex: SBGR,SBBR,SBSP)
+    if args.icao:
+        raw_codes = [c.strip().upper() for c in args.icao.split(',') if c.strip()]
+        icao_list = [c for c in raw_codes if len(c) == 4]  # Valida formato ICAO
+        if not icao_list:
+            log.error(f"Nenhum ICAO válido encontrado em: '{args.icao}'. Formato esperado: SBGR ou SBGR,SBBR,SBSP")
+            sys.exit(1)
+        log.info(f"🎯 Modo Seletivo: {len(icao_list)} aeródromo(s) — {', '.join(icao_list)}")
+    else:
+        icao_list = fetch_all_icao_codes()
+    telemetry['total_airports'] = len(icao_list)
+    telemetry['status'] = 'in_progress'
+    
+    # Thread de Heartbeat: Sobe a telemetria periodicamente sem travar os workers
+    stop_heartbeat = threading.Event()
+    def heartbeat_loop():
+        while not stop_heartbeat.is_set():
+            upload_telemetry(s3, telemetry)
+            time.sleep(3)
+
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    heartbeat_thread.start()
+
+    total_charts = [0]
+
+    def process_airport(icao, index):
+        with telemetry_lock:
+            telemetry['current_icao'] = icao
+        add_telemetry_log(telemetry, f"📡 [{icao}] Iniciando análise de cartas...")
+        
+        try:
+            charts = fetch_charts_for_icao(icao)
+            count = upsert_charts(s3, icao, charts, airac_cycle, args.dry_run, telemetry)
+            
+            with telemetry_lock:
+                total_charts[0] += count
+                telemetry['total_charts'] = total_charts[0]
+                telemetry['progress'] += 1
+                
+                if count > 0:
+                    add_telemetry_log(telemetry, f"[{icao}] Processado: {count} cartas encontradas.")
+                elif telemetry['progress'] % 50 == 0:
+                    add_telemetry_log(telemetry, f"📡 Checkpoint: {telemetry['progress']} aeródromos analisados...")
+        except Exception as e:
+            err_msg = str(e)[:100]
+            with telemetry_lock:
+                telemetry['progress'] += 1
+                add_telemetry_log(telemetry, f"❌ Erro em {icao}: {err_msg}")
+                telemetry['failed_airports'].append({
+                    'icao': icao,
+                    'error': err_msg,
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+                if len(telemetry['failed_airports']) > 100:
+                    telemetry['failed_airports'].pop(0)
+
+    # Modo seletivo usa os workers configurados (util para listas de 2+ aeródromos)
+    # mas limita ao tamanho da lista para não spawnar threads desnecessárias
+    max_workers = min(args.workers, len(icao_list)) if icao_list else args.workers
+    add_telemetry_log(telemetry, f"🚀 Iniciando processamento com {max_workers} thread(s) | {len(icao_list)} aeródromo(s)...")
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for i, icao in enumerate(icao_list):
+            executor.submit(process_airport, icao, i)
+
+    telemetry['progress'] = len(icao_list) 
+    stop_heartbeat.set() # Para o heartbeat para o upload final manual
+    
+    add_telemetry_log(telemetry, "📦 Gerando Master JSON...")
+    upload_telemetry(s3, telemetry)
+    if not args.dry_run: 
+        file_size = export_master_json(s3, airac_cycle)
+        telemetry['master_file_size'] = file_size
+    else:
+        add_telemetry_log(telemetry, "ℹ️ Dry Run: Upload do Master JSON suprimido.")
+    
+    telemetry['status'] = 'completed'
+    add_telemetry_log(telemetry, "✅ Operação concluída com sucesso!")
+    upload_telemetry(s3, telemetry)
+
+if __name__ == '__main__':
+    main()
