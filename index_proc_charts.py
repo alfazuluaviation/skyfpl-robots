@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas Aeronáuticas IFR/VFR (Versão Telemetria)
+SkyFPL - Robô de Indexação de Cartas (Versão 4.0 - Blindagem Total)
 ========================================================================
 Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            em tempo real para o Dashboard Admin através do Cloudflare R2.
+            em tempo real para o Dashboard Admin através do Supabase Storage.
 """
 
 import os
@@ -60,11 +60,11 @@ def init_s3():
         log.error("❌ Credenciais R2 incompletas nos Secrets!")
         return None
     
-    # Configuração de timeout agressiva para o S3
+    # Configuração de timeout ultra-agressiva para o S3
     config = Config(
-        connect_timeout=5,
-        read_timeout=10,
-        retries={'max_attempts': 2}
+        connect_timeout=15,
+        read_timeout=30,
+        retries={'max_attempts': 3}
     )
     
     return boto3.client(
@@ -91,7 +91,7 @@ def upload_telemetry(snapshot):
                 "x-upsert": "true"
             },
             data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
-            timeout=15
+            timeout=30
         )
     except Exception as e:
         log.error(f"❌ Falha fatal na telemetria: {e}")
@@ -124,13 +124,18 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
     
     try:
         # Download do original (DECEA)
-        resp = requests.get(url, timeout=10, stream=True)
+        resp = requests.get(url, timeout=30, stream=True)
         if not resp.ok:
             log.error(f"[{icao}] Erro download PDF: {url} -> {resp.status_code}")
             return '', 0
         
-        content = resp.content
+        # Lendo em chunks para evitar travar em arquivos imensos
+        content = b""
+        for chunk in resp.iter_content(chunk_size=8192):
+            if chunk: content += chunk
+        
         size = len(content)
+        log.info(f"[{icao}] Download concluído: {name} ({size/1024:.1f} KB)")
         
         # Upload para R2
         s3.put_object(
@@ -149,7 +154,7 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
 
 def fetch_all_icao_codes() -> list[str]:
     R2_NAVDATA_URL = 'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json'
-    resp = requests.get(R2_NAVDATA_URL, timeout=10)
+    resp = requests.get(R2_NAVDATA_URL, timeout=30)
     resp.raise_for_status()
     payload = resp.json()
     points = payload.get('data', [])
@@ -167,7 +172,7 @@ def fetch_charts_for_icao(icao: str, retries=3) -> list[dict]:
             EDGE_FUNCTION_URL,
             json={'icaoCode': icao},
             headers=HEADERS_EDGE,
-            timeout=10,
+            timeout=30,
         )
         
         # Erro 429 (Rate Limit)
@@ -329,7 +334,7 @@ def main():
         log.warning("🛑 Sinal de interrupção recebido. Finalizando telemetria...")
         telemetry['status'] = 'stopped'
         add_telemetry_log(telemetry, "🛑 Robô interrompido pelo usuário.")
-        upload_telemetry(s3, telemetry)
+        upload_telemetry(telemetry)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, handle_stop)
