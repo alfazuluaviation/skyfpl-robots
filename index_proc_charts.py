@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 4.0 - Blindagem Total)
+SkyFPL - Robô de Indexação de Cartas (Versão 5.0 - Telemetria Non-Blocking)
 ========================================================================
 Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            em tempo real para o Dashboard Admin através do Supabase Storage.
+            em tempo real (Fast-Polling) para o Supabase Storage.
 """
 
 import os
@@ -20,6 +20,10 @@ import re
 from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import requests
+
+# Sessão persistente para telemetria (muito mais rápido)
+telemetry_session = requests.Session()
 
 # ─── Configuração de Log Local ────────────────────────────────────────────────
 logging.basicConfig(
@@ -83,7 +87,7 @@ def upload_telemetry(snapshot):
         # Endereço do Bucket 'robots-telemetry' no Supabase
         url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
         
-        res = requests.post(
+        res = telemetry_session.post(
             url,
             headers={
                 "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
@@ -91,10 +95,11 @@ def upload_telemetry(snapshot):
                 "x-upsert": "true"
             },
             data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
-            timeout=30
+            timeout=5
         )
-    except Exception as e:
-        log.error(f"❌ Falha fatal na telemetria: {e}")
+    except Exception:
+        # Silencioso: Se a telemetria falhar, não travamos o robô
+        pass
 
 def add_telemetry_log(telemetry, message):
     log.info(message)
