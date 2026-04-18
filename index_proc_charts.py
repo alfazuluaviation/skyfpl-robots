@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 11.0 - Full Visibility)
+SkyFPL - Robô de Indexação de Cartas (Versão 12.0 - Auditoria & Estabilidade)
 ========================================================================
-Estratégia: Motor V10 (Fila Única) + Telemetria Restaurada (Fast-Timeout).
+Estratégia: Motor V10 + Telemetria com Lista de Auditoria para Dashboard.
 """
 
 import os
@@ -352,7 +352,8 @@ def main():
         'mirrored_charts': 0,
         'mirrored_bytes': 0,
         'logs': [],
-        'failed_airports': [] # Novo: Relatório de aeródromos recusados
+        'failed_airports': [],
+        'last_processed_charts': []
     }
 
     # Handler para interrupção graciosa (Cancelamento no GitHub)
@@ -413,8 +414,20 @@ def main():
         # Mapeia cada carta para uma tarefa de processamento individual
         def process_single_chart(item):
             icao_code, chart_data = item
-            # Criamos uma lista de uma única carta para reusar a lógica de upsert
-            return upsert_charts(s3, icao_code, [chart_data], airac_cycle, dry_run, telemetry)
+            url_r2, size = upsert_charts(s3, icao_code, [chart_data], airac_cycle, dry_run, telemetry)
+            
+            # Adiciona à lista de auditoria (últimas 5)
+            if url_r2:
+                with telemetry_lock:
+                    telemetry['last_processed_charts'].insert(0, {
+                        'icao': icao_code,
+                        'name': chart_data.get('nome_procedimento'),
+                        'url': url_r2,
+                        'at': datetime.now().strftime('%H:%M:%S')
+                    })
+                    if len(telemetry['last_processed_charts']) > 5:
+                        telemetry['last_processed_charts'].pop()
+            return 1 if url_r2 else 0
 
         # Envia para execução paralela
         results = list(executor.map(process_single_chart, all_chart_tasks))
