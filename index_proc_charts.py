@@ -293,11 +293,14 @@ def export_master_json(s3, airac_cycle: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--icao', type=str)
-    parser.add_argument('--dry-run', action='store_true')
-    parser.add_argument('--airac', type=str, default='')
-    parser.add_argument('--workers', type=int, default=5)
+    parser.add_argument('--icao', help='ICAO específico (ex: SBSV) ou lista CSV (ex: SBSV,SBGR)')
+    parser.add_argument('--dry-run', default='False', help='Simulação (True/False)')
+    parser.add_argument('--airac', help='Ciclo AIRAC (ex: 2404)')
+    parser.add_argument('--workers', type=int, default=5, help='Número de threads paralelas')
     args = parser.parse_args()
+
+    # Conversão de string para booleano (GitHub envia como string)
+    dry_run = str(args.dry_run).lower() == 'true'
 
     s3 = init_s3()
     airac_cycle = args.airac or datetime.now(timezone.utc).strftime('%y%m')
@@ -324,7 +327,7 @@ def main():
 
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
-    add_telemetry_log(telemetry, f"🤖 Robô Iniciado | Ciclo {airac_cycle} | DryRun: {args.dry_run}")
+    add_telemetry_log(telemetry, f"🤖 Robô Iniciado | Ciclo {airac_cycle} | DryRun: {dry_run}")
     upload_telemetry(s3, telemetry)
 
     # Suporte a lista de ICAOs separados por vírgula (ex: SBGR,SBBR,SBSP)
@@ -359,7 +362,7 @@ def main():
         
         try:
             charts = fetch_charts_for_icao(icao)
-            count = upsert_charts(s3, icao, charts, airac_cycle, args.dry_run, telemetry)
+            count = upsert_charts(s3, icao, charts, airac_cycle, dry_run, telemetry)
             
             with telemetry_lock:
                 total_charts[0] += count
@@ -397,7 +400,7 @@ def main():
     
     add_telemetry_log(telemetry, "📦 Gerando Master JSON...")
     upload_telemetry(s3, telemetry)
-    if not args.dry_run: 
+    if not dry_run: 
         file_size = export_master_json(s3, airac_cycle)
         telemetry['master_file_size'] = file_size
     else:
