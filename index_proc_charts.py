@@ -91,7 +91,7 @@ def upload_telemetry(snapshot):
                 "x-upsert": "true"
             },
             data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
-            timeout=10
+            timeout=15
         )
     except Exception as e:
         log.error(f"❌ Falha fatal na telemetria: {e}")
@@ -100,7 +100,7 @@ def add_telemetry_log(telemetry, message):
     log.info(message)
     with telemetry_lock:
         telemetry['logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
-        if len(telemetry['logs']) > 60:
+        if len(telemetry['logs']) > 20:
             telemetry['logs'].pop()
 
 telemetry_lock = threading.Lock()
@@ -416,6 +416,9 @@ def main():
     telemetry['status'] = 'completed'
     add_telemetry_log(telemetry, "✅ Operação concluída com sucesso!")
     upload_telemetry(telemetry)
+    
+    # Encerramento forçado para evitar threads zumbis
+    sys.exit(0)
 
 if __name__ == '__main__':
     main()
