@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 8.0 - Estabilidade Total)
+SkyFPL - Robô de Indexação de Cartas (Versão 9.0 - Foco em Processamento)
 ========================================================================
-Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            protegida por Socket Timeout e Sessão Persistente.
+Estratégia: Prioridade total para Mirroring e Indexação. Telemetria em 
+            segundo plano (Best-Effort) com silenciamento automático.
 """
 
 import os
@@ -102,7 +102,7 @@ def upload_telemetry(snapshot):
             timeout=5
         )
     except Exception:
-        # Silencioso: Se a telemetria falhar, não travamos o robô
+        # Silencioso: Se a telemetria falhar, o robô ignora totalmente.
         pass
 
 def add_telemetry_log(telemetry, message):
@@ -230,6 +230,11 @@ def upsert_charts(s3, icao: str, charts: list[dict], airac: str, dry_run: bool, 
             with telemetry_lock:
                 telemetry['mirrored_charts'] = telemetry.get('mirrored_charts', 0) + 1
                 telemetry['mirrored_bytes'] = telemetry.get('mirrored_bytes', 0) + size
+                
+                # Log de progresso a cada 10 cartas
+                current_count = telemetry['mirrored_charts']
+                if current_count % 10 == 0:
+                    log.info(f"   [PROGRESSO] {current_count} cartas já espelhadas no total...")
             mirrored_count += 1
         else:
             with telemetry_lock:
