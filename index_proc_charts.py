@@ -65,29 +65,24 @@ def init_s3():
         region_name='auto'
     )
 
-def upload_telemetry(s3, telemetry):
-    if not s3: return
+def upload_telemetry(snapshot):
+    """Sobe o snapshot de telemetria para o Supabase Storage."""
     try:
-        # Cria um snapshot para evitar race conditions durante o JSON dumps
-        with telemetry_lock:
-            snapshot = telemetry.copy()
-            snapshot['logs'] = list(telemetry['logs'])
-            snapshot['failed_airports'] = list(telemetry['failed_airports'])
-        
         snapshot['updated_at'] = time.time()
+        # Endereço do Bucket 'robots-telemetry' no Supabase
+        url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
         
-        # Configuração de timeout explícito para evitar que a thread de telemetria trave o processo
-        from botocore.config import Config
-        config = Config(connect_timeout=5, read_timeout=5, retries={'max_attempts': 0})
-        
-        s3.put_object(
-            Bucket=R2_BUCKET,
-            Key='procedural/telemetry.json',
-            Body=json.dumps(snapshot, ensure_ascii=False),
-            ContentType='application/json'
+        res = requests.post(
+            url,
+            headers={
+                "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+                "Content-Type": "application/json",
+                "x-upsert": "true"
+            },
+            data=json.dumps(snapshot, ensure_ascii=False).encode('utf-8')
         )
     except Exception as e:
-        log.error(f"❌ Falha ao subir telemetria para R2: {e}")
+        log.error(f"❌ Falha fatal na telemetria: {e}")
 
 def add_telemetry_log(telemetry, message):
     log.info(message)
@@ -328,7 +323,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
     add_telemetry_log(telemetry, f"🤖 Robô Iniciado | Ciclo {airac_cycle} | DryRun: {dry_run}")
-    upload_telemetry(s3, telemetry)
+    upload_telemetry(telemetry)
 
     # Suporte a lista de ICAOs separados por vírgula (ex: SBGR,SBBR,SBSP)
     if args.icao:
@@ -347,7 +342,7 @@ def main():
     stop_heartbeat = threading.Event()
     def heartbeat_loop():
         while not stop_heartbeat.is_set():
-            upload_telemetry(s3, telemetry)
+            upload_telemetry(telemetry)
             time.sleep(3)
 
     heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
@@ -399,7 +394,7 @@ def main():
     stop_heartbeat.set() # Para o heartbeat para o upload final manual
     
     add_telemetry_log(telemetry, "📦 Gerando Master JSON...")
-    upload_telemetry(s3, telemetry)
+    upload_telemetry(telemetry)
     if not dry_run: 
         file_size = export_master_json(s3, airac_cycle)
         telemetry['master_file_size'] = file_size
@@ -408,7 +403,7 @@ def main():
     
     telemetry['status'] = 'completed'
     add_telemetry_log(telemetry, "✅ Operação concluída com sucesso!")
-    upload_telemetry(s3, telemetry)
+    upload_telemetry(telemetry)
 
 if __name__ == '__main__':
     main()
