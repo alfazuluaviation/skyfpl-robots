@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 9.0 - Foco em Processamento)
+SkyFPL - Robô de Indexação de Cartas (Versão 10.0 - Fila Única Global)
 ========================================================================
-Estratégia: Prioridade total para Mirroring e Indexação. Telemetria em 
-            segundo plano (Best-Effort) com silenciamento automático.
+Estratégia: Prioridade para estabilidade. Processamento em fila única
+            com delay aleatório para evitar bloqueios no DECEA.
 """
 
 import os
@@ -17,11 +17,15 @@ import boto3
 import signal
 import threading
 import re
+import random
 import socket
 from botocore.config import Config
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 import requests
+
+# NUCLEAR TIMEOUT: Força qualquer operação de rede do sistema a expirar em 30s
+socket.setdefaulttimeout(30)
 
 # NUCLEAR TIMEOUT: Força qualquer operação de rede do sistema a expirar em 30s
 socket.setdefaulttimeout(30)
@@ -133,6 +137,10 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
     
     try:
         # Download do original (DECEA)
+        # Polidez de rede: Pequeno delay aleatório
+        import random
+        time.sleep(random.uniform(0.3, 1.2))
+        
         resp = requests.get(url, timeout=30, stream=True)
         if not resp.ok:
             log.error(f"[{icao}] Erro download PDF: {url} -> {resp.status_code}")
@@ -320,6 +328,7 @@ def export_master_json(s3, airac_cycle: str):
 # ─── Execução ─────────────────────────────────────────────────────────────────
 
 def main():
+    # ... (código de parsing permanece o mesmo até a criação do pool)
     parser = argparse.ArgumentParser()
     parser.add_argument('--icao', help='ICAO específico (ex: SBSV) ou lista CSV (ex: SBSV,SBGR)')
     parser.add_argument('--dry-run', default='False', help='Simulação (True/False)')
@@ -381,64 +390,48 @@ def main():
     heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
     heartbeat_thread.start()
 
-    total_charts = [0]
-
-    def process_airport(icao, index):
-        with telemetry_lock:
-            telemetry['current_icao'] = icao
-        add_telemetry_log(telemetry, f"📡 [{icao}] Iniciando análise de cartas...")
-        
+    # ESTRATÉGIA V10: Fila Única Global (Polidez de Rede)
+    all_chart_tasks = []
+    
+    # 1. Coleta metadados de todos os aeródromos (Rápido)
+    add_telemetry_log(telemetry, f"📡 Coletando lista de cartas para {len(icao_list)} aeródromo(s)...")
+    for icao in icao_list:
         try:
             charts = fetch_charts_for_icao(icao)
-            count = upsert_charts(s3, icao, charts, airac_cycle, dry_run, telemetry)
-            
-            with telemetry_lock:
-                total_charts[0] += count
-                telemetry['total_charts'] = total_charts[0]
-                telemetry['progress'] += 1
-                
-                if count > 0:
-                    add_telemetry_log(telemetry, f"[{icao}] Processado: {count} cartas encontradas.")
-                elif telemetry['progress'] % 50 == 0:
-                    add_telemetry_log(telemetry, f"📡 Checkpoint: {telemetry['progress']} aeródromos analisados...")
+            for chart in charts:
+                all_chart_tasks.append((icao, chart))
         except Exception as e:
-            err_msg = str(e)[:100]
-            with telemetry_lock:
-                telemetry['progress'] += 1
-                add_telemetry_log(telemetry, f"❌ Erro em {icao}: {err_msg}")
-                telemetry['failed_airports'].append({
-                    'icao': icao,
-                    'error': err_msg,
-                    'at': datetime.now().strftime('%H:%M:%S')
-                })
-                if len(telemetry['failed_airports']) > 100:
-                    telemetry['failed_airports'].pop(0)
+            add_telemetry_log(telemetry, f"❌ Erro ao buscar cartas de {icao}: {str(e)}")
 
-    # Modo seletivo usa os workers configurados (util para listas de 2+ aeródromos)
-    # mas limita ao tamanho da lista para não spawnar threads desnecessárias
-    max_workers = min(args.workers, len(icao_list)) if icao_list else args.workers
-    add_telemetry_log(telemetry, f"🚀 Iniciando processamento com {max_workers} thread(s) | {len(icao_list)} aeródromo(s)...")
+    # 2. Processamento em Massa com Workers Globais
+    total_to_process = len(all_chart_tasks)
+    add_telemetry_log(telemetry, f"🚀 Iniciando processamento de {total_to_process} cartas com {args.workers} workers globais...")
     
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for i, icao in enumerate(icao_list):
-            executor.submit(process_airport, icao, i)
+    processed_count = 0
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        # Mapeia cada carta para uma tarefa de processamento individual
+        def process_single_chart(item):
+            icao_code, chart_data = item
+            # Criamos uma lista de uma única carta para reusar a lógica de upsert
+            return upsert_charts(s3, icao_code, [chart_data], airac_cycle, dry_run, telemetry)
+
+        # Envia para execução paralela
+        results = list(executor.map(process_single_chart, all_chart_tasks))
+        processed_count = sum(results)
 
     telemetry['progress'] = len(icao_list) 
-    stop_heartbeat.set() # Para o heartbeat para o upload final manual
+    stop_heartbeat.set()
     
     add_telemetry_log(telemetry, "📦 Gerando Master JSON...")
     upload_telemetry(telemetry)
     if not dry_run: 
         file_size = export_master_json(s3, airac_cycle)
         telemetry['master_file_size'] = file_size
-    else:
-        add_telemetry_log(telemetry, "ℹ️ Dry Run: Upload do Master JSON suprimido.")
     
     telemetry['status'] = 'completed'
-    add_telemetry_log(telemetry, "✅ Operação concluída com sucesso!")
+    add_telemetry_log(telemetry, f"✅ Operação concluída! {processed_count} cartas indexadas.")
     upload_telemetry(telemetry)
     
-    # Encerramento forçado para evitar threads zumbis
     sys.exit(0)
 
 if __name__ == '__main__':
