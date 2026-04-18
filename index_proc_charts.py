@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-SkyFPL - Robô de Indexação de Cartas (Versão 7.0 - Telemetria Inteligente)
+SkyFPL - Robô de Indexação de Cartas (Versão 8.0 - Estabilidade Total)
 ========================================================================
 Estratégia: Varre aeródromos brasileiros via AISWEB e envia telemetria 
-            em tempo real com acúmulo de histórico no Dashboard.
+            protegida por Socket Timeout e Sessão Persistente.
 """
 
 import os
@@ -17,10 +17,14 @@ import boto3
 import signal
 import threading
 import re
+import socket
 from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import requests
+
+# NUCLEAR TIMEOUT: Força qualquer operação de rede do sistema a expirar em 30s
+socket.setdefaulttimeout(30)
 
 # Sessão persistente para telemetria (muito mais rápido)
 telemetry_session = requests.Session()
@@ -142,13 +146,15 @@ def mirror_pdf_to_r2(s3, icao: str, tipo: str, name: str, url: str, airac: str) 
         size = len(content)
         log.info(f"[{icao}] Download concluído: {name} ({size/1024:.1f} KB)")
         
-        # Upload para R2
+        # Upload para o R2 com logs de auditoria
+        log.info(f"   [R2] Enviando arquivo para CDN: {r2_key}")
         s3.put_object(
             Bucket=R2_BUCKET,
             Key=r2_key,
             Body=content,
-            ContentType='application/json'
+            ContentType='application/pdf'
         )
+        log.info(f"   [R2] Sucesso no espelhamento: {r2_key}")
         url_r2 = f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{r2_key}"
         return url_r2, size
     except Exception as e:
