@@ -223,7 +223,7 @@ def fetch_charts_for_icao(icao: str, retries=3) -> list[dict]:
         log.error(f"[{icao}] Falha crítica no fetch após retentativas: {e}")
         return []
 
-def upsert_charts(s3, icao: str, charts: list[dict], airac: str, dry_run: bool, telemetry: dict) -> int:
+def upsert_charts(s3, icao: str, charts: list[dict], airac: str, dry_run: bool, telemetry: dict) -> tuple[str, int]:
     if not charts or dry_run: return len(charts)
     records = []
     mirrored_count = 0
@@ -276,14 +276,16 @@ def upsert_charts(s3, icao: str, charts: list[dict], airac: str, dry_run: bool, 
                     'error': f"DB Erro {resp.status_code}",
                     'at': datetime.now().strftime('%H:%M:%S')
                 })
-            return 0
-        return len(records)
+        # Retorna a URL e o tamanho da última carta processada (ou vazio se falhar)
+        if records:
+            return records[0]['url_r2'], mirrored_count
+        return '', 0
     except Exception as e:
         error_msg = f"[{icao}] Erro ao upsert: {e}"
         log.error(error_msg)
         with telemetry_lock:
             add_telemetry_log(telemetry, error_msg)
-        return 0
+        return '', 0
 
 def export_master_json(s3, airac_cycle: str):
     all_records = []
