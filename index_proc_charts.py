@@ -105,7 +105,7 @@ def upload_telemetry(snapshot):
             upload_url,
             data=json_data,
             headers=HEADERS_STORAGE,
-            timeout=2
+            timeout=10
         )
     except Exception as e:
         log.error(f"Erro ao enviar telemetria: {e}")
@@ -350,6 +350,7 @@ def main():
         'current_icao': '',
         'progress': 0,
         'total_airports': 0,
+        'total_offered': 0,
         'total_charts': 0,
         'mirrored_charts': 0,
         'mirrored_bytes': 0,
@@ -402,6 +403,9 @@ def main():
     for icao in icao_list:
         try:
             charts = fetch_charts_for_icao(icao)
+            count = len(charts)
+            telemetry['total_offered'] += count
+            add_telemetry_log(telemetry, f"📡 {icao}: {count} cartas encontradas no AISWEB.")
             for chart in charts:
                 all_chart_tasks.append((icao, chart))
         except Exception as e:
@@ -445,7 +449,7 @@ def main():
         telemetry['master_file_size'] = file_size
     
     telemetry['status'] = 'completed'
-    add_telemetry_log(telemetry, f"✅ Operação concluída! {processed_count} cartas indexadas.")
+    add_telemetry_log(telemetry, f"✅ Operação concluída! Oferecidas: {telemetry.get('total_offered', 0)} | Processadas: {processed_count}")
     upload_telemetry(telemetry)
     
     sys.exit(0)
