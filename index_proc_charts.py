@@ -243,8 +243,17 @@ def main():
     add_telemetry_log(f"📦 Processando {len(all_tasks)} cartas com {args.workers} workers...")
     
     with ThreadPoolExecutor(max_workers=args.workers) as exe:
-        futures = [exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run) for t in all_tasks]
-        for f in as_completed(futures): pass
+        futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
+        for future in as_completed(futures):
+            icao_task = futures[future]
+            with telemetry_lock:
+                telemetry['current_icao'] = icao_task
+                telemetry['total_charts'] += 1
+                # Incrementa progresso global baseado em aeródromos únicos processados
+                # (Simulação aproximada para o Dashboard)
+                if telemetry['total_charts'] % 20 == 0:
+                    telemetry['progress'] += 1
+            pass
         
     stop_heartbeat.set()
     add_telemetry_log("📦 Finalizando Master JSON...")
