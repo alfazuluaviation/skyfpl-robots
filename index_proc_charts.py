@@ -442,7 +442,7 @@ def main():
     stop_heartbeat.set()
     
     add_telemetry_log(telemetry, "📦 Gerando Master JSON...")
-    upload_telemetry(telemetry)
+    upload_telemetry(s3, telemetry)
     if not dry_run: 
         file_size = export_master_json(s3, airac_cycle)
         telemetry['master_file_size'] = file_size
