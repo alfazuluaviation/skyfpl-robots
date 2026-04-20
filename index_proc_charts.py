@@ -228,6 +228,7 @@ def main():
             'total_offered': 0,
             'total_charts': 0,
             'processed_airports': 0,
+            'master_file_size': 0,
             'mirrored_charts': 0,
             'mirrored_bytes': 0,
             'logs': [],
@@ -308,7 +309,10 @@ def main():
         
     stop_heartbeat.set()
     add_telemetry_log("📦 Finalizando Master JSON...")
-    if not dry_run: export_master_json(s3, airac)
+    if not dry_run:
+        size = export_master_json(s3, airac)
+        with telemetry_lock:
+            telemetry['master_file_size'] = size
     
     telemetry['status'] = 'completed'
     add_telemetry_log(f"✅ Concluído! {telemetry['mirrored_charts']} cartas processadas.")
