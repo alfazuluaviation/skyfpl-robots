@@ -108,7 +108,10 @@ def upload_telemetry(snapshot):
             timeout=10
         )
     except Exception as e:
-        log.error(f"Erro ao enviar telemetria: {e}")
+        if not SUPABASE_URL:
+            log.error("❌ SUPABASE_URL não configurada! Verifique os Secrets do GitHub.")
+        else:
+            log.error(f"❌ Erro ao enviar telemetria: {e}")
 
 def add_telemetry_log(telemetry, message):
     log.info(message)
