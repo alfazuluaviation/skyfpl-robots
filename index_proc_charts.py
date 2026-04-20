@@ -123,7 +123,9 @@ def process_pdf_to_jpg(pdf_content):
 # ─── Infraestrutura R2 ───────────────────────────────────────────────────────
 
 def init_s3():
-    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]): return None
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
+        log.error("❌ ERRO: Credenciais do Cloudflare R2 não encontradas nos Secrets do GitHub!")
+        return None
     config = Config(connect_timeout=10, read_timeout=20, retries={'max_attempts': 2})
     return boto3.client('s3', endpoint_url=R2_ENDPOINT, aws_access_key_id=R2_ACCESS_KEY_ID,
                         aws_secret_access_key=R2_SECRET_ACCESS_KEY, region_name='auto', config=config)
