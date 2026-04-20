@@ -247,8 +247,12 @@ def main():
     
     icao_list = [c.strip().upper() for c in args.icao.split(',')] if args.icao else []
     if not icao_list:
+        add_telemetry_log("🌍 Baixando malha aérea brasileira para filtragem...")
         r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json')
-        icao_list = sorted({p['icao'] for p in r.json().get('data', []) if p.get('icao')})
+        nav_data = r.json().get('data', [])
+        # 🛡️ FILTRO TÁTICO: Apenas aeroportos e helipontos (evita 10k waypoints inúteis)
+        icao_list = sorted({p['icao'] for p in nav_data if p.get('icao') and p.get('type') in ['airport', 'heliport']})
+        add_telemetry_log(f"✅ Malha filtrada: {len(icao_list)} aeródromos identificados (de {len(nav_data)} pontos totais).")
     
     telemetry['total_airports'] = len(icao_list)
     telemetry['status'] = 'in_progress'
@@ -265,23 +269,30 @@ def main():
     all_tasks = []
     
     # 🚀 TURBO DISCOVERY: Busca listas de cartas em paralelo
-    with ThreadPoolExecutor(max_workers=args.workers * 2) as discovery_exe:
+    with ThreadPoolExecutor(max_workers=args.workers * 3) as discovery_exe:
         discovery_futures = {discovery_exe.submit(fetch_charts_for_icao, icao): icao for icao in icao_list}
+        processed_discovery = 0
+        total_to_discover = len(icao_list)
+        
         for future in as_completed(discovery_futures):
             icao = discovery_futures[future]
+            processed_discovery += 1
             charts = future.result()
+            
             if charts:
                 with telemetry_lock:
                     telemetry['total_offered'] += len(charts)
                 for c in charts:
                     all_tasks.append((icao, c))
             
-            # Atualiza status a cada 100 aeródromos descobertos
-            if len(all_tasks) % 100 == 0:
+            # Atualiza status visual de progresso da descoberta
+            if processed_discovery % 50 == 0 or processed_discovery == total_to_discover:
                 with telemetry_lock:
-                    telemetry['status'] = f"Descoberta: {len(all_tasks)} cartas encontradas..."
+                    telemetry['status'] = f"Descobrindo: {processed_discovery}/{total_to_discover} aeródromos..."
+                    telemetry['progress'] = int((processed_discovery / total_to_discover) * 20) # Os primeiros 20% são descoberta
+                upload_telemetry(s3, telemetry)
     
-    add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas prontas para processamento.")
+    add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas encontradas em {len(icao_list)} aeródromos.")
     
     with ThreadPoolExecutor(max_workers=args.workers) as exe:
         futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
