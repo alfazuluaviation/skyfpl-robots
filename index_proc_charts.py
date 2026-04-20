@@ -92,26 +92,22 @@ def init_s3():
         config=config
     )
 
-def upload_telemetry(snapshot):
-    """Sobe o snapshot de telemetria para o Supabase Storage."""
+def upload_telemetry(s3, snapshot):
+    """Sobe o snapshot de telemetria para o Cloudflare R2."""
+    if not s3: return
     try:
         snapshot['updated_at'] = time.time()
-        # Endereço do Bucket 'robots-telemetry' no Supabase
-        url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
-        upload_url = f"{SUPABASE_URL}/storage/v1/object/robots-telemetry/procedural/telemetry.json"
-        json_data = json.dumps(snapshot, ensure_ascii=False).encode('utf-8')
+        r2_key = "procedural/telemetry.json"
+        json_data = json.dumps(snapshot, ensure_ascii=False)
         
-        telemetry_session.put(
-            upload_url,
-            data=json_data,
-            headers=HEADERS_STORAGE,
-            timeout=10
+        s3.put_object(
+            Bucket=R2_BUCKET,
+            Key=r2_key,
+            Body=json_data.encode('utf-8'),
+            ContentType='application/json'
         )
     except Exception as e:
-        if not SUPABASE_URL:
-            log.error("❌ SUPABASE_URL não configurada! Verifique os Secrets do GitHub.")
-        else:
-            log.error(f"❌ Erro ao enviar telemetria: {e}")
+        log.error(f"❌ Erro ao enviar telemetria para R2: {e}")
 
 def add_telemetry_log(telemetry, message):
     log.info(message)
@@ -373,7 +369,7 @@ def main():
     signal.signal(signal.SIGTERM, handle_stop)
     signal.signal(signal.SIGINT, handle_stop)
     add_telemetry_log(telemetry, f"🤖 Robô Iniciado | Ciclo {airac_cycle} | DryRun: {dry_run}")
-    upload_telemetry(telemetry)
+    upload_telemetry(s3, telemetry)
 
     # Suporte a lista de ICAOs separados por vírgula (ex: SBGR,SBBR,SBSP)
     if args.icao:
@@ -390,12 +386,12 @@ def main():
     
     # Thread de Heartbeat: Sobe a telemetria periodicamente sem travar os workers
     stop_heartbeat = threading.Event()
-    def heartbeat_loop():
+    def heartbeat_loop(s3_client):
         while not stop_heartbeat.is_set():
-            upload_telemetry(telemetry)
+            upload_telemetry(s3_client, telemetry)
             time.sleep(10)
 
-    heartbeat_thread = threading.Thread(target=heartbeat_loop, daemon=True)
+    heartbeat_thread = threading.Thread(target=heartbeat_loop, args=(s3,), daemon=True)
     heartbeat_thread.start()
 
     # ESTRATÉGIA V10: Fila Única Global (Polidez de Rede)
@@ -453,7 +449,7 @@ def main():
     
     telemetry['status'] = 'completed'
     add_telemetry_log(telemetry, f"✅ Operação concluída! Oferecidas: {telemetry.get('total_offered', 0)} | Processadas: {processed_count}")
-    upload_telemetry(telemetry)
+    upload_telemetry(s3, telemetry)
     
     sys.exit(0)
 
