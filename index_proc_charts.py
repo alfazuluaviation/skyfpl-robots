@@ -149,13 +149,44 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
     
     try:
         resp = requests.get(url_decea, timeout=30)
-        if not resp.ok: return 0
+        if not resp.ok:
+            with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': f"DECEA Offline/Erro: {resp.status_code}", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+            return 0
+            
         pdf_bytes = resp.content
-        
         jpg_bytes, meta = process_pdf_to_jpg(pdf_bytes)
         
+        if not jpg_bytes:
+             with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': "Erro Conversão JPEG (PDF Inválido?)", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+             return 0
+
         url_pdf = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.pdf", pdf_bytes, 'application/pdf')
         url_jpg = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.jpg", jpg_bytes, 'image/jpeg') if jpg_bytes else None
+        
+        if not url_pdf or not url_jpg:
+             with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': "Erro Upload R2 (Cloudflare Timeout)", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+             return 0
         
         record = {
             'icao': icao, 'tipo': tipo, 'nome_procedimento': name, 'url_decea': url_decea,
@@ -175,10 +206,16 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
         return 1
     except Exception as e:
         err_msg = str(e)
-        log.error(f"Erro {icao} - {name}: {err_msg}")
+        log.error(f"❌ Erro {icao} - {name}: {err_msg}")
         with telemetry_lock:
-            telemetry['failed_airports'].insert(0, {'icao': icao, 'error': f"{name}: {err_msg}", 'at': datetime.now().strftime('%H:%M:%S')})
-            if len(telemetry['failed_airports']) > 20: telemetry['failed_airports'].pop()
+            telemetry['failed_charts'] += 1
+            telemetry['failed_airports'].insert(0, {
+                'icao': icao, 
+                'name': name,
+                'error': f"Falha Crítica: {err_msg}", 
+                'at': datetime.now().strftime('%H:%M:%S')
+            })
+            if len(telemetry['failed_airports']) > 30: telemetry['failed_airports'].pop()
         return 0
 
 def fetch_charts_for_icao(icao):
@@ -308,6 +345,20 @@ def main():
                 telemetry['progress'] = len(processed_airports_set)
         
     stop_heartbeat.set()
+    
+    # ─── RECONCILIAÇÃO FINAL (Tolerância Zero) ───────────────────────────────
+    total_offered = telemetry['total_offered']
+    total_success = telemetry['mirrored_charts']
+    total_failed  = telemetry['failed_charts']
+    diff = total_offered - (total_success + total_failed)
+    
+    if diff == 0 and total_failed == 0:
+        add_telemetry_log(f"💎 INTEGRIDADE 100%: Todas as {total_offered} cartas foram processadas com sucesso.")
+    elif diff == 0 and total_failed > 0:
+        add_telemetry_log(f"⚠️ ATENÇÃO: {total_success} sucessos, {total_failed} falhas registradas. Total reconciliado.")
+    else:
+        add_telemetry_log(f"🚨 ALERTA CRÍTICO: Diferença de {diff} cartas não contabilizadas!")
+    
     add_telemetry_log("📦 Finalizando Master JSON...")
     if not dry_run:
         size = export_master_json(s3, airac)
