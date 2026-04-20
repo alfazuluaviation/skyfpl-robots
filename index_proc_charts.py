@@ -213,6 +213,22 @@ def main():
     s3 = init_s3()
     airac = args.airac or datetime.now(timezone.utc).strftime('%y%m')
     
+    # Reinicializa a telemetria global para esta execução
+    with telemetry_lock:
+        telemetry.update({
+            'status': 'initializing',
+            'current_icao': '',
+            'progress': 0,
+            'total_airports': 0,
+            'total_offered': 0,
+            'total_charts': 0,
+            'mirrored_charts': 0,
+            'mirrored_bytes': 0,
+            'logs': [],
+            'failed_airports': [],
+            'last_processed_charts': []
+        })
+    
     def handle_stop(s, f):
         telemetry['status'] = 'stopped'
         upload_telemetry(s3, telemetry)
