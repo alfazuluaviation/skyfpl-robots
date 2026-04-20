@@ -169,11 +169,16 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
             telemetry['mirrored_charts'] += 1
             telemetry['mirrored_bytes'] += len(pdf_bytes) + (len(jpg_bytes) if jpg_bytes else 0)
             telemetry['last_processed_charts'].insert(0, {'icao': icao, 'name': name, 'url': url_jpg or url_pdf, 'at': datetime.now().strftime('%H:%M:%S')})
-            if len(telemetry['last_processed_charts']) > 5: telemetry['last_processed_charts'].pop()
-            
+            if len(telemetry['last_processed_charts']) > 20: telemetry['last_processed_charts'].pop()
+        
+        add_telemetry_log(f"✅ {icao}: {tipo} - {name} processada")
         return 1
     except Exception as e:
-        log.error(f"Erro {icao} - {name}: {e}")
+        err_msg = str(e)
+        log.error(f"Erro {icao} - {name}: {err_msg}")
+        with telemetry_lock:
+            telemetry['failed_airports'].insert(0, {'icao': icao, 'error': f"{name}: {err_msg}", 'at': datetime.now().strftime('%H:%M:%S')})
+            if len(telemetry['failed_airports']) > 20: telemetry['failed_airports'].pop()
         return 0
 
 def fetch_charts_for_icao(icao):
