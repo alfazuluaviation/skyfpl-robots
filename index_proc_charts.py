@@ -221,7 +221,7 @@ def main():
     # Reinicializa a telemetria global para esta execução
     with telemetry_lock:
         telemetry.update({
-            'status': 'initializing',
+            'status': 'Iniciando Super Robô v13.0...',
             'current_icao': '',
             'progress': 0,
             'total_airports': 0,
@@ -233,6 +233,9 @@ def main():
             'failed_airports': [],
             'last_processed_charts': []
         })
+    
+    # FORÇA UPLOAD IMEDIATO (Feedback instantâneo para o Dashboard)
+    upload_telemetry(s3, telemetry)
     
     def handle_stop(s, f):
         telemetry['status'] = 'stopped'
@@ -253,17 +256,32 @@ def main():
     stop_heartbeat = threading.Event()
     def hb():
         while not stop_heartbeat.is_set():
+            # Força upload para o dashboard ver o status de consulta
             upload_telemetry(s3, telemetry)
             time.sleep(10)
     threading.Thread(target=hb, daemon=True).start()
     
+    add_telemetry_log(f"🌍 Iniciando Descoberta Paralela para {len(icao_list)} aeródromos...")
     all_tasks = []
-    for icao in icao_list:
-        charts = fetch_charts_for_icao(icao)
-        telemetry['total_offered'] += len(charts)
-        for c in charts: all_tasks.append((icao, c))
     
-    add_telemetry_log(f"📦 Processando {len(all_tasks)} cartas com {args.workers} workers...")
+    # 🚀 TURBO DISCOVERY: Busca listas de cartas em paralelo
+    with ThreadPoolExecutor(max_workers=args.workers * 2) as discovery_exe:
+        discovery_futures = {discovery_exe.submit(fetch_charts_for_icao, icao): icao for icao in icao_list}
+        for future in as_completed(discovery_futures):
+            icao = discovery_futures[future]
+            charts = future.result()
+            if charts:
+                with telemetry_lock:
+                    telemetry['total_offered'] += len(charts)
+                for c in charts:
+                    all_tasks.append((icao, c))
+            
+            # Atualiza status a cada 100 aeródromos descobertos
+            if len(all_tasks) % 100 == 0:
+                with telemetry_lock:
+                    telemetry['status'] = f"Descoberta: {len(all_tasks)} cartas encontradas..."
+    
+    add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas prontas para processamento.")
     
     with ThreadPoolExecutor(max_workers=args.workers) as exe:
         futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
@@ -272,11 +290,7 @@ def main():
             with telemetry_lock:
                 telemetry['current_icao'] = icao_task
                 telemetry['total_charts'] += 1
-                # Incrementa progresso global baseado em aeródromos únicos processados
-                # (Simulação aproximada para o Dashboard)
-                if telemetry['total_charts'] % 20 == 0:
-                    telemetry['progress'] += 1
-            pass
+                telemetry['progress'] = int((telemetry['total_charts'] / len(all_tasks)) * 100) if all_tasks else 0
         
     stop_heartbeat.set()
     add_telemetry_log("📦 Finalizando Master JSON...")
