@@ -227,6 +227,7 @@ def main():
             'total_airports': 0,
             'total_offered': 0,
             'total_charts': 0,
+            'processed_airports': 0,
             'mirrored_charts': 0,
             'mirrored_bytes': 0,
             'logs': [],
@@ -294,6 +295,7 @@ def main():
     
     add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas encontradas em {len(icao_list)} aeródromos.")
     
+    processed_airports_set = set()
     with ThreadPoolExecutor(max_workers=args.workers) as exe:
         futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
         for future in as_completed(futures):
@@ -301,7 +303,8 @@ def main():
             with telemetry_lock:
                 telemetry['current_icao'] = icao_task
                 telemetry['total_charts'] += 1
-                telemetry['progress'] = int((telemetry['total_charts'] / len(all_tasks)) * 100) if all_tasks else 0
+                processed_airports_set.add(icao_task)
+                telemetry['progress'] = len(processed_airports_set)
         
     stop_heartbeat.set()
     add_telemetry_log("📦 Finalizando Master JSON...")
