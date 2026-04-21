@@ -60,6 +60,7 @@ telemetry = {
     'total_offered': 0,
     'total_charts': 0,
     'mirrored_charts': 0,
+    'failed_charts': 0,
     'mirrored_bytes': 0,
     'logs': [],
     'failed_airports': [],
@@ -126,7 +127,7 @@ def init_s3():
     if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
         log.error("❌ ERRO: Credenciais do Cloudflare R2 não encontradas nos Secrets do GitHub!")
         return None
-    config = Config(connect_timeout=10, read_timeout=20, retries={'max_attempts': 2})
+    config = Config(connect_timeout=15, read_timeout=30, retries={'max_attempts': 3}, max_pool_connections=50)
     return boto3.client('s3', endpoint_url=R2_ENDPOINT, aws_access_key_id=R2_ACCESS_KEY_ID,
                         aws_secret_access_key=R2_SECRET_ACCESS_KEY, region_name='auto', config=config)
 
@@ -267,6 +268,7 @@ def main():
             'processed_airports': 0,
             'master_file_size': 0,
             'mirrored_charts': 0,
+            'failed_charts': 0,
             'mirrored_bytes': 0,
             'logs': [],
             'failed_airports': [],
