@@ -21,7 +21,7 @@ async function runSync() {
     
     try {
         // 1. Descoberta Dinâmica do Link (Igual ao Dashboard)
-        console.log('🔍 [ROBOT] Consultando link oficial via Edge Function...');
+        console.log('🔍 [ROBOT] Consultando catálogo oficial via Edge Function...');
         const DISCOVERY_URL = `${SUPABASE_URL}/functions/v1/fetch-aisweb-data`;
         const discoveryRes = await axios.post(DISCOVERY_URL, 
             { area: 'pub', type: 'aixm' },
@@ -29,19 +29,33 @@ async function runSync() {
         );
 
         if (!discoveryRes.data?.success) {
-            throw new Error('Falha ao descobrir link oficial: ' + (discoveryRes.data?.error || 'Erro desconhecido'));
+            throw new Error('Falha ao descobrir link: ' + (discoveryRes.data?.error || 'Erro desconhecido'));
         }
 
-        // Parse do XML de retorno para achar o link "Completo"
-        const xml = discoveryRes.data.xml;
-        const linkMatch = xml.match(/<link><!\[CDATA\[(.*?)]]><\/link>/) || xml.match(/<link>(.*?)<\/link>/);
-        const dynamicLink = linkMatch ? linkMatch[1] : null;
+        // Parsing Robusto (Igual ao AixmService.ts do Dashboard)
+        const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
+        const jsonObj = parser.parse(discoveryRes.data.xml);
+        const items = jsonObj.aisweb?.item || [];
+        const itemsArray = Array.isArray(items) ? items : [items];
 
+        // Busca o item "Completo" ou "Snapshot"
+        const selectedItem = itemsArray.find(item => {
+            const name = String(item.nome || '').toLowerCase();
+            return name.includes('completo') || name.includes('snapshot') || name.includes('full');
+        }) || itemsArray[0];
+
+        let dynamicLink = selectedItem?.link || selectedItem?.file || '';
+        if (typeof dynamicLink === 'object') dynamicLink = dynamicLink['#text'] || '';
+        
         if (!dynamicLink) {
-            throw new Error('Não foi possível encontrar o link de download no XML do DECEA.');
+            console.error('📦 XML recebido:', discoveryRes.data.xml);
+            throw new Error('Não foi possível encontrar o link de download no catálogo do DECEA.');
         }
 
-        console.log(`🛰️ [ROBOT] Link Oficial Identificado: ${dynamicLink}`);
+        // Limpeza de caracteres especiais do CDATA se houver
+        dynamicLink = dynamicLink.replace(']]>', '').replace('<![CDATA[', '').trim();
+
+        console.log(`🛰️ [ROBOT] Link Autorizado: ${dynamicLink}`);
 
         // 2. Download via Túnel de Alta Performance (corsproxy.io)
         console.log('📦 [ROBOT] Iniciando download via túnel corsproxy.io...');
