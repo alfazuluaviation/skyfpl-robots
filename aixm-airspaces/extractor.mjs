@@ -196,22 +196,32 @@ async function runSync() {
 
         console.log(`📊 [ROBOT] ${enrichedData.length} áreas extraídas. Iniciando sincronização Supabase...`);
 
-        // 5. Sincronização em Massa (Upsert por Identificador)
-        for (const area of enrichedData) {
-            const { error: updateError } = await supabase
-                .from('eac_snapshots')
-                .update({
-                    // Atualizamos o raw_properties com a "verdade" do AIP
-                    raw_properties: {
-                        ...area,
-                        aip_source: 'AIXM 5.1 ROBOT',
-                        processed_at: new Date().toISOString()
-                    }
-                })
-                .eq('ident', area.ident)
-                .eq('is_current', true);
+        console.log(`📊 [ROBOT] Iniciando sincronização em massa (Bulk Upsert) para ${enrichedData.length} áreas...`);
 
-            if (updateError) console.warn(`⚠️ Erro ao atualizar ${area.ident}: ${updateError.message}`);
+        // Sincronização em massa (Muito mais rápido que loop individual)
+        const { error: upsertError } = await supabase
+            .from('eac_snapshots')
+            .upsert(
+                enrichedData.map(area => ({
+                    identifier: area.ident,
+                    name: area.nome,
+                    type: area.tipo,
+                    lowerlimit: area.lowerlimit,
+                    upperlimit: area.upperlimit,
+                    uom_llimit: area.uom_llimit,
+                    uom_ulimit: area.uom_ulimit,
+                    ref_lower: area.ref_lower,
+                    ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL', // Inferência tática
+                    horario: area.horario,
+                    remarks: area.observacoes,
+                    updated_at: new Date().toISOString()
+                })),
+                { onConflict: 'identifier' }
+            );
+
+        if (upsertError) {
+            console.error('❌ [ROBOT] Erro no Bulk Upsert:', upsertError.message);
+            throw upsertError;
         }
 
         console.log('✅ [ROBOT] Sincronização concluída com sucesso!');
