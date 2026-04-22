@@ -237,12 +237,17 @@ async function runSync() {
                     uom_ulimit: area.uom_ulimit,
                     efetivacao: effectiveDate, // Agora com a data real do ciclo!
                     raw_properties: {
-                        horario: area.horario,
-                        observacoes: area.observacoes,
-                        ref_lower: area.ref_lower,
-                        ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
                         ident: area.ident,
                         nome: area.nome,
+                        tipo: area.tipo,
+                        upperlimit: area.upperlimit,
+                        uom_ulimit: area.uom_ulimit,
+                        lowerlimit: area.lowerlimit,
+                        uom_llimit: area.uom_llimit,
+                        ref_lower: area.ref_lower,
+                        ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
+                        horario: area.horario,
+                        observacoes: area.observacoes,
                         processed_at: new Date().toISOString(),
                         aip_source: 'AIXM 5.1 ROBOT'
                     },
