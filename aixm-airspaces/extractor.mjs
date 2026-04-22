@@ -126,8 +126,17 @@ async function runSync() {
             if (!airspace) return;
 
             const timeSlices = Array.isArray(airspace.timeSlice) ? airspace.timeSlice : [airspace.timeSlice];
+            
+            // MODO DETETIVE: Investigar áreas específicas que o usuário reportou como faltantes
+            const designator = timeSlices[0]?.AirspaceTimeSlice?.designator || 'UNKN';
+            if (designator === 'SBR881' || designator === 'SBR108') {
+                console.log(`🔍 [DETETIVE] Encontrada área alvo: ${designator}`);
+                console.log(`📄 [DETETIVE] Interpretations: ${timeSlices.map(ts => ts.AirspaceTimeSlice?.interpretation).join(', ')}`);
+                console.log(`📄 [DETETIVE] Types: ${timeSlices.map(ts => ts.AirspaceTimeSlice?.type).join(', ')}`);
+            }
+
             const timeSlice = timeSlices.find(ts => 
-                (ts.AirspaceTimeSlice?.interpretation === 'BASELINE' || ts.AirspaceTimeSlice?.interpretation === 'PERMANENT')
+                ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation)
             )?.AirspaceTimeSlice || timeSlices[0]?.AirspaceTimeSlice;
 
             if (timeSlice && ['R', 'P', 'D'].includes(timeSlice.type)) {
