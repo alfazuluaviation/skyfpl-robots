@@ -198,7 +198,7 @@ async function runSync() {
 
         console.log(`📊 [ROBOT] Iniciando sincronização em massa (Bulk Upsert) para ${enrichedData.length} áreas...`);
 
-        // Sincronização em massa (Bulk Upsert) seguindo o esquema REAL do banco (Nomes em PT)
+        // Sincronização em massa (Bulk Upsert) seguindo o esquema RESTRITO do banco
         const { error: upsertError } = await supabase
             .from('eac_snapshots')
             .upsert(
@@ -210,11 +210,12 @@ async function runSync() {
                     uom_llimit: area.uom_llimit,
                     upperlimit: area.upperlimit,
                     uom_ulimit: area.uom_ulimit,
-                    ref_lower: area.ref_lower,
-                    ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
+                    efetivacao: area.horario,
                     raw_properties: {
                         horario: area.horario,
                         observacoes: area.observacoes,
+                        ref_lower: area.ref_lower,
+                        ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
                         ident: area.ident,
                         nome: area.nome,
                         processed_at: new Date().toISOString(),
