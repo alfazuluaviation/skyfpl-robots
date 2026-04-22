@@ -212,6 +212,17 @@ async function runSync() {
             console.warn('⚠️ [ROBOT] Erro ao limpar snapshots antigos:', deleteError.message);
         }
 
+        // Extração da data de efetivação (Ciclo AIRAC) do catálogo
+        let effectiveDate = '2026-04-16'; // Fallback seguro
+        try {
+            const rawAmdt = selectedItem?.amdt || '';
+            const dateMatch = String(rawAmdt).match(/(\d{4}-\d{2}-\d{2})/);
+            if (dateMatch) effectiveDate = dateMatch[1];
+            console.log(`📅 [ROBOT] Ciclo AIRAC detectado: ${effectiveDate}`);
+        } catch (e) {
+            console.warn('⚠️ [ROBOT] Não foi possível extrair a data de efetivação, usando fallback.');
+        }
+
         console.log('📤 [ROBOT] Inserindo novos snapshots em massa...');
         const { error: insertError } = await supabase
             .from('eac_snapshots')
@@ -224,7 +235,7 @@ async function runSync() {
                     uom_llimit: area.uom_llimit,
                     upperlimit: area.upperlimit,
                     uom_ulimit: area.uom_ulimit,
-                    efetivacao: area.horario,
+                    efetivacao: effectiveDate, // Agora com a data real do ciclo!
                     raw_properties: {
                         horario: area.horario,
                         observacoes: area.observacoes,
