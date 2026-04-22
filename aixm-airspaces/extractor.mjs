@@ -198,25 +198,32 @@ async function runSync() {
 
         console.log(`📊 [ROBOT] Iniciando sincronização em massa (Bulk Upsert) para ${enrichedData.length} áreas...`);
 
-        // Sincronização em massa (Muito mais rápido que loop individual)
+        // Sincronização em massa (Bulk Upsert) seguindo o esquema do Dashboard
         const { error: upsertError } = await supabase
             .from('eac_snapshots')
             .upsert(
                 enrichedData.map(area => ({
-                    identifier: area.ident,
+                    ident: area.ident,
                     name: area.nome,
                     type: area.tipo,
                     lowerlimit: area.lowerlimit,
-                    upperlimit: area.upperlimit,
                     uom_llimit: area.uom_llimit,
+                    upperlimit: area.upperlimit,
                     uom_ulimit: area.uom_ulimit,
                     ref_lower: area.ref_lower,
-                    ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL', // Inferência tática
-                    horario: area.horario,
-                    remarks: area.observacoes,
+                    ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
+                    raw_properties: {
+                        horario: area.horario,
+                        observacao: area.observacoes,
+                        ident: area.ident,
+                        nome: area.nome,
+                        processed_at: new Date().toISOString(),
+                        source: 'AIXM 5.1 ROBOT'
+                    },
+                    is_current: true,
                     updated_at: new Date().toISOString()
                 })),
-                { onConflict: 'identifier' }
+                { onConflict: 'ident' }
             );
 
         if (upsertError) {
