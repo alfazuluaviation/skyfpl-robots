@@ -20,42 +20,25 @@ async function runSync() {
     console.log('🧪 [ROBOT] Iniciando Sincronização AIXM...');
     
     try {
-        const client = axios.create({
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-            },
-            withCredentials: true
-        });
-
-        // Passo 1: Visitar a página inicial de downloads
-        console.log('🌐 [ROBOT] Estabelecendo sessão com AISWeb...');
-        const sessionRes = await client.get('https://aisweb.decea.mil.br/?i=download');
-        const cookies = sessionRes.headers['set-cookie'];
+        // 1. Download do ZIP via Proxy Supabase (para evitar bloqueio do GitHub IP)
+        console.log(`🌐 [ROBOT] Solicitando download via Proxy Supabase...`);
+        const PROXY_URL = `${SUPABASE_URL}/functions/v1/proxy-aisweb`;
         
-        // Pequena pausa para simular tempo de reação humano
-        console.log('⏳ [ROBOT] Aguardando processamento da sessão...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        // Passo 2: Baixar o ZIP usando os cookies da sessão e headers completos
-        console.log(`📦 [ROBOT] Baixando AIXM de: ${AIXM_URL}`);
-        const response = await client.get(AIXM_URL, { 
+        const response = await axios.post(PROXY_URL, { url: AIXM_URL }, { 
             responseType: 'arraybuffer',
             headers: {
-                'Referer': 'https://aisweb.decea.mil.br/?i=download',
-                'Cookie': cookies ? cookies.map(c => c.split(';')[0]).join('; ') : '',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive'
-            }
+                'Authorization': `Bearer ${SUPABASE_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            timeout: 300000 // 5 minutos de timeout para o ZIP pesado
         });
 
-        // Validação do arquivo
-        const contentType = response.headers['content-type'] || '';
-        if (contentType.includes('text/html') || response.data.length < 10000) {
-            throw new Error('O DECEA recusou o download automático. O arquivo recebido é muito pequeno ou é uma página HTML.');
+        // Validação básica do arquivo
+        if (response.data.length < 10000) {
+            throw new Error('O arquivo recebido via Proxy é muito pequeno. Possível erro na Edge Function ou link expirado.');
         }
 
+        console.log(`📦 [ROBOT] ZIP recebido (${(response.data.length / 1024 / 1024).toFixed(2)} MB). Extraindo...`);
         const zip = await JSZip.loadAsync(response.data);
         
         // 2. Extração do XML
