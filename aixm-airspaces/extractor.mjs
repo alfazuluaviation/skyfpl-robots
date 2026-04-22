@@ -6,11 +6,11 @@ import { createClient } from '@supabase/supabase-js';
 
 // Configurações via Variáveis de Ambiente (GitHub Secrets)
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const AIXM_URL = 'https://aisweb.decea.mil.br/download/?arquivo=EAC-R_AIXM_5.1.zip';
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
-    console.error('❌ Erro: SUPABASE_URL e SUPABASE_SERVICE_KEY são obrigatórios.');
+    console.error('❌ Erro: SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios.');
     process.exit(1);
 }
 
