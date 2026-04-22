@@ -222,7 +222,7 @@ async function runSync() {
                         aip_source: 'AIXM 5.1 ROBOT'
                     },
                     is_current: true,
-                    updated_at: new Date().toISOString()
+                    snapshot_at: new Date().toISOString()
                 })),
                 { onConflict: 'ident' }
             );
