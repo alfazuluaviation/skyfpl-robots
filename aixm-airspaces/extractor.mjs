@@ -58,21 +58,31 @@ async function runSync() {
 
         console.log(`🛰️ [ROBOT] Link Autorizado: ${dynamicLink}`);
 
-        // 2. Download via Túnel de Alta Performance (corsproxy.io)
-        console.log('📦 [ROBOT] Iniciando download via túnel corsproxy.io...');
-        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(dynamicLink)}`;
+        // 2. Download via CURL (Ignorando o proxy que bloqueou o GitHub)
+        console.log('📦 [ROBOT] Iniciando download direto via CURL...');
         
-        const response = await axios.get(proxyUrl, { 
-            responseType: 'arraybuffer',
-            timeout: 600000 // 10 minutos
-        });
+        const { execSync } = await import('child_process');
+        const fs = await import('fs');
+        const tempPath = './aixm_temp.zip';
 
-        if (response.data.length < 1000000) {
-            throw new Error('O arquivo recebido é muito pequeno. O túnel pode ter falhado.');
+        const curlCmd = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" \
+            -H "Referer: https://aisweb.decea.mil.br/?i=download" \
+            --connect-timeout 60 \
+            --retry 3 \
+            -o ${tempPath} "${dynamicLink}"`;
+
+        execSync(curlCmd, { stdio: 'inherit' });
+
+        if (!fs.existsSync(tempPath) || fs.statSync(tempPath).size < 1000000) {
+            throw new Error('O arquivo baixado pelo CURL é muito pequeno ou não existe.');
         }
 
-        console.log(`✅ [ROBOT] Banco AIXM recebido (${(response.data.length / 1024 / 1024).toFixed(2)} MB).`);
-        const zip = await JSZip.loadAsync(response.data);
+        console.log(`✅ [ROBOT] Banco AIXM recebido (${(fs.statSync(tempPath).size / 1024 / 1024).toFixed(2)} MB).`);
+        const zipData = fs.readFileSync(tempPath);
+        const zip = await JSZip.loadAsync(zipData);
+        
+        // Limpeza
+        fs.unlinkSync(tempPath);
         
         // 2. Extração do XML
         const xmlFileName = Object.keys(zip.files).find(f => f.endsWith('.xml'));
