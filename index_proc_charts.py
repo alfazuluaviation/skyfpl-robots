@@ -60,6 +60,10 @@ telemetry = {
     'total_offered': 0,
     'total_charts': 0,
     'mirrored_charts': 0,
+<<<<<<< HEAD
+=======
+    'failed_charts': 0,
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
     'mirrored_bytes': 0,
     'logs': [],
     'failed_airports': [],
@@ -123,8 +127,15 @@ def process_pdf_to_jpg(pdf_content):
 # ─── Infraestrutura R2 ───────────────────────────────────────────────────────
 
 def init_s3():
+<<<<<<< HEAD
     if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]): return None
     config = Config(connect_timeout=10, read_timeout=20, retries={'max_attempts': 2})
+=======
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
+        log.error("❌ ERRO: Credenciais do Cloudflare R2 não encontradas nos Secrets do GitHub!")
+        return None
+    config = Config(connect_timeout=15, read_timeout=30, retries={'max_attempts': 3}, max_pool_connections=50)
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
     return boto3.client('s3', endpoint_url=R2_ENDPOINT, aws_access_key_id=R2_ACCESS_KEY_ID,
                         aws_secret_access_key=R2_SECRET_ACCESS_KEY, region_name='auto', config=config)
 
@@ -147,6 +158,7 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
     
     try:
         resp = requests.get(url_decea, timeout=30)
+<<<<<<< HEAD
         if not resp.ok: return 0
         pdf_bytes = resp.content
         
@@ -155,6 +167,47 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
         url_pdf = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.pdf", pdf_bytes, 'application/pdf')
         url_jpg = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.jpg", jpg_bytes, 'image/jpeg') if jpg_bytes else None
         
+=======
+        if not resp.ok:
+            with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': f"DECEA Offline/Erro: {resp.status_code}", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+            return 0
+            
+        pdf_bytes = resp.content
+        jpg_bytes, meta = process_pdf_to_jpg(pdf_bytes)
+        
+        if not jpg_bytes:
+             with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': "Erro Conversão JPEG (PDF Inválido?)", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+             return 0
+
+        url_pdf = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.pdf", pdf_bytes, 'application/pdf')
+        url_jpg = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.jpg", jpg_bytes, 'image/jpeg') if jpg_bytes else None
+        
+        if not url_pdf or not url_jpg:
+             with telemetry_lock:
+                telemetry['failed_charts'] += 1
+                telemetry['failed_airports'].insert(0, {
+                    'icao': icao, 
+                    'name': name,
+                    'error': "Erro Upload R2 (Cloudflare Timeout)", 
+                    'at': datetime.now().strftime('%H:%M:%S')
+                })
+             return 0
+        
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
         record = {
             'icao': icao, 'tipo': tipo, 'nome_procedimento': name, 'url_decea': url_decea,
             'url_r2': url_pdf, 'url_r2_jpg': url_jpg, 'airac_cycle': airac,
@@ -167,11 +220,30 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
             telemetry['mirrored_charts'] += 1
             telemetry['mirrored_bytes'] += len(pdf_bytes) + (len(jpg_bytes) if jpg_bytes else 0)
             telemetry['last_processed_charts'].insert(0, {'icao': icao, 'name': name, 'url': url_jpg or url_pdf, 'at': datetime.now().strftime('%H:%M:%S')})
+<<<<<<< HEAD
             if len(telemetry['last_processed_charts']) > 5: telemetry['last_processed_charts'].pop()
             
         return 1
     except Exception as e:
         log.error(f"Erro {icao} - {name}: {e}")
+=======
+            if len(telemetry['last_processed_charts']) > 20: telemetry['last_processed_charts'].pop()
+        
+        add_telemetry_log(f"✅ {icao}: {tipo} - {name} processada")
+        return 1
+    except Exception as e:
+        err_msg = str(e)
+        log.error(f"❌ Erro {icao} - {name}: {err_msg}")
+        with telemetry_lock:
+            telemetry['failed_charts'] += 1
+            telemetry['failed_airports'].insert(0, {
+                'icao': icao, 
+                'name': name,
+                'error': f"Falha Crítica: {err_msg}", 
+                'at': datetime.now().strftime('%H:%M:%S')
+            })
+            if len(telemetry['failed_airports']) > 30: telemetry['failed_airports'].pop()
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
         return 0
 
 def fetch_charts_for_icao(icao):
@@ -211,6 +283,31 @@ def main():
     s3 = init_s3()
     airac = args.airac or datetime.now(timezone.utc).strftime('%y%m')
     
+<<<<<<< HEAD
+=======
+    # Reinicializa a telemetria global para esta execução
+    with telemetry_lock:
+        telemetry.update({
+            'status': 'Iniciando Super Robô v13.0...',
+            'current_icao': '',
+            'progress': 0,
+            'total_airports': 0,
+            'total_offered': 0,
+            'total_charts': 0,
+            'processed_airports': 0,
+            'master_file_size': 0,
+            'mirrored_charts': 0,
+            'failed_charts': 0,
+            'mirrored_bytes': 0,
+            'logs': [],
+            'failed_airports': [],
+            'last_processed_charts': []
+        })
+    
+    # FORÇA UPLOAD IMEDIATO (Feedback instantâneo para o Dashboard)
+    upload_telemetry(s3, telemetry)
+    
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
     def handle_stop(s, f):
         telemetry['status'] = 'stopped'
         upload_telemetry(s3, telemetry)
@@ -221,8 +318,17 @@ def main():
     
     icao_list = [c.strip().upper() for c in args.icao.split(',')] if args.icao else []
     if not icao_list:
+<<<<<<< HEAD
         r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json')
         icao_list = sorted({p['icao'] for p in r.json().get('data', []) if p.get('icao')})
+=======
+        add_telemetry_log("🌍 Baixando malha aérea brasileira para filtragem...")
+        r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json')
+        nav_data = r.json().get('data', [])
+        # 🛡️ FILTRO TÁTICO: Apenas aeroportos e helipontos (evita 10k waypoints inúteis)
+        icao_list = sorted({p['icao'] for p in nav_data if p.get('icao') and p.get('type') in ['airport', 'heliport']})
+        add_telemetry_log(f"✅ Malha filtrada: {len(icao_list)} aeródromos identificados (de {len(nav_data)} pontos totais).")
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
     
     telemetry['total_airports'] = len(icao_list)
     telemetry['status'] = 'in_progress'
@@ -230,10 +336,15 @@ def main():
     stop_heartbeat = threading.Event()
     def hb():
         while not stop_heartbeat.is_set():
+<<<<<<< HEAD
+=======
+            # Força upload para o dashboard ver o status de consulta
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
             upload_telemetry(s3, telemetry)
             time.sleep(10)
     threading.Thread(target=hb, daemon=True).start()
     
+<<<<<<< HEAD
     all_tasks = []
     for icao in icao_list:
         charts = fetch_charts_for_icao(icao)
@@ -249,6 +360,68 @@ def main():
     stop_heartbeat.set()
     add_telemetry_log("📦 Finalizando Master JSON...")
     if not dry_run: export_master_json(s3, airac)
+=======
+    add_telemetry_log(f"🌍 Iniciando Descoberta Paralela para {len(icao_list)} aeródromos...")
+    all_tasks = []
+    
+    # 🚀 TURBO DISCOVERY: Busca listas de cartas em paralelo
+    with ThreadPoolExecutor(max_workers=args.workers * 3) as discovery_exe:
+        discovery_futures = {discovery_exe.submit(fetch_charts_for_icao, icao): icao for icao in icao_list}
+        processed_discovery = 0
+        total_to_discover = len(icao_list)
+        
+        for future in as_completed(discovery_futures):
+            icao = discovery_futures[future]
+            processed_discovery += 1
+            charts = future.result()
+            
+            if charts:
+                with telemetry_lock:
+                    telemetry['total_offered'] += len(charts)
+                for c in charts:
+                    all_tasks.append((icao, c))
+            
+            # Atualiza status visual de progresso da descoberta
+            if processed_discovery % 50 == 0 or processed_discovery == total_to_discover:
+                with telemetry_lock:
+                    telemetry['status'] = f"Descobrindo: {processed_discovery}/{total_to_discover} aeródromos..."
+                    telemetry['progress'] = int((processed_discovery / total_to_discover) * 20) # Os primeiros 20% são descoberta
+                upload_telemetry(s3, telemetry)
+    
+    add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas encontradas em {len(icao_list)} aeródromos.")
+    
+    processed_airports_set = set()
+    with ThreadPoolExecutor(max_workers=args.workers) as exe:
+        futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
+        for future in as_completed(futures):
+            icao_task = futures[future]
+            with telemetry_lock:
+                telemetry['current_icao'] = icao_task
+                telemetry['total_charts'] += 1
+                processed_airports_set.add(icao_task)
+                telemetry['progress'] = len(processed_airports_set)
+        
+    stop_heartbeat.set()
+    
+    # ─── RECONCILIAÇÃO FINAL (Tolerância Zero) ───────────────────────────────
+    total_offered = telemetry['total_offered']
+    total_success = telemetry['mirrored_charts']
+    total_failed  = telemetry['failed_charts']
+    diff = total_offered - (total_success + total_failed)
+    
+    if diff == 0 and total_failed == 0:
+        add_telemetry_log(f"💎 INTEGRIDADE 100%: Todas as {total_offered} cartas foram processadas com sucesso.")
+    elif diff == 0 and total_failed > 0:
+        add_telemetry_log(f"⚠️ ATENÇÃO: {total_success} sucessos, {total_failed} falhas registradas. Total reconciliado.")
+    else:
+        add_telemetry_log(f"🚨 ALERTA CRÍTICO: Diferença de {diff} cartas não contabilizadas!")
+    
+    add_telemetry_log("📦 Finalizando Master JSON...")
+    if not dry_run:
+        size = export_master_json(s3, airac)
+        with telemetry_lock:
+            telemetry['master_file_size'] = size
+>>>>>>> e533f6fddebc0a0f28366771d863e766bc7a2fad
     
     telemetry['status'] = 'completed'
     add_telemetry_log(f"✅ Concluído! {telemetry['mirrored_charts']} cartas processadas.")
