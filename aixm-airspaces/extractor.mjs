@@ -82,14 +82,14 @@ async function runSync() {
         
         // 3. Parsing
         console.log('🔍 [ROBOT] Analisando estrutura XML...');
-        const parser = new XMLParser({
+        const parser2 = new XMLParser({
             ignoreAttributes: false,
             attributeNamePrefix: "@_",
             removeNSPrefix: true
         });
         
-        const jsonObj = parser.parse(xmlText);
-        const members = jsonObj.AIXMBasicMessage?.hasMember || [];
+        const jsonObj2 = parser2.parse(xmlText);
+        const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
         console.log(`📂 [ROBOT] Total de membros encontrados: ${members.length}`);
 
         const enrichedData = [];
