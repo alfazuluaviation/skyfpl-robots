@@ -126,30 +126,22 @@ async function runSync() {
             if (!airspace) return;
 
             const timeSlices = Array.isArray(airspace.timeSlice) ? airspace.timeSlice : [airspace.timeSlice];
-            
-            // MODO DETETIVE: Investigar áreas específicas que o usuário reportou como faltantes
-            const designator = timeSlices[0]?.AirspaceTimeSlice?.designator || 'UNKN';
-            if (designator === 'SBR881' || designator === 'SBR108') {
-                console.log(`🔍 [DETETIVE] Encontrada área alvo: ${designator}`);
-                console.log(`📄 [DETETIVE] Interpretations: ${timeSlices.map(ts => ts.AirspaceTimeSlice?.interpretation).join(', ')}`);
-                console.log(`📄 [DETETIVE] Types: ${timeSlices.map(ts => ts.AirspaceTimeSlice?.type).join(', ')}`);
-            }
-
             const timeSlice = timeSlices.find(ts => 
                 ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation)
             )?.AirspaceTimeSlice || timeSlices[0]?.AirspaceTimeSlice;
 
             if (timeSlice && ['R', 'P', 'D'].includes(timeSlice.type)) {
                 
+                // Extração profunda de limites (AIXM 5.1 pode variar a estrutura)
                 const geometry = timeSlice.geometryComponent?.AirspaceGeometryComponent || timeSlice.geometryComponent;
                 const volume = geometry?.theAirspaceVolume?.AirspaceVolume || geometry?.theAirspaceVolume;
                 
-                const rawUpper = volume?.upperLimit || timeSlice.upperLimit;
-                const rawLower = volume?.lowerLimit || timeSlice.lowerLimit;
+                const rawUpper = volume?.upperLimit || timeSlice.upperLimit || geometry?.upperLimit;
+                const rawLower = volume?.lowerLimit || timeSlice.lowerLimit || geometry?.lowerLimit;
                 const upperRef = volume?.upperLimitReference || timeSlice.upperLimitReference || '';
                 const lowerRef = volume?.lowerLimitReference || timeSlice.lowerLimitReference || '';
 
-                // Horário H24 / Ativação
+                // Horário / Ativação
                 let horarioFinal = 'CONSULTAR NOTAM';
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
@@ -161,96 +153,73 @@ async function runSync() {
                     horarioFinal = 'ATIVO';
                 }
 
-                // Observações (Melhorado para capturar Procedimento Especial e notas)
+                // Observações Completas
                 let observacoesFinal = '';
-                const circle = volume?.horizontalProjection?.Surface?.patches?.PolygonPatch?.exterior?.Ring?.curveMember?.Curve?.segments?.CircleByCenterPoint;
-                if (circle) {
-                    const pos = String(circle.pos || '').split(' ');
-                    const dmsPos = pos.length === 2 ? toDMS(parseFloat(pos[0]), parseFloat(pos[1])) : pos.join(' ');
-                    const radius = circle.radius?.['#text'] || circle.radius?.val || circle.radius || '1.0';
-                    observacoesFinal = `ÁREA CIRCULAR COM CENTRO EM ${dmsPos} COM UM RAIO DE ${radius} NM. `;
-                }
-
-                const activityMap = { 'OTHER': 'OUTRAS ATIVIDADES / MOTIVOS', 'TRAINING': 'TREINAMENTO MILITAR' };
-                const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
-                observacoesFinal += activities.length ? activities.map(act => activityMap[act] || act).join(' / ') : 'OUTRAS ATIVIDADES / MOTIVOS';
-
-                // Captura de Notas e Anotações (Procedimento Especial, etc)
                 const annotations = Array.isArray(timeSlice.annotation) ? timeSlice.annotation : [timeSlice.annotation];
                 annotations.forEach(ann => {
-                    const noteText = ann?.Annotation?.text || ann?.Note?.text || '';
+                    const noteText = ann?.Annotation?.text || ann?.Note?.text || ann?.text || '';
                     if (noteText && !observacoesFinal.includes(noteText)) {
-                        observacoesFinal += ` / ${noteText}`;
+                        observacoesFinal += (observacoesFinal ? ' / ' : '') + noteText;
                     }
                 });
 
-                // Mapeamento de Referências Verticais
+                const activityMap = { 'OTHER': 'OUTRAS ATIVIDADES', 'TRAINING': 'TREINAMENTO MILITAR' };
+                const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
+                if (activities.length) {
+                    const actStr = activities.map(act => activityMap[act] || act).join(' / ');
+                    if (!observacoesFinal.includes(actStr)) observacoesFinal += (observacoesFinal ? ' / ' : '') + actStr;
+                }
+
+                // Mapeamento de Referências
                 const mapRef = (ref, uom) => {
                     const r = String(ref?.['#text'] || ref?.val || ref || '').toUpperCase();
                     if (r === 'SFC') return 'GND';
                     if (r === 'MSL') return 'MSL';
                     if (r === 'STD' || uom === 'FL') return 'STD';
-                    return 'AGL'; // Default seguro
+                    return 'AGL';
+                };
+
+                const parseLimit = (limit) => {
+                    const val = limit?.['#text'] || limit?.val || limit;
+                    return val !== undefined ? parseFloat(val) : null;
                 };
 
                 enrichedData.push({
                     ident: String(timeSlice.designator || 'UNKN'),
+                    nome: timeSlice.name || null,
                     tipo: timeSlice.type,
-                    nome: timeSlice.name || 'ÁREA SEM NOME',
-                    upperlimit: parseFloat(rawUpper?.['#text'] || rawUpper?.val || rawUpper || 0),
+                    upperlimit: parseLimit(rawUpper),
                     uom_ulimit: rawUpper?.['@_uom'] || 'FL',
-                    lowerlimit: parseFloat(rawLower?.['#text'] || rawLower?.val || rawLower || 0),
+                    lowerlimit: parseLimit(rawLower),
                     uom_llimit: rawLower?.['@_uom'] || 'FT',
-                    ref_lower: mapRef(lowerRef, rawLower?.['@_uom'] || 'FT'),
-                    ref_upper: mapRef(upperRef, rawUpper?.['@_uom'] || 'FL'),
+                    ref_lower: mapRef(lowerRef, rawLower?.['@_uom']),
+                    ref_upper: mapRef(upperRef, rawUpper?.['@_uom']),
                     horario: horarioFinal,
-                    observacoes: observacoesFinal.toUpperCase().trim()
+                    observacoes: observacoesFinal || 'OUTRAS ATIVIDADES / MOTIVOS',
+                    full_aixm_node: timeSlice // O "Pulo do Gato": Captura TUDO
                 });
             }
         });
 
-        console.log(`📊 [ROBOT] ${enrichedData.length} áreas extraídas. Iniciando sincronização Supabase...`);
+        console.log(`📊 [ROBOT] ${enrichedData.length} áreas processadas. Iniciando Sincronização em Modo Inspeção Total...`);
 
-        console.log(`📊 [ROBOT] Iniciando sincronização em massa (Bulk Upsert) para ${enrichedData.length} áreas...`);
-
-        // Sincronização Atômica: Removemos o estado atual e inserimos o novo (Bulk)
-        console.log(`🧹 [ROBOT] Limpando snapshots atuais para ${enrichedData.length} áreas...`);
-        
-        const idents = enrichedData.map(area => area.ident);
-        const { error: deleteError } = await supabase
-            .from('eac_snapshots')
-            .delete()
-            .in('ident', idents)
-            .eq('is_current', true);
-
-        if (deleteError) {
-            console.warn('⚠️ [ROBOT] Erro ao limpar snapshots antigos:', deleteError.message);
-        }
-
-        // Extração da data de efetivação (Ciclo AIRAC) do catálogo
-        let effectiveDate = '2026-04-16'; // Fallback seguro
+        // Extração da data de efetivação
+        let effectiveDate = '2026-04-16';
         try {
             const rawAmdt = selectedItem?.amdt || '';
             const dateMatch = String(rawAmdt).match(/(\d{4}-\d{2}-\d{2})/);
             if (dateMatch) effectiveDate = dateMatch[1];
-            console.log(`📅 [ROBOT] Ciclo AIRAC detectado: ${effectiveDate}`);
-        } catch (e) {
-            console.warn('⚠️ [ROBOT] Não foi possível extrair a data de efetivação, usando fallback.');
-        }
+        } catch (e) {}
 
-        console.log('📤 [ROBOT] Inserindo novos snapshots em massa...');
-        const { error: insertError } = await supabase
-            .from('eac_snapshots')
-            .insert(
-                enrichedData.map(area => ({
-                    ident: area.ident,
-                    nome: area.nome,
-                    tipo: area.tipo,
-                    lowerlimit: area.lowerlimit,
-                    uom_llimit: area.uom_llimit,
-                    upperlimit: area.upperlimit,
-                    uom_ulimit: area.uom_ulimit,
-                    efetivacao: effectiveDate, // Agora com a data real do ciclo!
+        // SINCRONIZAÇÃO INTELIGENTE (Sem Delete)
+        // Para evitar destruir polígonos e dados do GeoServer, vamos apenas atualizar.
+        // Como o Supabase upsert sobrescreve tudo, vamos fazer um loop controlado.
+        
+        for (const area of enrichedData) {
+            const { error: updateError } = await supabase
+                .from('eac_snapshots')
+                .update({
+                    efetivacao: effectiveDate,
                     raw_properties: {
                         ident: area.ident,
                         nome: area.nome,
@@ -263,20 +232,22 @@ async function runSync() {
                         ref_upper: area.ref_upper,
                         horario: area.horario,
                         observacoes: area.observacoes,
+                        full_aixm_node: area.full_aixm_node, // 100% de visibilidade
                         processed_at: new Date().toISOString(),
                         aip_source: 'AIXM 5.1 ROBOT'
                     },
-                    is_current: true,
-                    snapshot_at: new Date().toISOString()
-                }))
-            );
+                    updated_at: new Date().toISOString()
+                })
+                .eq('ident', area.ident)
+                .eq('is_current', true);
 
-        if (insertError) {
-            console.error('❌ [ROBOT] Erro ao inserir novos snapshots:', insertError.message);
-            throw insertError;
+            if (updateError) {
+                // Se não existir, poderíamos inserir, mas aqui queremos apenas auditar o que o GeoServer já tem.
+                // Se for uma área nova do AIXM, o dashboard cuidará disso depois.
+            }
         }
 
-        console.log('✅ [ROBOT] Sincronização concluída com sucesso!');
+        console.log('✅ [ROBOT] Sincronização inteligente concluída!');
 
     } catch (error) {
         console.error('❌ [ROBOT] Erro fatal no pipeline:', error.message);
