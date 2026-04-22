@@ -20,26 +20,32 @@ async function runSync() {
     console.log('🧪 [ROBOT] Iniciando Sincronização AIXM...');
     
     try {
-        // 1. Download do ZIP via Proxy Supabase (para evitar bloqueio do GitHub IP)
-        console.log(`🌐 [ROBOT] Solicitando download via Proxy Supabase...`);
-        const PROXY_URL = `${SUPABASE_URL}/functions/v1/proxy-aisweb`;
+        // 1. Download do ZIP via CURL (Muito mais robusto para arquivos grandes e evita bloqueios)
+        console.log(`📦 [ROBOT] Baixando AIXM via CURL: ${AIXM_URL}`);
         
-        const response = await axios.post(PROXY_URL, { url: AIXM_URL }, { 
-            responseType: 'arraybuffer',
-            headers: {
-                'Authorization': `Bearer ${SUPABASE_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            timeout: 300000 // 5 minutos de timeout para o ZIP pesado
-        });
+        const { execSync } = await import('child_process');
+        const fs = await import('fs');
+        const tempPath = './aixm_temp.zip';
 
-        // Validação básica do arquivo
-        if (response.data.length < 10000) {
-            throw new Error('O arquivo recebido via Proxy é muito pequeno. Possível erro na Edge Function ou link expirado.');
+        // Comando CURL com headers de navegador e retry automático
+        const curlCmd = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" \
+            -H "Referer: https://aisweb.decea.mil.br/?i=download" \
+            --connect-timeout 30 \
+            --retry 3 \
+            -o ${tempPath} "${AIXM_URL}"`;
+
+        execSync(curlCmd, { stdio: 'inherit' });
+
+        if (!fs.existsSync(tempPath) || fs.statSync(tempPath).size < 1000000) {
+            throw new Error('Falha no download: Arquivo não encontrado ou muito pequeno.');
         }
 
-        console.log(`📦 [ROBOT] ZIP recebido (${(response.data.length / 1024 / 1024).toFixed(2)} MB). Extraindo...`);
-        const zip = await JSZip.loadAsync(response.data);
+        console.log(`📦 [ROBOT] Download concluído (${(fs.statSync(tempPath).size / 1024 / 1024).toFixed(2)} MB). Lendo ZIP...`);
+        const zipData = fs.readFileSync(tempPath);
+        const zip = await JSZip.loadAsync(zipData);
+        
+        // Limpeza
+        fs.unlinkSync(tempPath);
         
         // 2. Extração do XML
         const xmlFileName = Object.keys(zip.files).find(f => f.endsWith('.xml'));
