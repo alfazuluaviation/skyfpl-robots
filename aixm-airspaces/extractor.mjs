@@ -7,7 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 // Configurações via Variáveis de Ambiente (GitHub Secrets)
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const AIXM_URL = 'https://aisweb.decea.mil.br/download/?arquivo=EAC-R_AIXM_5.1.zip';
+const AIXM_URL = 'https://aisweb.decea.mil.br/download/?public=409c79f8-a70d-409f-a5d62c2f1bd33e00.zip&p=Completo';
 
 if (!SUPABASE_URL || !SUPABASE_KEY) {
     console.error('❌ Erro: SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios.');
@@ -20,32 +20,44 @@ async function runSync() {
     console.log('🧪 [ROBOT] Iniciando Sincronização AIXM...');
     
     try {
-        // 1. Download do ZIP via CURL (Muito mais robusto para arquivos grandes e evita bloqueios)
-        console.log(`📦 [ROBOT] Baixando AIXM via CURL: ${AIXM_URL}`);
-        
-        const { execSync } = await import('child_process');
-        const fs = await import('fs');
-        const tempPath = './aixm_temp.zip';
+        // 1. Descoberta Dinâmica do Link (Igual ao Dashboard)
+        console.log('🔍 [ROBOT] Consultando link oficial via Edge Function...');
+        const DISCOVERY_URL = `${SUPABASE_URL}/functions/v1/fetch-aisweb-data`;
+        const discoveryRes = await axios.post(DISCOVERY_URL, 
+            { area: 'pub', type: 'aixm' },
+            { headers: { 'Authorization': `Bearer ${SUPABASE_KEY}` } }
+        );
 
-        // Comando CURL com headers de navegador e retry automático
-        const curlCmd = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" \
-            -H "Referer: https://aisweb.decea.mil.br/?i=download" \
-            --connect-timeout 30 \
-            --retry 3 \
-            -o ${tempPath} "${AIXM_URL}"`;
-
-        execSync(curlCmd, { stdio: 'inherit' });
-
-        if (!fs.existsSync(tempPath) || fs.statSync(tempPath).size < 1000000) {
-            throw new Error('Falha no download: Arquivo não encontrado ou muito pequeno.');
+        if (!discoveryRes.data?.success) {
+            throw new Error('Falha ao descobrir link oficial: ' + (discoveryRes.data?.error || 'Erro desconhecido'));
         }
 
-        console.log(`📦 [ROBOT] Download concluído (${(fs.statSync(tempPath).size / 1024 / 1024).toFixed(2)} MB). Lendo ZIP...`);
-        const zipData = fs.readFileSync(tempPath);
-        const zip = await JSZip.loadAsync(zipData);
+        // Parse do XML de retorno para achar o link "Completo"
+        const xml = discoveryRes.data.xml;
+        const linkMatch = xml.match(/<link><!\[CDATA\[(.*?)]]><\/link>/) || xml.match(/<link>(.*?)<\/link>/);
+        const dynamicLink = linkMatch ? linkMatch[1] : null;
+
+        if (!dynamicLink) {
+            throw new Error('Não foi possível encontrar o link de download no XML do DECEA.');
+        }
+
+        console.log(`🛰️ [ROBOT] Link Oficial Identificado: ${dynamicLink}`);
+
+        // 2. Download via Túnel de Alta Performance (corsproxy.io)
+        console.log('📦 [ROBOT] Iniciando download via túnel corsproxy.io...');
+        const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(dynamicLink)}`;
         
-        // Limpeza
-        fs.unlinkSync(tempPath);
+        const response = await axios.get(proxyUrl, { 
+            responseType: 'arraybuffer',
+            timeout: 600000 // 10 minutos
+        });
+
+        if (response.data.length < 1000000) {
+            throw new Error('O arquivo recebido é muito pequeno. O túnel pode ter falhado.');
+        }
+
+        console.log(`✅ [ROBOT] Banco AIXM recebido (${(response.data.length / 1024 / 1024).toFixed(2)} MB).`);
+        const zip = await JSZip.loadAsync(response.data);
         
         // 2. Extração do XML
         const xmlFileName = Object.keys(zip.files).find(f => f.endsWith('.xml'));
