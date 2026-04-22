@@ -1,4 +1,4 @@
-name: AIXM Airspace Sync
+name: "🛰️ SkyFPL - Robô Processador de Espaços Aéreos (AIXM 5.1)"
 
 on:
   workflow_dispatch: # Permite disparar manualmente via API/Dashboard
