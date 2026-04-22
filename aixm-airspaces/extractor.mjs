@@ -20,9 +20,23 @@ async function runSync() {
     console.log('🧪 [ROBOT] Iniciando Sincronização AIXM...');
     
     try {
-        // 1. Download do ZIP
+        // 1. Download do ZIP com Headers de Navegador (para evitar bloqueio)
         console.log(`📦 [ROBOT] Baixando AIXM de: ${AIXM_URL}`);
-        const response = await axios.get(AIXM_URL, { responseType: 'arraybuffer' });
+        const response = await axios.get(AIXM_URL, { 
+            responseType: 'arraybuffer',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Referer': 'https://aisweb.decea.mil.br/?i=download',
+                'Accept': 'application/zip, application/octet-stream, */*'
+            }
+        });
+
+        // Validação básica do arquivo
+        const contentType = response.headers['content-type'] || '';
+        if (contentType.includes('text/html')) {
+            throw new Error('O DECEA retornou uma página HTML em vez do arquivo ZIP. Possível bloqueio de acesso ou link expirado.');
+        }
+
         const zip = await JSZip.loadAsync(response.data);
         
         // 2. Extração do XML
