@@ -146,9 +146,10 @@ async function runSync() {
                 
                 const rawUpper = volume?.upperLimit || timeSlice.upperLimit;
                 const rawLower = volume?.lowerLimit || timeSlice.lowerLimit;
-                const lowerRef = volume?.lowerLimitReference || '';
+                const upperRef = volume?.upperLimitReference || timeSlice.upperLimitReference || '';
+                const lowerRef = volume?.lowerLimitReference || timeSlice.lowerLimitReference || '';
 
-                // Horário H24
+                // Horário H24 / Ativação
                 let horarioFinal = 'CONSULTAR NOTAM';
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
@@ -160,7 +161,7 @@ async function runSync() {
                     horarioFinal = 'ATIVO';
                 }
 
-                // Observações
+                // Observações (Melhorado para capturar Procedimento Especial e notas)
                 let observacoesFinal = '';
                 const circle = volume?.horizontalProjection?.Surface?.patches?.PolygonPatch?.exterior?.Ring?.curveMember?.Curve?.segments?.CircleByCenterPoint;
                 if (circle) {
@@ -174,10 +175,23 @@ async function runSync() {
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
                 observacoesFinal += activities.length ? activities.map(act => activityMap[act] || act).join(' / ') : 'OUTRAS ATIVIDADES / MOTIVOS';
 
-                const extraNote = timeSlice.annotation?.Annotation?.text || '';
-                if (extraNote && !observacoesFinal.includes(extraNote)) {
-                    observacoesFinal += ` / ${extraNote}`;
-                }
+                // Captura de Notas e Anotações (Procedimento Especial, etc)
+                const annotations = Array.isArray(timeSlice.annotation) ? timeSlice.annotation : [timeSlice.annotation];
+                annotations.forEach(ann => {
+                    const noteText = ann?.Annotation?.text || ann?.Note?.text || '';
+                    if (noteText && !observacoesFinal.includes(noteText)) {
+                        observacoesFinal += ` / ${noteText}`;
+                    }
+                });
+
+                // Mapeamento de Referências Verticais
+                const mapRef = (ref, uom) => {
+                    const r = String(ref?.['#text'] || ref?.val || ref || '').toUpperCase();
+                    if (r === 'SFC') return 'GND';
+                    if (r === 'MSL') return 'MSL';
+                    if (r === 'STD' || uom === 'FL') return 'STD';
+                    return 'AGL'; // Default seguro
+                };
 
                 enrichedData.push({
                     ident: String(timeSlice.designator || 'UNKN'),
@@ -187,9 +201,10 @@ async function runSync() {
                     uom_ulimit: rawUpper?.['@_uom'] || 'FL',
                     lowerlimit: parseFloat(rawLower?.['#text'] || rawLower?.val || rawLower || 0),
                     uom_llimit: rawLower?.['@_uom'] || 'FT',
-                    ref_lower: lowerRef === 'SFC' ? 'AGL' : (lowerRef === 'MSL' ? 'MSL' : 'STD'),
+                    ref_lower: mapRef(lowerRef, rawLower?.['@_uom'] || 'FT'),
+                    ref_upper: mapRef(upperRef, rawUpper?.['@_uom'] || 'FL'),
                     horario: horarioFinal,
-                    observacoes: observacoesFinal.toUpperCase()
+                    observacoes: observacoesFinal.toUpperCase().trim()
                 });
             }
         });
@@ -245,7 +260,7 @@ async function runSync() {
                         lowerlimit: area.lowerlimit,
                         uom_llimit: area.uom_llimit,
                         ref_lower: area.ref_lower,
-                        ref_upper: area.uom_ulimit === 'FL' ? 'STD' : 'MSL',
+                        ref_upper: area.ref_upper,
                         horario: area.horario,
                         observacoes: area.observacoes,
                         processed_at: new Date().toISOString(),
