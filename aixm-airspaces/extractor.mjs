@@ -32,15 +32,15 @@ async function runSync() {
             throw new Error('Falha ao descobrir link: ' + (discoveryRes.data?.error || 'Erro desconhecido'));
         }
 
-        // Parsing Robusto (Igual ao AixmService.ts do Dashboard)
+        // Parsing Robusto (Ajustado para a estrutura real: aisweb -> pub -> item)
         const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
         const jsonObj = parser.parse(discoveryRes.data.xml);
-        const items = jsonObj.aisweb?.item || [];
+        const items = jsonObj.aisweb?.pub?.item || [];
         const itemsArray = Array.isArray(items) ? items : [items];
 
-        // Busca o item "Completo" ou "Snapshot"
+        // Busca o item "Completo" ou "Snapshot" usando a tag <name>
         const selectedItem = itemsArray.find(item => {
-            const name = String(item.nome || '').toLowerCase();
+            const name = String(item.name || '').toLowerCase();
             return name.includes('completo') || name.includes('snapshot') || name.includes('full');
         }) || itemsArray[0];
 
@@ -52,8 +52,9 @@ async function runSync() {
             throw new Error('Não foi possível encontrar o link de download no catálogo do DECEA.');
         }
 
-        // Limpeza de caracteres especiais do CDATA se houver
-        dynamicLink = dynamicLink.replace(']]>', '').replace('<![CDATA[', '').trim();
+        // Limpeza agressiva: remover CDATA e sufixos estranhos como ">Completo"
+        dynamicLink = dynamicLink.replace(']]>', '').replace('<![CDATA[', '');
+        dynamicLink = dynamicLink.split('">')[0].trim(); // Remove ">Completo"
 
         console.log(`🛰️ [ROBOT] Link Autorizado: ${dynamicLink}`);
 
