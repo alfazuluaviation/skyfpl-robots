@@ -29,18 +29,24 @@ async function runSync() {
             withCredentials: true
         });
 
-        // Passo 1: Visitar a página inicial de downloads para pegar o cookie de sessão
+        // Passo 1: Visitar a página inicial de downloads
         console.log('🌐 [ROBOT] Estabelecendo sessão com AISWeb...');
         const sessionRes = await client.get('https://aisweb.decea.mil.br/?i=download');
         const cookies = sessionRes.headers['set-cookie'];
+        
+        // Pequena pausa para simular tempo de reação humano
+        console.log('⏳ [ROBOT] Aguardando processamento da sessão...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Passo 2: Baixar o ZIP usando os cookies da sessão
+        // Passo 2: Baixar o ZIP usando os cookies da sessão e headers completos
         console.log(`📦 [ROBOT] Baixando AIXM de: ${AIXM_URL}`);
         const response = await client.get(AIXM_URL, { 
             responseType: 'arraybuffer',
             headers: {
                 'Referer': 'https://aisweb.decea.mil.br/?i=download',
-                'Cookie': cookies ? cookies.join('; ') : ''
+                'Cookie': cookies ? cookies.map(c => c.split(';')[0]).join('; ') : '',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive'
             }
         });
 
