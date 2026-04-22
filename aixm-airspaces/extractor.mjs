@@ -198,10 +198,24 @@ async function runSync() {
 
         console.log(`📊 [ROBOT] Iniciando sincronização em massa (Bulk Upsert) para ${enrichedData.length} áreas...`);
 
-        // Sincronização em massa (Bulk Upsert) seguindo o esquema RESTRITO do banco
-        const { error: upsertError } = await supabase
+        // Sincronização Atômica: Removemos o estado atual e inserimos o novo (Bulk)
+        console.log(`🧹 [ROBOT] Limpando snapshots atuais para ${enrichedData.length} áreas...`);
+        
+        const idents = enrichedData.map(area => area.ident);
+        const { error: deleteError } = await supabase
             .from('eac_snapshots')
-            .upsert(
+            .delete()
+            .in('ident', idents)
+            .eq('is_current', true);
+
+        if (deleteError) {
+            console.warn('⚠️ [ROBOT] Erro ao limpar snapshots antigos:', deleteError.message);
+        }
+
+        console.log('📤 [ROBOT] Inserindo novos snapshots em massa...');
+        const { error: insertError } = await supabase
+            .from('eac_snapshots')
+            .insert(
                 enrichedData.map(area => ({
                     ident: area.ident,
                     nome: area.nome,
@@ -223,13 +237,12 @@ async function runSync() {
                     },
                     is_current: true,
                     snapshot_at: new Date().toISOString()
-                })),
-                { onConflict: 'ident' }
+                }))
             );
 
-        if (upsertError) {
-            console.error('❌ [ROBOT] Erro no Bulk Upsert:', upsertError.message);
-            throw upsertError;
+        if (insertError) {
+            console.error('❌ [ROBOT] Erro ao inserir novos snapshots:', insertError.message);
+            throw insertError;
         }
 
         console.log('✅ [ROBOT] Sincronização concluída com sucesso!');
