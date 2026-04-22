@@ -20,21 +20,34 @@ async function runSync() {
     console.log('🧪 [ROBOT] Iniciando Sincronização AIXM...');
     
     try {
-        // 1. Download do ZIP com Headers de Navegador (para evitar bloqueio)
-        console.log(`📦 [ROBOT] Baixando AIXM de: ${AIXM_URL}`);
-        const response = await axios.get(AIXM_URL, { 
-            responseType: 'arraybuffer',
+        const client = axios.create({
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            },
+            withCredentials: true
+        });
+
+        // Passo 1: Visitar a página inicial de downloads para pegar o cookie de sessão
+        console.log('🌐 [ROBOT] Estabelecendo sessão com AISWeb...');
+        const sessionRes = await client.get('https://aisweb.decea.mil.br/?i=download');
+        const cookies = sessionRes.headers['set-cookie'];
+
+        // Passo 2: Baixar o ZIP usando os cookies da sessão
+        console.log(`📦 [ROBOT] Baixando AIXM de: ${AIXM_URL}`);
+        const response = await client.get(AIXM_URL, { 
+            responseType: 'arraybuffer',
+            headers: {
                 'Referer': 'https://aisweb.decea.mil.br/?i=download',
-                'Accept': 'application/zip, application/octet-stream, */*'
+                'Cookie': cookies ? cookies.join('; ') : ''
             }
         });
 
-        // Validação básica do arquivo
+        // Validação do arquivo
         const contentType = response.headers['content-type'] || '';
-        if (contentType.includes('text/html')) {
-            throw new Error('O DECEA retornou uma página HTML em vez do arquivo ZIP. Possível bloqueio de acesso ou link expirado.');
+        if (contentType.includes('text/html') || response.data.length < 10000) {
+            throw new Error('O DECEA recusou o download automático. O arquivo recebido é muito pequeno ou é uma página HTML.');
         }
 
         const zip = await JSZip.loadAsync(response.data);
