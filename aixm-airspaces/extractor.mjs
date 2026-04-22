@@ -147,9 +147,19 @@ async function runSync() {
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
                 const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
                 
+                // Busca profunda por gatilhos de NOTAM
+                const activationStatus = String(firstActivation?.status || '').toUpperCase();
+                const activationNoteOrig = String(firstActivation?.annotation?.Note?.text || firstActivation?.annotation?.text || '');
+                
                 if (timesheet && (timesheet.startTime === '00:00' && timesheet.endTime === '00:00')) {
                     horarioFinal = 'H24';
-                } else if (firstActivation?.status === 'ACTIVE') {
+                } else if (activationNoteOrig.toUpperCase().includes('NOTAM')) {
+                    // Traz o texto ORIGINAL e sem filtros do DECEA
+                    horarioFinal = activationNoteOrig;
+                } else if (activationStatus === 'NOTAM' || activationStatus === 'INTERMITTENT') {
+                    // Mostra o enum original do AIXM
+                    horarioFinal = `STATUS: ${activationStatus}`;
+                } else if (activationStatus === 'ACTIVE') {
                     horarioFinal = 'ATIVO';
                 }
 
@@ -163,7 +173,24 @@ async function runSync() {
                     }
                 });
 
-                const activityMap = { 'OTHER': 'OUTRAS ATIVIDADES', 'TRAINING': 'TREINAMENTO MILITAR' };
+                // SUPER DICIONÁRIO DE ATIVIDADES AIXM
+                const activityMap = { 
+                    'OTHER': 'OUTRAS ATIVIDADES', 
+                    'TRAINING': 'TREINAMENTO MILITAR',
+                    'MILOPS': 'OPERAÇÕES MILITARES',
+                    'SHOOTING': 'TIRO REAL',
+                    'AEROCLUB': 'OPERAÇÕES DE AEROCLUBE',
+                    'ACROBATICS': 'ACROBACIA AÉREA',
+                    'GLIDER': 'VOO A VELA / PLANADORES',
+                    'PARACHUTE': 'PÁRA-QUEDISMO',
+                    'UAS': 'OPERAÇÕES DE DRONE/UAS',
+                    'SPORT': 'ATIVIDADE ESPORTIVA',
+                    'TOWING': 'REBOQUE DE PLANADOR',
+                    'VIP': 'VOO VIP / PRESIDENCIAL',
+                    'NATURE': 'PRESERVAÇÃO DA NATUREZA',
+                    'DANGER': 'ÁREA DE PERIGO'
+                };
+                
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
                 if (activities.length) {
                     const actStr = activities.map(act => activityMap[act] || act).join(' / ');
