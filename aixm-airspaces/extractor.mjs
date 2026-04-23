@@ -269,8 +269,7 @@ async function runSync() {
                         full_aixm_node: area.full_aixm_node, // 100% de visibilidade
                         processed_at: new Date().toISOString(),
                         aip_source: 'AIXM 5.1 ROBOT'
-                    },
-                    updated_at: new Date().toISOString()
+                    }
                 })
                 .eq('ident', area.ident)
                 .eq('is_current', true)
