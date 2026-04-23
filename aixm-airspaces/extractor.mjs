@@ -169,7 +169,12 @@ async function runSync() {
                             inGroup--;
                         } else if (char === '\\') {
                             let j = i + 1;
-                            if (str[j] === "'") { i = j + 2; } // pula caracteres hex
+                            if (str[j] === "'") { 
+                                // Decodificador de Acentos Hexadecimais (ex: \'e7 -> ç)
+                                const hex = str.substring(j + 1, j + 3);
+                                text += String.fromCharCode(parseInt(hex, 16));
+                                i = j + 2; 
+                            }
                             else if (str[j] && str[j].match(/[a-zA-Z]/)) {
                                 while (str[j] && str[j].match(/[a-zA-Z0-9-]/)) j++;
                                 if (str[j] === ' ') j++; // pula o espaço após o comando
