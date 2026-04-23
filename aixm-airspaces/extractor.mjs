@@ -184,43 +184,59 @@ async function runSync() {
                     return text.replace(/&#[0-9]+;/g, '').replace(/\s+/g, ' ').trim();
                 };
 
-                // Busca profunda por gatilhos de NOTAM (Lidando com a estrutura LinguisticNote do DECEA)
-                const activationStatus = String(firstActivation?.status || '').toUpperCase();
-                let activationNoteOrig = '';
-                
-                const noteObj = firstActivation?.annotation?.Note;
-                if (noteObj?.translatedNote) {
-                    const tNotes = Array.isArray(noteObj.translatedNote) ? noteObj.translatedNote : [noteObj.translatedNote];
-                    for (const tn of tNotes) {
-                        const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
-                        if (lang === 'POR') {
-                            activationNoteOrig = stripRtf(tn?.LinguisticNote?.note?.['#text'] || '');
+                // Extrator Universal de Notas Poliglotas (Cão Farejador)
+                const extractAllNotes = (obj, targetLang = 'POR') => {
+                    let notes = [];
+                    const traverse = (o) => {
+                        if (!o) return;
+                        if (Array.isArray(o)) {
+                            o.forEach(traverse);
+                        } else if (typeof o === 'object') {
+                            if (o.translatedNote) {
+                                const tNotes = Array.isArray(o.translatedNote) ? o.translatedNote : [o.translatedNote];
+                                tNotes.forEach(tn => {
+                                    const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
+                                    if (lang === targetLang) {
+                                        const text = stripRtf(tn?.LinguisticNote?.note?.['#text'] || '');
+                                        if (text && !notes.includes(text)) notes.push(text);
+                                    }
+                                });
+                            } else if (o.Note && o.Note.text && !o.Note.translatedNote) {
+                                const text = stripRtf(o.Note.text);
+                                if (text && !notes.includes(text)) notes.push(text);
+                            } else if (o.Annotation && o.Annotation.text) {
+                                const text = stripRtf(o.Annotation.text);
+                                if (text && !notes.includes(text)) notes.push(text);
+                            } else if (o.text && typeof o.text === 'string' && !o.translatedNote) {
+                                const text = stripRtf(o.text);
+                                if (text && !notes.includes(text)) notes.push(text);
+                            }
+                            Object.values(o).forEach(traverse);
                         }
-                    }
-                }
-                if (!activationNoteOrig) activationNoteOrig = stripRtf(noteObj?.text || firstActivation?.annotation?.text || '');
+                    };
+                    traverse(obj);
+                    return notes;
+                };
+
+                // Lógica de Ativação Combinada
+                const activationStatus = String(firstActivation?.status || '').toUpperCase();
+                const activationNotes = extractAllNotes(firstActivation, 'POR');
+                const activationNoteStr = activationNotes.join(' / ');
                 
                 if (timesheet && (timesheet.startTime === '00:00' && timesheet.endTime === '00:00')) {
                     horarioFinal = 'H24';
-                } else if (activationNoteOrig.toUpperCase().includes('NOTAM')) {
-                    // Traz o texto ORIGINAL e limpo do RTF
-                    horarioFinal = activationNoteOrig;
+                    if (activationNoteStr) horarioFinal += ` (${activationNoteStr})`;
+                } else if (activationNoteStr) {
+                    horarioFinal = activationNoteStr;
                 } else if (activationStatus === 'NOTAM' || activationStatus === 'INTERMITTENT') {
-                    // Mostra o enum original do AIXM
                     horarioFinal = `STATUS: ${activationStatus}`;
                 } else if (activationStatus === 'ACTIVE') {
                     horarioFinal = 'ATIVO';
                 }
 
-                // Observações Completas
-                let observacoesFinal = '';
-                const annotations = Array.isArray(timeSlice.annotation) ? timeSlice.annotation : [timeSlice.annotation];
-                annotations.forEach(ann => {
-                    const noteText = ann?.Annotation?.text || ann?.Note?.text || ann?.text || '';
-                    if (noteText && !observacoesFinal.includes(noteText)) {
-                        observacoesFinal += (observacoesFinal ? ' / ' : '') + noteText;
-                    }
-                });
+                // Observações Gerais (Busca no resto da área inteira)
+                const allNotes = extractAllNotes(timeSlice, 'POR');
+                let observacoesFinal = allNotes.filter(n => !activationNotes.includes(n)).join(' / ');
 
                 // SUPER DICIONÁRIO DE ATIVIDADES AIXM
                 const activityMap = { 
