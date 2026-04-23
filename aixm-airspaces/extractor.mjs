@@ -184,8 +184,8 @@ async function runSync() {
                     return text.replace(/&#[0-9]+;/g, '').replace(/\s+/g, ' ').trim();
                 };
 
-                // Extrator Universal de Notas Poliglotas (Cão Farejador)
-                const extractAllNotes = (obj, targetLang = 'POR') => {
+                // Extrator Universal de Notas Poliglotas (Cão Farejador com Inteligência Semântica)
+                const extractAllNotes = (obj) => {
                     let notes = [];
                     const traverse = (o) => {
                         if (!o) return;
@@ -194,13 +194,36 @@ async function runSync() {
                         } else if (typeof o === 'object') {
                             if (o.translatedNote) {
                                 const tNotes = Array.isArray(o.translatedNote) ? o.translatedNote : [o.translatedNote];
+                                let bestText = null;
+                                let maxPorScore = -999;
+
                                 tNotes.forEach(tn => {
+                                    const rawText = tn?.LinguisticNote?.note?.['#text'] || '';
+                                    const text = stripRtf(rawText);
+                                    if (!text) return;
+                                    
                                     const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
-                                    if (lang === targetLang) {
-                                        const text = stripRtf(tn?.LinguisticNote?.note?.['#text'] || '');
-                                        if (text && !notes.includes(text)) notes.push(text);
+                                    const lowerText = text.toLowerCase();
+                                    let score = 0;
+                                    
+                                    // Bônus de "Brasilidade" (Palavras em Português)
+                                    const porWords = ['em', 'com', 'sob', 'para', 'de', 'da', 'do', 'mediante', 'coordenação', 'coordenacao', 'ativado', 'ativada', 'pelo', 'pela', 'aos', 'às', 'até', 'sujeito', 'voos', 'rádio', 'livre', 'balões', 'quente'];
+                                    porWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score += 2; });
+                                    
+                                    // Penalidade (Palavras em Inglês)
+                                    const engWords = ['under', 'with', 'and', 'by', 'subject', 'activated', 'to', 'from', 'for', 'coordination', 'coordenation', 'flights', 'free', 'hot', 'balloons'];
+                                    engWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score -= 2; });
+
+                                    // Voto de confiança na etiqueta do DECEA (em caso de empate, como textos curtos "HJ")
+                                    if (lang === 'POR') score += 1;
+
+                                    if (score > maxPorScore) {
+                                        maxPorScore = score;
+                                        bestText = text;
                                     }
                                 });
+
+                                if (bestText && !notes.includes(bestText)) notes.push(bestText);
                             } else if (o.Note && o.Note.text && !o.Note.translatedNote) {
                                 const text = stripRtf(o.Note.text);
                                 if (text && !notes.includes(text)) notes.push(text);
@@ -220,7 +243,7 @@ async function runSync() {
 
                 // Lógica de Ativação Combinada
                 const activationStatus = String(firstActivation?.status || '').toUpperCase();
-                const activationNotes = extractAllNotes(firstActivation, 'POR');
+                const activationNotes = extractAllNotes(firstActivation);
                 const activationNoteStr = activationNotes.join(' / ');
                 
                 if (timesheet && (timesheet.startTime === '00:00' && timesheet.endTime === '00:00')) {
