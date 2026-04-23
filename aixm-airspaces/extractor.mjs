@@ -246,8 +246,11 @@ async function runSync() {
         // Para evitar destruir polígonos e dados do GeoServer, vamos apenas atualizar.
         // Como o Supabase upsert sobrescreve tudo, vamos fazer um loop controlado.
         
+        let countUpdated = 0;
+        let lastError = null;
+
         for (const area of enrichedData) {
-            const { error: updateError } = await supabase
+            const { data, error: updateError } = await supabase
                 .from('eac_snapshots')
                 .update({
                     efetivacao: effectiveDate,
@@ -270,15 +273,22 @@ async function runSync() {
                     updated_at: new Date().toISOString()
                 })
                 .eq('ident', area.ident)
-                .eq('is_current', true);
+                .eq('is_current', true)
+                .select();
 
             if (updateError) {
-                // Se não existir, poderíamos inserir, mas aqui queremos apenas auditar o que o GeoServer já tem.
-                // Se for uma área nova do AIXM, o dashboard cuidará disso depois.
+                lastError = updateError;
+                console.error(`❌ Erro ao atualizar ${area.ident}:`, updateError.message || updateError);
+            } else if (data && data.length > 0) {
+                countUpdated++;
             }
         }
 
-        console.log('✅ [ROBOT] Sincronização inteligente concluída!');
+        console.log(`✅ [ROBOT] Sincronização inteligente concluída! Atualizadas: ${countUpdated} de ${enrichedData.length}`);
+        if (countUpdated === 0 && enrichedData.length > 0) {
+            console.warn(`⚠️ ALERTA: Zero áreas atualizadas. O 'ident' pode não estar batendo ou as áreas não estão 'is_current'.`);
+            if (lastError) console.error(`Último erro capturado:`, lastError);
+        }
 
     } catch (error) {
         console.error('❌ [ROBOT] Erro fatal no pipeline:', error.message);
