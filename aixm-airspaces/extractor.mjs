@@ -211,6 +211,10 @@ async function runSync() {
                     return val !== undefined ? parseFloat(val) : null;
                 };
 
+                // Cria uma cópia segura sem as coordenadas gigantes para o Supabase não rejeitar
+                const safeTimeSlice = JSON.parse(JSON.stringify(timeSlice));
+                if (safeTimeSlice.geometryComponent) delete safeTimeSlice.geometryComponent;
+
                 enrichedData.push({
                     ident: String(timeSlice.designator || 'UNKN'),
                     nome: timeSlice.name || null,
@@ -223,7 +227,7 @@ async function runSync() {
                     ref_upper: mapRef(upperRef, rawUpper?.['@_uom']),
                     horario: horarioFinal,
                     observacoes: observacoesFinal || 'OUTRAS ATIVIDADES / MOTIVOS',
-                    full_aixm_node: timeSlice // O "Pulo do Gato": Captura TUDO
+                    full_aixm_node: safeTimeSlice // 100% de visibilidade de metadata (sem lag)
                 });
             }
         });
