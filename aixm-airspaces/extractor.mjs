@@ -146,15 +146,38 @@ async function runSync() {
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
                 const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
-                
-                // Busca profunda por gatilhos de NOTAM
+                // Limpador de RTF nativo para lidar com as sujeiras do DECEA (ex: \fs17 A\fs16 tivado)
+                const stripRtf = (str) => {
+                    if (!str || typeof str !== 'string') return '';
+                    if (!str.includes('{\\rtf1')) return str;
+                    return str
+                        .replace(/\\[a-z]+[0-9]* ?/gi, '') // Remove \fs16, \par, \f0, etc.
+                        .replace(/\\[{}*\'\-~|]/g, '') // Remove caracteres de controle escapados
+                        .replace(/[{}]/g, '') // Remove chaves remanescentes
+                        .replace(/&#[0-9]+;/g, '') // Remove entidades como &#13;
+                        .trim();
+                };
+
+                // Busca profunda por gatilhos de NOTAM (Lidando com a estrutura LinguisticNote do DECEA)
                 const activationStatus = String(firstActivation?.status || '').toUpperCase();
-                const activationNoteOrig = String(firstActivation?.annotation?.Note?.text || firstActivation?.annotation?.text || '');
+                let activationNoteOrig = '';
+                
+                const noteObj = firstActivation?.annotation?.Note;
+                if (noteObj?.translatedNote) {
+                    const tNotes = Array.isArray(noteObj.translatedNote) ? noteObj.translatedNote : [noteObj.translatedNote];
+                    for (const tn of tNotes) {
+                        const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
+                        if (lang === 'POR') {
+                            activationNoteOrig = stripRtf(tn?.LinguisticNote?.note?.['#text'] || '');
+                        }
+                    }
+                }
+                if (!activationNoteOrig) activationNoteOrig = stripRtf(noteObj?.text || firstActivation?.annotation?.text || '');
                 
                 if (timesheet && (timesheet.startTime === '00:00' && timesheet.endTime === '00:00')) {
                     horarioFinal = 'H24';
                 } else if (activationNoteOrig.toUpperCase().includes('NOTAM')) {
-                    // Traz o texto ORIGINAL e sem filtros do DECEA
+                    // Traz o texto ORIGINAL e limpo do RTF
                     horarioFinal = activationNoteOrig;
                 } else if (activationStatus === 'NOTAM' || activationStatus === 'INTERMITTENT') {
                     // Mostra o enum original do AIXM
