@@ -387,6 +387,54 @@ async function runSync() {
             if (lastError) console.error(`Último erro capturado:`, lastError);
         }
 
+        // ==========================================
+        // ROTA 1: MOTOR DE FALLBACK (HEURÍSTICA)
+        // Para áreas que o DECEA esqueceu no AIXM
+        // ==========================================
+        console.log(`\n🔍 [ROBOT] Iniciando Motor de Fallback para áreas Órfãs (PENDENTE)...`);
+        const { data: pendingAreas, error: pendingError } = await supabase
+            .from('eac_snapshots')
+            .select('*')
+            .eq('is_current', true)
+            .is('raw_properties->>aip_source', null);
+
+        if (pendingError) {
+            console.error(`❌ Erro ao buscar áreas pendentes:`, pendingError);
+        } else if (pendingAreas && pendingAreas.length > 0) {
+            console.log(`💡 Encontradas ${pendingAreas.length} áreas abandonadas pelo DECEA. Acionando Dedução Semântica...`);
+            let countFallback = 0;
+            
+            for (const orphan of pendingAreas) {
+                const nome = String(orphan.raw_properties?.nome || '').toUpperCase();
+                let obs = null;
+                let hor = 'H24';
+                let applied = false;
+
+                // Fidelidade estrita: Não adivinhamos dados. Apenas marcamos como ausente no AIXM
+                const fallbackProps = {
+                    ...orphan.raw_properties,
+                    observacoes: 'DADOS AUSENTES NO AIXM',
+                    horario: 'NÃO INFORMADO',
+                    processed_at: new Date().toISOString(),
+                    aip_source: 'WFS GEOJSON' 
+                };
+
+                const { error: fallbackError } = await supabase
+                    .from('eac_snapshots')
+                    .update({ raw_properties: fallbackProps })
+                    .eq('id', orphan.id);
+
+                if (fallbackError) {
+                    console.error(`❌ Erro no fallback do ${orphan.ident}:`, fallbackError);
+                } else {
+                    countFallback++;
+                }
+            }
+            console.log(`🤖 [ROBOT] Processamento concluído. Áreas marcadas como DADOS AUSENTES: ${countFallback} de ${pendingAreas.length}`);
+        } else {
+            console.log(`✨ Nenhuma área órfã encontrada. A sincronização está 100% íntegra.`);
+        }
+
     } catch (error) {
         console.error('❌ [ROBOT] Erro fatal no pipeline:', error.message);
         process.exit(1);
