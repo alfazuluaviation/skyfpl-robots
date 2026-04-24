@@ -281,7 +281,12 @@ async function runSync() {
                     'TOWING': 'REBOQUE DE PLANADOR',
                     'VIP': 'VOO VIP / PRESIDENCIAL',
                     'NATURE': 'PRESERVAÇÃO DA NATUREZA',
-                    'DANGER': 'ÁREA DE PERIGO'
+                    'DANGER': 'ÁREA DE PERIGO',
+                    'TECHNICAL': 'ATIVIDADE TÉCNICA',
+                    'PARAGLIDER': 'PARAPENTE / VOO LIVRE',
+                    'HANGGLIDER': 'ASA DELTA / VOO LIVRE',
+                    'ULTRALIGHT': 'ULTRALEVES',
+                    'BALLOON': 'BALONISMO / BALÕES'
                 };
                 
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
