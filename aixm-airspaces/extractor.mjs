@@ -290,8 +290,11 @@ async function runSync() {
                     'SHOOTING': 'TIRO REAL',
                     'AIR_GUN': 'ARTILHARIA AÉREA',
                     'AEROCLUB': 'OPERAÇÕES DE AEROCLUBE',
-                    'ACROBATICS': 'ACROBACIA AÉREA',
+                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
+                    'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
+                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS',
                     'GLIDER': 'PLANADOR / VOO A VELA',
+                    'GLIDING': 'PLANADOR / VOO A VELA',
                     'PARACHUTE': 'PÁRA-QUEDISMO',
                     'UAS': 'DRONE / UAS',
                     'SPORT': 'ATIVIDADE ESPORTIVA',
@@ -307,7 +310,8 @@ async function runSync() {
                     'FIREWORK': 'FOGOS DE ARTIFÍCIO',
                     'FIRE_FIGHTING': 'COMBATE A INCÊNDIO',
                     'FIRE_EXERCISE': 'EXERCÍCIO DE COMBATE A INCÊNDIO',
-                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS'
+                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS',
+                    'ADIZ': 'ZONA DE IDENTIFICAÇÃO DE DEFESA AÉREA'
                 };
                 
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
