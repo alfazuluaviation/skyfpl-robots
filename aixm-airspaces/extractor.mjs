@@ -282,15 +282,16 @@ async function runSync() {
                     .replace(/^\/|\/$/g, '')
                     .trim();
 
-                // SUPER DICIONÁRIO DE ATIVIDADES AIXM (V42.60)
+                // SUPER DICIONÁRIO DE ATIVIDADES AIXM (V42.70)
                 const activityMap = { 
                     'OTHER': 'OUTRAS ATIVIDADES', 
                     'TRAINING': 'TREINAMENTO', 
                     'MILOPS': 'OPERAÇÕES MILITARES',
                     'SHOOTING': 'TIRO REAL',
+                    'AIR_GUN': 'ARTILHARIA AÉREA',
                     'AEROCLUB': 'OPERAÇÕES DE AEROCLUBE',
                     'ACROBATICS': 'ACROBACIA AÉREA',
-                    'GLIDER': 'PLANADOR / GLIDING',
+                    'GLIDER': 'PLANADOR / VOO A VELA',
                     'PARACHUTE': 'PÁRA-QUEDISMO',
                     'UAS': 'DRONE / UAS',
                     'SPORT': 'ATIVIDADE ESPORTIVA',
@@ -299,10 +300,14 @@ async function runSync() {
                     'NATURE': 'PRESERVAÇÃO DA NATUREZA',
                     'DANGER': 'ÁREA DE PERIGO',
                     'TECHNICAL': 'ATIVIDADE TÉCNICA',
-                    'PARAGLIDER': 'PARAPENTE / VOO LIVRE',
-                    'HANGGLIDER': 'ASA DELTA / VOO LIVRE',
+                    'PARAGLIDER': 'PARAPENTE',
+                    'HANGGLIDER': 'ASA-DELTA',
                     'ULTRALIGHT': 'ULTRALEVES',
-                    'BALLOON': 'BALONISMO / BALÕES'
+                    'BALLOON': 'BALONISMO',
+                    'FIREWORK': 'FOGOS DE ARTIFÍCIO',
+                    'FIRE_FIGHTING': 'COMBATE A INCÊNDIO',
+                    'FIRE_EXERCISE': 'EXERCÍCIO DE COMBATE A INCÊNDIO',
+                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS'
                 };
                 
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
