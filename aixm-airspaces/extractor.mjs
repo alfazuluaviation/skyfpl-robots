@@ -381,7 +381,7 @@ async function runSync() {
                 .from('eac_snapshots')
                 .update({
                     efetivacao: effectiveDate,
-                    is_current: true,
+                    is_current: true, 
                     raw_properties: {
                         ident: area.ident,
                         nome: area.nome,
@@ -400,6 +400,8 @@ async function runSync() {
                     }
                 })
                 .eq('ident', area.ident)
+                .eq('tipo', area.tipo) // 🛡️ PROTEÇÃO: Evita duplicar ou sobrescrever tipos errados
+                .select();
 
             if (updateError) {
                 lastError = updateError;
