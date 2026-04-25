@@ -246,31 +246,21 @@ async function runSync() {
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
                 const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
-                // ==========================================
-                // MOTOR DE INTELIGÊNCIA V42.90 (RESTAURADO)
-                // ==========================================
-                const dayMap = {
-                    'MON': 'Segunda', 'TUE': 'Terça', 'WED': 'Quarta', 'THU': 'Quinta', 'FRI': 'Sexta',
-                    'SAT': 'Sábado', 'SUN': 'Domingo', 'HOL': 'Feriados', 'MON-FRI': 'Segunda a Sexta',
-                    'SAT-SUN': 'Sábados e Domingos', 'EXC': 'Exceto', 'ANY': 'Qualquer dia'
-                };
-
+                
                 let horarioFinal = 'CONSULTAR NOTAM';
                 if (timesheet) {
-                    // 1. Extração de Dias
-                    const days = Array.isArray(timesheet.day) ? timesheet.day : [timesheet.day];
-                    const translatedDays = days.filter(Boolean).map(d => dayMap[d] || d).join(', ');
-                    
-                    // 2. Extração de Eventos (SR/SS) e Horas
-                    const start = timesheet.startTime || timesheet.startEvent || '';
-                    const end = timesheet.endTime || timesheet.endEvent || '';
-                    
-                    let timeStr = `${start}-${end} UTC`;
-                    if (start === 'SR' && end === 'SS') timeStr = 'Do nascer ao pôr do sol';
-                    else if (start === 'SS' && end === 'SR') timeStr = 'Do pôr do sol ao nascer';
-                    else if (start === '00:00' && end === '00:00') timeStr = 'H24';
-                    
-                    horarioFinal = translatedDays ? `${translatedDays}, ${timeStr}` : timeStr;
+                    const start = timesheet.startEvent || timesheet.startTime;
+                    const end = timesheet.endEvent || timesheet.endTime;
+
+                    if (start === 'SR' && end === 'SS') {
+                        horarioFinal = 'Do nascer ao pôr do sol';
+                    } else if (start === 'SS' && end === 'SR') {
+                        horarioFinal = 'Do pôr do sol ao nascer';
+                    } else if (start === '00:00' && end === '00:00') {
+                        horarioFinal = 'H24';
+                    } else if (start && end) {
+                        horarioFinal = `${start} - ${end} UTC`;
+                    }
                 }
 
                 // 3. Notas de Ativação (Enriquecimento)
@@ -307,9 +297,6 @@ async function runSync() {
                     if (!observacoesFinal.includes(actStr)) observacoesFinal += (observacoesFinal ? ' / ' : '') + actStr;
                 }
 
-                // Fallback de Segurança
-                if (!observacoesFinal) observacoesFinal = 'OUTRAS ATIVIDADES / MOTIVOS';
-
                 const mapRef = (ref, uom) => {
                     const r = String(ref?.['#text'] || ref?.val || ref || '').toUpperCase();
                     if (r === 'SFC') return 'GND';
@@ -337,7 +324,7 @@ async function runSync() {
                     ref_lower: mapRef(lowerRef, rawLower?.['@_uom']),
                     ref_upper: mapRef(upperRef, rawUpper?.['@_uom']),
                     horario: horarioFinal,
-                    observacoes: observacoesFinal,
+                    observacoes: observacoesFinal || 'OUTRAS ATIVIDADES',
                     full_aixm_node: safeTimeSlice
                 });
             }
@@ -381,7 +368,7 @@ async function runSync() {
 
             if (!updateError) countUpdated++;
         }
-        console.log(`✅ [ROBOT] Sincronização inteligente concluída! Atualizadas: ${countUpdated} de ${enrichedData.length}`);
+        console.log(`✅ [ROBOT] Sincronização concluída! Atualizadas: ${countUpdated} de ${enrichedData.length}`);
 
         // ==========================================
         // ROTA 1: MOTOR DE FALLBACK (HEURÍSTICA)
