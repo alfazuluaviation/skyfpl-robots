@@ -130,10 +130,12 @@ async function runSync() {
                 ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation)
             )?.AirspaceTimeSlice || timeSlices[0]?.AirspaceTimeSlice;
             
-        // Máquina de Estados para limpar RTF com perfeição
+        // Máquina de Estados para limpar RTF com perfeição (V42.60)
         const stripRtf = (str) => {
             if (!str || typeof str !== 'string') return '';
-            if (!str.includes('{\\rtf1')) return str.trim();
+            // Remove bullets e caracteres de lista comuns no DECEA
+            let clean = str.replace(/·/g, '').trim();
+            if (!clean.includes('{\\rtf1')) return clean;
             
             let text = '';
             let inGroup = 0;
@@ -152,23 +154,28 @@ async function runSync() {
                 } else if (char === '\\') {
                     let j = i + 1;
                     if (str[j] === "'") { 
-                        // Decodificador de Acentos Hexadecimais (ex: \'e7 -> ç)
                         const hex = str.substring(j + 1, j + 3);
                         text += String.fromCharCode(parseInt(hex, 16));
                         i = j + 2; 
                     }
                     else if (str[j] && str[j].match(/[a-zA-Z]/)) {
                         while (str[j] && str[j].match(/[a-zA-Z0-9-]/)) j++;
-                        if (str[j] === ' ') j++; // pula o espaço após o comando
+                        if (str[j] === ' ') j++; 
                         i = j - 1;
-                    } else { i = j; } // pula caracteres escapados \{ \} \\
+                    } else { i = j; } 
                 } else {
                     if (skipGroup === 0 && inGroup > 0 && char !== '\r' && char !== '\n') {
                         text += char;
                     }
                 }
             }
-            return text.replace(/&#[0-9]+;/g, '').replace(/\s+/g, ' ').trim();
+            return text.replace(/&#[0-9]+;/g, '').replace(/·/g, '').replace(/\s+/g, ' ').trim();
+        };
+
+        const getLimit = (node) => {
+            if (!node) return null;
+            const val = node.val || node['#text'] || node;
+            return val !== undefined ? parseFloat(val) : null;
         };
 
         // Extrator Universal de Notas Poliglotas (Cão Farejador com Inteligência Semântica)
@@ -187,21 +194,18 @@ async function runSync() {
                         tNotes.forEach(tn => {
                             const rawText = tn?.LinguisticNote?.note?.['#text'] || '';
                             const text = stripRtf(rawText);
-                            if (!text) return;
+                            if (!text || text.length < 2) return;
                             
                             const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
                             const lowerText = text.toLowerCase();
                             let score = 0;
                             
-                            // Bônus de "Brasilidade" (Palavras em Português)
                             const porWords = ['em', 'com', 'sob', 'para', 'de', 'da', 'do', 'mediante', 'coordenação', 'coordenacao', 'ativado', 'ativada', 'pelo', 'pela', 'aos', 'às', 'até', 'sujeito', 'voos', 'rádio', 'livre', 'balões', 'quente'];
                             porWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score += 2; });
                             
-                            // Penalidade (Palavras em Inglês)
                             const engWords = ['under', 'with', 'and', 'by', 'subject', 'activated', 'to', 'from', 'for', 'coordination', 'coordenation', 'flights', 'free', 'hot', 'balloons'];
                             engWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score -= 2; });
 
-                            // Voto de confiança na etiqueta do DECEA (em caso de empate, como textos curtos "HJ")
                             if (lang === 'POR') score += 1;
 
                             if (score > maxPorScore) {
@@ -213,13 +217,13 @@ async function runSync() {
                         if (bestText && !notes.includes(bestText)) notes.push(bestText);
                     } else if (o.Note && o.Note.text && !o.Note.translatedNote) {
                         const text = stripRtf(o.Note.text);
-                        if (text && !notes.includes(text)) notes.push(text);
+                        if (text && text.length >= 2 && !notes.includes(text)) notes.push(text);
                     } else if (o.Annotation && o.Annotation.text) {
                         const text = stripRtf(o.Annotation.text);
-                        if (text && !notes.includes(text)) notes.push(text);
+                        if (text && text.length >= 2 && !notes.includes(text)) notes.push(text);
                     } else if (o.text && typeof o.text === 'string' && !o.translatedNote) {
                         const text = stripRtf(o.text);
-                        if (text && !notes.includes(text)) notes.push(text);
+                        if (text && text.length >= 2 && !notes.includes(text)) notes.push(text);
                     }
                     Object.values(o).forEach(traverse);
                 }
@@ -230,7 +234,6 @@ async function runSync() {
 
             if (timeSlice && ['R', 'P', 'D'].includes(timeSlice.type)) {
                 
-                // Extração profunda de limites (AIXM 5.1 pode variar a estrutura)
                 const geometry = timeSlice.geometryComponent?.AirspaceGeometryComponent || timeSlice.geometryComponent;
                 const volume = geometry?.theAirspaceVolume?.AirspaceVolume || geometry?.theAirspaceVolume;
                 
@@ -239,14 +242,13 @@ async function runSync() {
                 const upperRef = volume?.upperLimitReference || timeSlice.upperLimitReference || '';
                 const lowerRef = volume?.lowerLimitReference || timeSlice.lowerLimitReference || '';
 
-                // Horário / Ativação — INTELIGÊNCIA AERONÁUTICA (V42.55)
+                // Horário / Ativação
                 let horarioFinal = 'CONSULTAR NOTAM';
                 
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
                 const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
                 
-                // Mapeamento de Eventos Astronômicos (SR/SS)
                 if (timesheet) {
                     const start = timesheet.startEvent;
                     const end = timesheet.endEvent;
@@ -262,9 +264,8 @@ async function runSync() {
                     }
                 }
 
-                // Fallback para Notas se o horário não for estruturado
                 const activationNotes = extractAllNotes(firstActivation);
-                const activationNoteStr = activationNotes.join(' / ');
+                const activationNoteStr = activationNotes.filter(n => n.length > 2).join(' / ');
                 
                 if (horarioFinal === 'CONSULTAR NOTAM' && activationNoteStr) {
                     horarioFinal = activationNoteStr;
@@ -272,22 +273,26 @@ async function runSync() {
                     horarioFinal += ` (${activationNoteStr})`;
                 }
 
-
-                // Observações Gerais (Busca no resto da área inteira)
+                // Observações Gerais
                 const allNotes = extractAllNotes(timeSlice, 'POR');
-                let observacoesFinal = allNotes.filter(n => !activationNotes.includes(n)).join(' / ');
+                let observacoesFinal = allNotes
+                    .filter(n => n.length > 2 && !activationNotes.includes(n))
+                    .join(' / ')
+                    .replace(/\/ \//g, '/')
+                    .replace(/^\/|\/$/g, '')
+                    .trim();
 
-                // SUPER DICIONÁRIO DE ATIVIDADES AIXM
+                // SUPER DICIONÁRIO DE ATIVIDADES AIXM (V42.60)
                 const activityMap = { 
                     'OTHER': 'OUTRAS ATIVIDADES', 
-                    'TRAINING': 'TREINAMENTO MILITAR',
+                    'TRAINING': 'TREINAMENTO', 
                     'MILOPS': 'OPERAÇÕES MILITARES',
                     'SHOOTING': 'TIRO REAL',
                     'AEROCLUB': 'OPERAÇÕES DE AEROCLUBE',
                     'ACROBATICS': 'ACROBACIA AÉREA',
-                    'GLIDER': 'VOO A VELA / PLANADORES',
+                    'GLIDER': 'PLANADOR / GLIDING',
                     'PARACHUTE': 'PÁRA-QUEDISMO',
-                    'UAS': 'OPERAÇÕES DE DRONE/UAS',
+                    'UAS': 'DRONE / UAS',
                     'SPORT': 'ATIVIDADE ESPORTIVA',
                     'TOWING': 'REBOQUE DE PLANADOR',
                     'VIP': 'VOO VIP / PRESIDENCIAL',
