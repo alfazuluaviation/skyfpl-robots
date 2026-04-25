@@ -243,25 +243,29 @@ async function runSync() {
                 const lowerRef = volume?.lowerLimitReference || timeSlice.lowerLimitReference || '';
 
                 // Horário / Ativação
-                let horarioFinal = 'CONSULTAR NOTAM';
-                
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
                 const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
-                
-                if (timesheet) {
-                    const start = timesheet.startEvent;
-                    const end = timesheet.endEvent;
 
-                    if (start === 'SR' && end === 'SS') {
-                        horarioFinal = 'Do nascer ao pôr do sol';
-                    } else if (start === 'SS' && end === 'SR') {
-                        horarioFinal = 'Do pôr do sol ao nascer';
-                    } else if (timesheet.startTime === '00:00' && timesheet.endTime === '00:00') {
-                        horarioFinal = 'H24';
-                    } else if (timesheet.startTime && timesheet.endTime) {
-                        horarioFinal = `${timesheet.startTime} - ${timesheet.endTime} UTC`;
-                    }
+                // Tradução de Dias e Horários Aeronáuticos (V42.85)
+                const dayMap = {
+                    'MON': 'Segunda', 'TUE': 'Terça', 'WED': 'Quarta', 'THU': 'Quinta', 'FRI': 'Sexta',
+                    'SAT': 'Sábado', 'SUN': 'Domingo', 'HOL': 'Feriados', 'MON-FRI': 'Segunda a Sexta',
+                    'SAT-SUN': 'Sábados e Domingos', 'EXC': 'Exceto', 'ANY': 'Qualquer dia'
+                };
+
+                let horarioFinal = 'CONSULTAR NOTAM';
+                if (timesheet) {
+                    const days = Array.isArray(timesheet.day) ? timesheet.day : [timesheet.day];
+                    const translatedDays = days.filter(Boolean).map(d => dayMap[d] || d).join(', ');
+                    
+                    const start = timesheet.startTime || '';
+                    const end = timesheet.endTime || '';
+                    
+                    let timeStr = (start === 'SR' && end === 'SS') ? 'Do nascer ao pôr do sol' : `${start} - ${end} UTC`;
+                    if (start === '00:00' && end === '00:00') timeStr = 'H24';
+                    
+                    horarioFinal = translatedDays ? `${translatedDays}, ${timeStr}` : timeStr;
                 }
 
                 const activationNotes = extractAllNotes(firstActivation);
@@ -377,6 +381,7 @@ async function runSync() {
                 .from('eac_snapshots')
                 .update({
                     efetivacao: effectiveDate,
+                    is_current: true,
                     raw_properties: {
                         ident: area.ident,
                         nome: area.nome,
@@ -389,14 +394,12 @@ async function runSync() {
                         ref_upper: area.ref_upper,
                         horario: area.horario,
                         observacoes: area.observacoes,
-                        full_aixm_node: area.full_aixm_node, // 100% de visibilidade
+                        full_aixm_node: area.full_aixm_node,
                         processed_at: new Date().toISOString(),
                         aip_source: 'AIXM 5.1 ROBOT'
                     }
                 })
                 .eq('ident', area.ident)
-                .eq('is_current', true)
-                .select();
 
             if (updateError) {
                 lastError = updateError;
