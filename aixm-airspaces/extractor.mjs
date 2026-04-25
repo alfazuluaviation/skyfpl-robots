@@ -129,6 +129,104 @@ async function runSync() {
             const timeSlice = timeSlices.find(ts => 
                 ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation)
             )?.AirspaceTimeSlice || timeSlices[0]?.AirspaceTimeSlice;
+            
+        // Máquina de Estados para limpar RTF com perfeição
+        const stripRtf = (str) => {
+            if (!str || typeof str !== 'string') return '';
+            if (!str.includes('{\\rtf1')) return str.trim();
+            
+            let text = '';
+            let inGroup = 0;
+            let skipGroup = 0;
+            
+            for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                if (char === '{') {
+                    inGroup++;
+                    if (str.substring(i, i + 12).match(/\{\\(\*|fonttbl|colortbl|stylesheet|info)/)) {
+                        if (skipGroup === 0) skipGroup = inGroup;
+                    }
+                } else if (char === '}') {
+                    if (skipGroup === inGroup) skipGroup = 0;
+                    inGroup--;
+                } else if (char === '\\') {
+                    let j = i + 1;
+                    if (str[j] === "'") { 
+                        // Decodificador de Acentos Hexadecimais (ex: \'e7 -> ç)
+                        const hex = str.substring(j + 1, j + 3);
+                        text += String.fromCharCode(parseInt(hex, 16));
+                        i = j + 2; 
+                    }
+                    else if (str[j] && str[j].match(/[a-zA-Z]/)) {
+                        while (str[j] && str[j].match(/[a-zA-Z0-9-]/)) j++;
+                        if (str[j] === ' ') j++; // pula o espaço após o comando
+                        i = j - 1;
+                    } else { i = j; } // pula caracteres escapados \{ \} \\
+                } else {
+                    if (skipGroup === 0 && inGroup > 0 && char !== '\r' && char !== '\n') {
+                        text += char;
+                    }
+                }
+            }
+            return text.replace(/&#[0-9]+;/g, '').replace(/\s+/g, ' ').trim();
+        };
+
+        // Extrator Universal de Notas Poliglotas (Cão Farejador com Inteligência Semântica)
+        const extractAllNotes = (obj) => {
+            let notes = [];
+            const traverse = (o) => {
+                if (!o) return;
+                if (Array.isArray(o)) {
+                    o.forEach(traverse);
+                } else if (typeof o === 'object') {
+                    if (o.translatedNote) {
+                        const tNotes = Array.isArray(o.translatedNote) ? o.translatedNote : [o.translatedNote];
+                        let bestText = null;
+                        let maxPorScore = -999;
+
+                        tNotes.forEach(tn => {
+                            const rawText = tn?.LinguisticNote?.note?.['#text'] || '';
+                            const text = stripRtf(rawText);
+                            if (!text) return;
+                            
+                            const lang = String(tn?.LinguisticNote?.note?.['@_lang'] || '').toUpperCase();
+                            const lowerText = text.toLowerCase();
+                            let score = 0;
+                            
+                            // Bônus de "Brasilidade" (Palavras em Português)
+                            const porWords = ['em', 'com', 'sob', 'para', 'de', 'da', 'do', 'mediante', 'coordenação', 'coordenacao', 'ativado', 'ativada', 'pelo', 'pela', 'aos', 'às', 'até', 'sujeito', 'voos', 'rádio', 'livre', 'balões', 'quente'];
+                            porWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score += 2; });
+                            
+                            // Penalidade (Palavras em Inglês)
+                            const engWords = ['under', 'with', 'and', 'by', 'subject', 'activated', 'to', 'from', 'for', 'coordination', 'coordenation', 'flights', 'free', 'hot', 'balloons'];
+                            engWords.forEach(w => { if (new RegExp(`\\b${w}\\b`).test(lowerText)) score -= 2; });
+
+                            // Voto de confiança na etiqueta do DECEA (em caso de empate, como textos curtos "HJ")
+                            if (lang === 'POR') score += 1;
+
+                            if (score > maxPorScore) {
+                                maxPorScore = score;
+                                bestText = text;
+                            }
+                        });
+
+                        if (bestText && !notes.includes(bestText)) notes.push(bestText);
+                    } else if (o.Note && o.Note.text && !o.Note.translatedNote) {
+                        const text = stripRtf(o.Note.text);
+                        if (text && !notes.includes(text)) notes.push(text);
+                    } else if (o.Annotation && o.Annotation.text) {
+                        const text = stripRtf(o.Annotation.text);
+                        if (text && !notes.includes(text)) notes.push(text);
+                    } else if (o.text && typeof o.text === 'string' && !o.translatedNote) {
+                        const text = stripRtf(o.text);
+                        if (text && !notes.includes(text)) notes.push(text);
+                    }
+                    Object.values(o).forEach(traverse);
+                }
+            };
+            traverse(obj);
+            return notes;
+        };
 
             if (timeSlice && ['R', 'P', 'D'].includes(timeSlice.type)) {
                 
