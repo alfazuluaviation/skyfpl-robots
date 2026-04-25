@@ -341,12 +341,21 @@ async function runSync() {
 
         let countUpdated = 0;
         for (const area of enrichedData) {
+            // 🛡️ AVIONICS MASTER: Recuperar o objeto original para não apagar a GEOMETRIA (WFS)
+            const { data: existing } = await supabase
+                .from('eac_snapshots')
+                .select('raw_properties')
+                .eq('ident', area.ident)
+                .eq('tipo', area.tipo)
+                .single();
+
             const { error: updateError } = await supabase
                 .from('eac_snapshots')
                 .update({
                     efetivacao: effectiveDate,
                     is_current: true,
                     raw_properties: {
+                        ...(existing?.raw_properties || {}), // Preserva a GEOMETRIA e dados originais do WFS
                         ident: area.ident,
                         nome: area.nome,
                         tipo: area.tipo,
@@ -388,18 +397,13 @@ async function runSync() {
             let countFallback = 0;
             
             for (const orphan of pendingAreas) {
-                const nome = String(orphan.raw_properties?.nome || '').toUpperCase();
-                let obs = null;
-                let hor = 'H24';
-                let applied = false;
-
-                // Fidelidade estrita: Não adivinhamos dados. Apenas marcamos como ausente no AIXM
+                // 🛡️ AVIONICS MASTER: Marcar como ausente preservando a geometria
                 const fallbackProps = {
-                    ...orphan.raw_properties,
+                    ...(orphan.raw_properties || {}),
                     observacoes: 'DADOS AUSENTES NO AIXM',
                     horario: 'NÃO INFORMADO',
                     processed_at: new Date().toISOString(),
-                    aip_source: 'WFS GEOJSON' 
+                    aip_source: 'WFS GEOJSON (FALLBACK)' 
                 };
 
                 const { error: fallbackError } = await supabase
