@@ -245,9 +245,9 @@ async function runSync() {
                 // Horário / Ativação
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
-                const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
-
-                // Tradução de Dias e Horários Aeronáuticos (V42.85)
+                const timesheet = firstActivatio                // ==========================================
+                // MOTOR DE INTELIGÊNCIA V42.90 (RESTAURADO)
+                // ==========================================
                 const dayMap = {
                     'MON': 'Segunda', 'TUE': 'Terça', 'WED': 'Quarta', 'THU': 'Quinta', 'FRI': 'Sexta',
                     'SAT': 'Sábado', 'SUN': 'Domingo', 'HOL': 'Feriados', 'MON-FRI': 'Segunda a Sexta',
@@ -256,18 +256,23 @@ async function runSync() {
 
                 let horarioFinal = 'CONSULTAR NOTAM';
                 if (timesheet) {
+                    // 1. Extração de Dias
                     const days = Array.isArray(timesheet.day) ? timesheet.day : [timesheet.day];
                     const translatedDays = days.filter(Boolean).map(d => dayMap[d] || d).join(', ');
                     
-                    const start = timesheet.startTime || '';
-                    const end = timesheet.endTime || '';
+                    // 2. Extração de Eventos (SR/SS) e Horas
+                    const start = timesheet.startTime || timesheet.startEvent || '';
+                    const end = timesheet.endTime || timesheet.endEvent || '';
                     
-                    let timeStr = (start === 'SR' && end === 'SS') ? 'Do nascer ao pôr do sol' : `${start} - ${end} UTC`;
-                    if (start === '00:00' && end === '00:00') timeStr = 'H24';
+                    let timeStr = `${start}-${end} UTC`;
+                    if (start === 'SR' && end === 'SS') timeStr = 'Do nascer ao pôr do sol';
+                    else if (start === 'SS' && end === 'SR') timeStr = 'Do pôr do sol ao nascer';
+                    else if (start === '00:00' && end === '00:00') timeStr = 'H24';
                     
                     horarioFinal = translatedDays ? `${translatedDays}, ${timeStr}` : timeStr;
                 }
 
+                // 3. Notas de Ativação (Enriquecimento)
                 const activationNotes = extractAllNotes(firstActivation);
                 const activationNoteStr = activationNotes.filter(n => n.length > 2).join(' / ');
                 
@@ -277,7 +282,7 @@ async function runSync() {
                     horarioFinal += ` (${activationNoteStr})`;
                 }
 
-                // Observações Gerais
+                // 4. Observações Gerais e Atividades
                 const allNotes = extractAllNotes(timeSlice, 'POR');
                 let observacoesFinal = allNotes
                     .filter(n => n.length > 2 && !activationNotes.includes(n))
@@ -286,36 +291,13 @@ async function runSync() {
                     .replace(/^\/|\/$/g, '')
                     .trim();
 
-                // SUPER DICIONÁRIO DE ATIVIDADES AIXM (V42.70)
                 const activityMap = { 
-                    'OTHER': 'OUTRAS ATIVIDADES', 
-                    'TRAINING': 'TREINAMENTO', 
-                    'MILOPS': 'OPERAÇÕES MILITARES',
-                    'SHOOTING': 'TIRO REAL',
-                    'AIR_GUN': 'ARTILHARIA AÉREA',
-                    'AEROCLUB': 'OPERAÇÕES DE AEROCLUBE',
-                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
-                    'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
-                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS',
-                    'GLIDER': 'PLANADOR / VOO A VELA',
-                    'GLIDING': 'PLANADOR / VOO A VELA',
-                    'PARACHUTE': 'PÁRA-QUEDISMO',
-                    'UAS': 'DRONE / UAS',
-                    'SPORT': 'ATIVIDADE ESPORTIVA',
-                    'TOWING': 'REBOQUE DE PLANADOR',
-                    'VIP': 'VOO VIP / PRESIDENCIAL',
-                    'NATURE': 'PRESERVAÇÃO DA NATUREZA',
-                    'DANGER': 'ÁREA DE PERIGO',
-                    'TECHNICAL': 'ATIVIDADE TÉCNICA',
-                    'PARAGLIDER': 'PARAPENTE',
-                    'HANGGLIDER': 'ASA-DELTA',
-                    'ULTRALIGHT': 'ULTRALEVES',
-                    'BALLOON': 'BALONISMO',
-                    'FIREWORK': 'FOGOS DE ARTIFÍCIO',
-                    'FIRE_FIGHTING': 'COMBATE A INCÊNDIO',
-                    'FIRE_EXERCISE': 'EXERCÍCIO DE COMBATE A INCÊNDIO',
-                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS',
-                    'ADIZ': 'ZONA DE IDENTIFICAÇÃO DE DEFESA AÉREA'
+                    'OTHER': 'OUTRAS ATIVIDADES', 'TRAINING': 'TREINAMENTO', 'MILOPS': 'OPERAÇÕES MILITARES',
+                    'SHOOTING': 'TIRO REAL', 'AIR_GUN': 'ARTILHARIA AÉREA', 'AEROCLUB': 'AEROCLUBE',
+                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS', 'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
+                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS', 'GLIDER': 'PLANADOR / VOO A VELA',
+                    'PARACHUTE': 'PÁRA-QUEDISMO', 'UAS': 'DRONE / UAS', 'SPORT': 'ATIVIDADE ESPORTIVA',
+                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS'
                 };
                 
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
@@ -324,7 +306,9 @@ async function runSync() {
                     if (!observacoesFinal.includes(actStr)) observacoesFinal += (observacoesFinal ? ' / ' : '') + actStr;
                 }
 
-                // Mapeamento de Referências
+                // Fallback de Segurança
+                if (!observacoesFinal) observacoesFinal = 'OUTRAS ATIVIDADES / MOTIVOS';
+
                 const mapRef = (ref, uom) => {
                     const r = String(ref?.['#text'] || ref?.val || ref || '').toUpperCase();
                     if (r === 'SFC') return 'GND';
@@ -338,7 +322,6 @@ async function runSync() {
                     return val !== undefined ? parseFloat(val) : null;
                 };
 
-                // Cria uma cópia segura sem as coordenadas gigantes para o Supabase não rejeitar
                 const safeTimeSlice = JSON.parse(JSON.stringify(timeSlice));
                 if (safeTimeSlice.geometryComponent) delete safeTimeSlice.geometryComponent;
 
@@ -349,19 +332,18 @@ async function runSync() {
                     upperlimit: parseLimit(rawUpper),
                     uom_ulimit: rawUpper?.['@_uom'] || 'FL',
                     lowerlimit: parseLimit(rawLower),
-                    uom_llimit: rawLower?.['@_uom'] || 'FT',
+                    uom_llimit: rawLower?.['@_uom'] || 'FL',
                     ref_lower: mapRef(lowerRef, rawLower?.['@_uom']),
                     ref_upper: mapRef(upperRef, rawUpper?.['@_uom']),
                     horario: horarioFinal,
-                    observacoes: observacoesFinal || 'OUTRAS ATIVIDADES / MOTIVOS',
-                    full_aixm_node: safeTimeSlice // 100% de visibilidade de metadata (sem lag)
+                    observacoes: observacoesFinal,
+                    full_aixm_node: safeTimeSlice
                 });
             }
         });
 
-        console.log(`📊 [ROBOT] ${enrichedData.length} áreas processadas. Iniciando Sincronização em Modo Inspeção Total...`);
+        console.log(`📊 [ROBOT] ${enrichedData.length} áreas processadas. Sincronizando com o Banco...`);
 
-        // Extração da data de efetivação
         let effectiveDate = '2026-04-16';
         try {
             const rawAmdt = selectedItem?.amdt || '';
@@ -369,19 +351,13 @@ async function runSync() {
             if (dateMatch) effectiveDate = dateMatch[1];
         } catch (e) {}
 
-        // SINCRONIZAÇÃO INTELIGENTE (Sem Delete)
-        // Para evitar destruir polígonos e dados do GeoServer, vamos apenas atualizar.
-        // Como o Supabase upsert sobrescreve tudo, vamos fazer um loop controlado.
-        
         let countUpdated = 0;
-        let lastError = null;
-
         for (const area of enrichedData) {
-            const { data, error: updateError } = await supabase
+            const { error: updateError } = await supabase
                 .from('eac_snapshots')
                 .update({
                     efetivacao: effectiveDate,
-                    is_current: true, 
+                    is_current: true,
                     raw_properties: {
                         ident: area.ident,
                         nome: area.nome,
@@ -400,22 +376,11 @@ async function runSync() {
                     }
                 })
                 .eq('ident', area.ident)
-                .eq('tipo', area.tipo) // 🛡️ PROTEÇÃO: Evita duplicar ou sobrescrever tipos errados
-                .select();
+                .eq('tipo', area.tipo);
 
-            if (updateError) {
-                lastError = updateError;
-                console.error(`❌ Erro ao atualizar ${area.ident}:`, updateError.message || updateError);
-            } else if (data && data.length > 0) {
-                countUpdated++;
-            }
+            if (!updateError) countUpdated++;
         }
-
         console.log(`✅ [ROBOT] Sincronização inteligente concluída! Atualizadas: ${countUpdated} de ${enrichedData.length}`);
-        if (countUpdated === 0 && enrichedData.length > 0) {
-            console.warn(`⚠️ ALERTA: Zero áreas atualizadas. O 'ident' pode não estar batendo ou as áreas não estão 'is_current'.`);
-            if (lastError) console.error(`Último erro capturado:`, lastError);
-        }
 
         // ==========================================
         // ROTA 1: MOTOR DE FALLBACK (HEURÍSTICA)
