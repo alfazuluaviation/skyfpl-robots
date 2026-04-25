@@ -245,7 +245,8 @@ async function runSync() {
                 // Horário / Ativação
                 const activationList = Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation];
                 const firstActivation = activationList[0]?.AirspaceActivation || activationList[0];
-                const timesheet = firstActivatio                // ==========================================
+                const timesheet = firstActivation?.timeInterval?.Timesheet || firstActivation?.timeInterval;
+                // ==========================================
                 // MOTOR DE INTELIGÊNCIA V42.90 (RESTAURADO)
                 // ==========================================
                 const dayMap = {
