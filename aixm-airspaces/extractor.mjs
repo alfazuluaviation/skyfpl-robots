@@ -267,10 +267,21 @@ async function runSync() {
                 const activationNotes = extractAllNotes(firstActivation);
                 const activationNoteStr = activationNotes.filter(n => n.length > 2).join(' / ');
                 
-                if (horarioFinal === 'CONSULTAR NOTAM' && activationNoteStr) {
-                    horarioFinal = activationNoteStr;
-                } else if (horarioFinal === 'H24' && activationNoteStr) {
-                    horarioFinal += ` (${activationNoteStr})`;
+                // 🛡️ AVIONICS MASTER: Separação Inteligente de Horário e Notas
+                let extraObsFromActivation = '';
+                if (activationNoteStr) {
+                    // Tenta detectar padrão "H24 (Nota...)"
+                    const splitMatch = activationNoteStr.match(/^([A-Z0-9\-\s]+)\s*\((.*)\)$/i);
+                    if (splitMatch) {
+                        horarioFinal = splitMatch[1].trim();
+                        extraObsFromActivation = splitMatch[2].trim();
+                    } else if (horarioFinal === 'CONSULTAR NOTAM' || horarioFinal === 'H24') {
+                        // Se já temos H24 e a nota não segue o padrão de parênteses, 
+                        // tratamos a nota como observação extra
+                        extraObsFromActivation = activationNoteStr;
+                    } else {
+                        horarioFinal = activationNoteStr;
+                    }
                 }
 
                 // 4. Observações Gerais e Atividades
@@ -278,9 +289,14 @@ async function runSync() {
                 let observacoesFinal = allNotes
                     .filter(n => n.length > 2 && !activationNotes.includes(n))
                     .join(' / ')
-                    .replace(/\/ \//g, '/')
-                    .replace(/^\/|\/$/g, '')
                     .trim();
+
+                if (extraObsFromActivation) {
+                    observacoesFinal = (extraObsFromActivation + (observacoesFinal ? ' / ' : '') + observacoesFinal)
+                        .replace(/\/ \//g, '/')
+                        .replace(/^\/|\/$/g, '')
+                        .trim();
+                }
 
                 const activityMap = { 
                     'OTHER': 'OUTRAS ATIVIDADES', 'TRAINING': 'TREINAMENTO', 'MILOPS': 'OPERAÇÕES MILITARES',
@@ -341,41 +357,50 @@ async function runSync() {
 
         let countUpdated = 0;
         for (const area of enrichedData) {
-            // 🛡️ AVIONICS MASTER: Recuperar o objeto original para não apagar a GEOMETRIA (WFS)
-            const { data: existing } = await supabase
+            // 🛡️ AVIONICS MASTER: Match resiliente (remove espaços para evitar divergência WFS vs AIXM)
+            const cleanIdent = area.ident.replace(/\s+/g, '');
+
+            const { data: existingArray } = await supabase
                 .from('eac_snapshots')
-                .select('raw_properties')
-                .eq('ident', area.ident)
+                .select('raw_properties, id, ident')
+                .or(`ident.eq."${area.ident}",ident.eq."${cleanIdent}"`)
                 .eq('tipo', area.tipo)
-                .single();
+                .eq('is_current', true)
+                .limit(1);
 
-            const { error: updateError } = await supabase
-                .from('eac_snapshots')
-                .update({
-                    efetivacao: effectiveDate,
-                    is_current: true,
-                    raw_properties: {
-                        ...(existing?.raw_properties || {}), // Preserva a GEOMETRIA e dados originais do WFS
-                        ident: area.ident,
-                        nome: area.nome,
-                        tipo: area.tipo,
-                        upperlimit: area.upperlimit,
-                        uom_ulimit: area.uom_ulimit,
-                        lowerlimit: area.lowerlimit,
-                        uom_llimit: area.uom_llimit,
-                        ref_lower: area.ref_lower,
-                        ref_upper: area.ref_upper,
-                        horario: area.horario,
-                        observacoes: area.observacoes,
-                        full_aixm_node: area.full_aixm_node,
-                        processed_at: new Date().toISOString(),
-                        aip_source: 'AIXM 5.1 ROBOT'
-                    }
-                })
-                .eq('ident', area.ident)
-                .eq('tipo', area.tipo);
+            const existing = existingArray?.[0];
 
-            if (!updateError) countUpdated++;
+            if (existing) {
+                // 🛡️ AVIONICS MASTER: Proteção de Dados (Não sobrescreve nota rica por nota genérica)
+                const currentObs = existing.raw_properties?.observacoes || existing.raw_properties?.properties?.observacao || '';
+                const newObs = area.observacoes || '';
+                const isGeneric = (n) => !n || n.toUpperCase().includes('SEM OBSERVAÇÃO') || n.toUpperCase() === 'PROCEDURE' || n.toUpperCase() === 'TECHNICAL';
+                
+                const finalObsToSave = (isGeneric(newObs) && !isGeneric(currentObs)) ? currentObs : newObs;
+
+                const { error: updateError } = await supabase
+                    .from('eac_snapshots')
+                    .update({
+                        efetivacao: effectiveDate,
+                        raw_properties: {
+                            ...(existing.raw_properties || {}),
+                            properties: {
+                                ...(existing.raw_properties?.properties || {}),
+                                observacao: finalObsToSave,
+                                horario: area.horario || existing.raw_properties?.horario,
+                                aip_source: 'AIXM 5.1 (SkyFPL Robot)'
+                            },
+                            ident: area.ident,
+                            nome: area.nome || existing.nome,
+                            observacoes: finalObsToSave,
+                            horario: area.horario || existing.raw_properties?.horario,
+                            aip_source: 'AIXM 5.1 (SkyFPL Robot)'
+                        }
+                    })
+                    .eq('id', existing.id);
+
+                if (!updateError) countUpdated++;
+            }
         }
         console.log(`✅ [ROBOT] Sincronização concluída! Atualizadas: ${countUpdated} de ${enrichedData.length}`);
 
