@@ -298,32 +298,46 @@ async function runSync() {
                         .trim();
                 }
 
+                // 🛡️ AVIONICS MASTER: Conversor tático de caixa (Preserva siglas)
+                const toTacticalCase = (str) => {
+                    if (!str) return '';
+                    const acronyms = ['NOTAM', 'H24', 'UTC', 'GND', 'MSL', 'AGL', 'FL', 'AIP', 'DECEA', 'VFR', 'IFR', 'ATC', 'UAS', 'FIR', 'SBBS', 'SBRP', 'SBBS'];
+                    return str.split(' ').map(word => {
+                        const cleanWord = word.replace(/[().,]/g, '').toUpperCase();
+                        if (acronyms.includes(cleanWord)) return word.toUpperCase();
+                        if (word.length <= 2 && !/[aeiou]/i.test(word)) return word.toUpperCase(); // Siglas curtas
+                        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+                    }).join(' ');
+                };
+
                 const activityMap = { 
-                    'OTHER': 'OUTRAS ATIVIDADES', 
-                    'TRAINING': 'TREINAMENTO', 
-                    'MILOPS': 'OPERAÇÕES MILITARES',
-                    'SHOOTING': 'TIRO REAL', 
-                    'AIR_GUN': 'ARTILHARIA AÉREA', 
-                    'AEROCLUB': 'AEROCLUBE',
-                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS', 
-                    'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
-                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS', 
-                    'GLIDER': 'ASA-DELTA / PARAPENTE / VOO LIVRE',
-                    'HANGGLIDER': 'ASA-DELTA / PARAPENTE',
-                    'PARAGLIDER': 'PARAPENTE / VOO LIVRE',
-                    'HANGGLIDING': 'ASA-DELTA / PARAPENTE',
-                    'PARAGLIDING': 'PARAPENTE / VOO LIVRE',
-                    'PARACHUTE': 'PÁRA-QUEDISMO', 
-                    'UAS': 'DRONE / UAS', 
-                    'SPORT': 'ATIVIDADE ESPORTIVA / VOO LIVRE',
-                    'NAVAL_EXER': 'EXERCÍCIOS NAVAIS'
+                    'OTHER': 'Outras atividades', 
+                    'TRAINING': 'Treinamento', 
+                    'MILOPS': 'Operações militares',
+                    'SHOOTING': 'Tiro real', 
+                    'AIR_GUN': 'Artilharia aérea', 
+                    'AEROCLUB': 'Aeroclube',
+                    'ACROBATICS': 'Voos acrobáticos / Acrobacias', 
+                    'AEROBATICS': 'Voos acrobáticos / Acrobacias',
+                    'EXERCISE': 'Combate aéreo / Exercícios', 
+                    'GLIDER': 'Asa-delta / Parapente / Voo livre',
+                    'HANGGLIDER': 'Asa-delta / Parapente',
+                    'PARAGLIDER': 'Parapente / Voo livre',
+                    'PARAGLIDING': 'Parapente / Voo livre',
+                    'PARACHUTE': 'Paraquedismo', 
+                    'UAS': 'Drone / UAS', 
+                    'SPORT': 'Atividade esportiva / Voo livre',
+                    'NAVAL_EXER': 'Exercícios navais'
                 };
                 
                 const activities = activationList.map(a => (a.AirspaceActivation || a)?.activity).filter(Boolean);
                 if (activities.length) {
-                    const actStr = activities.map(act => activityMap[act] || act).join(' / ');
+                    const actStr = activities.map(act => activityMap[act] || toTacticalCase(act)).join(' / ');
                     if (!observacoesFinal.includes(actStr)) observacoesFinal += (observacoesFinal ? ' / ' : '') + actStr;
                 }
+
+                // Aplica o conversor tático no final
+                observacoesFinal = toTacticalCase(observacoesFinal);
 
                 const mapRef = (ref, uom) => {
                     const r = String(ref?.['#text'] || ref?.val || ref || '').toUpperCase();
