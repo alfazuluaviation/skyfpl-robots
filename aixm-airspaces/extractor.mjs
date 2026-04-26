@@ -299,11 +299,23 @@ async function runSync() {
                 }
 
                 const activityMap = { 
-                    'OTHER': 'OUTRAS ATIVIDADES', 'TRAINING': 'TREINAMENTO', 'MILOPS': 'OPERAÇÕES MILITARES',
-                    'SHOOTING': 'TIRO REAL', 'AIR_GUN': 'ARTILHARIA AÉREA', 'AEROCLUB': 'AEROCLUBE',
-                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS', 'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
-                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS', 'GLIDER': 'PLANADOR / VOO A VELA',
-                    'PARACHUTE': 'PÁRA-QUEDISMO', 'UAS': 'DRONE / UAS', 'SPORT': 'ATIVIDADE ESPORTIVA',
+                    'OTHER': 'OUTRAS ATIVIDADES', 
+                    'TRAINING': 'TREINAMENTO', 
+                    'MILOPS': 'OPERAÇÕES MILITARES',
+                    'SHOOTING': 'TIRO REAL', 
+                    'AIR_GUN': 'ARTILHARIA AÉREA', 
+                    'AEROCLUB': 'AEROCLUBE',
+                    'ACROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS', 
+                    'AEROBATICS': 'VOOS ACROBÁTICOS / ACROBACIAS',
+                    'EXERCISE': 'COMBATE AÉREO / EXERCÍCIOS', 
+                    'GLIDER': 'ASA-DELTA / PARAPENTE / VOO LIVRE',
+                    'HANGGLIDER': 'ASA-DELTA / PARAPENTE',
+                    'PARAGLIDER': 'PARAPENTE / VOO LIVRE',
+                    'HANGGLIDING': 'ASA-DELTA / PARAPENTE',
+                    'PARAGLIDING': 'PARAPENTE / VOO LIVRE',
+                    'PARACHUTE': 'PÁRA-QUEDISMO', 
+                    'UAS': 'DRONE / UAS', 
+                    'SPORT': 'ATIVIDADE ESPORTIVA / VOO LIVRE',
                     'NAVAL_EXER': 'EXERCÍCIOS NAVAIS'
                 };
                 
