@@ -413,11 +413,19 @@ async function runSync() {
                             properties: {
                                 ...(existing.raw_properties?.properties || {}),
                                 observacao: finalObsToSave,
+                                upperlimit: area.upperlimit,
+                                uom_ulimit: area.uom_ulimit,
+                                lowerlimit: area.lowerlimit,
+                                uom_llimit: area.uom_llimit,
                                 horario: area.horario || existing.raw_properties?.horario,
                                 aip_source: 'AIXM 5.1 (SkyFPL Robot)'
                             },
                             ident: area.ident,
                             nome: area.nome || existing.nome,
+                            upperlimit: area.upperlimit,
+                            uom_ulimit: area.uom_ulimit,
+                            lowerlimit: area.lowerlimit,
+                            uom_llimit: area.uom_llimit,
                             observacoes: finalObsToSave,
                             horario: area.horario || existing.raw_properties?.horario,
                             aip_source: 'AIXM 5.1 (SkyFPL Robot)'
