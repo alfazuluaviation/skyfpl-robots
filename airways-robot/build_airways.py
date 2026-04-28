@@ -41,7 +41,8 @@ def download_layer(layer_id):
     all_features = []
     start_index = 0
     
-    print(f"Baixando {layer_id}...")
+    print(f"🚀 Iniciando download da camada: {layer_id}", flush=True)
+    print(f"🔗 Usando Proxy: {PROXY_URL}", flush=True)
     
     while True:
         params = {
@@ -50,29 +51,38 @@ def download_layer(layer_id):
             'startIndex': str(start_index)
         }
         url = f"{PROXY_URL}?{urlencode(params)}"
+        
+        # Priorizar chave do ambiente (GitHub Secrets)
+        env_key = os.environ.get('SUPABASE_ANON_KEY')
+        active_key = env_key if env_key else SUPABASE_ANON_KEY
+        
         headers = {
-            'Authorization': f'Bearer {SUPABASE_ANON_KEY}',
-            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': f'Bearer {active_key}',
+            'apikey': active_key,
             'Accept': 'application/json'
         }
         
         try:
+            print(f"  🛰️ Solicitando página {start_index // PAGE_SIZE + 1} (Índice: {start_index})...", flush=True)
             response = requests.get(url, headers=headers, timeout=60)
+            
             if response.status_code == 200:
                 data = response.json()
                 features = data.get('features', [])
                 all_features.extend(features)
-                print(f"  Página {start_index // PAGE_SIZE + 1}: +{len(features)}. Total: {len(all_features)}")
+                print(f"  ✅ Recebidos {len(features)} itens. Total acumulado: {len(all_features)}", flush=True)
                 
                 if len(features) < PAGE_SIZE:
+                    print(f"  🏁 Fim da camada {layer_id} alcançado.", flush=True)
                     break
                 start_index += len(features)
             else:
-                print(f"  Erro HTTP {response.status_code}. Tentando novamente...")
-                time.sleep(2)
+                print(f"  ❌ Erro HTTP {response.status_code}: {response.text[:200]}", flush=True)
+                print(f"  ⏳ Tentando novamente em 5 segundos...", flush=True)
+                time.sleep(5)
         except Exception as e:
-            print(f"  Erro: {e}")
-            time.sleep(5)
+            print(f"  💥 Erro de conexão: {e}", flush=True)
+            time.sleep(10)
             
     return all_features
 
@@ -137,21 +147,26 @@ def build_db(all_airways):
     return db_path
 
 def main():
+    print("🚦 Iniciando Robô Processador de Aerovias SkyFPL...", flush=True)
     s3 = init_s3()
     all_airways = {}
     
     for layer in LAYERS:
         all_airways[layer['name']] = download_layer(layer['id'])
         
+    print("🏗️ Iniciando construção do banco de dados SQLite...", flush=True)
     db_file = build_db(all_airways)
     
     if s3:
-        print(f"Fazendo upload de {db_file} para R2...")
+        print(f"📦 Fazendo upload de {db_file} para R2...", flush=True)
         try:
             s3.upload_file(db_file, R2_BUCKET, f"navdata/{db_file}")
-            print("✅ Upload concluído.")
+            print("🚀 ✅ Sincronização com Cloudflare R2 concluída com sucesso!", flush=True)
         except Exception as e:
-            print(f"❌ Erro no upload: {e}")
+            print(f"❌ Erro fatal no upload: {e}", flush=True)
+            sys.exit(1)
+    else:
+        print("⚠️ Upload ignorado (credenciais R2 ausentes).", flush=True)
 
 if __name__ == "__main__":
     main()
