@@ -1,4 +1,4 @@
-name: Build Airway Navigation Data
+name: "🛣️ SkyFPL - Robô Processador de Aerovias (H/L)"
 
 on:
   workflow_dispatch:
