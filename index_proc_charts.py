@@ -223,10 +223,12 @@ def extract_georef(doc, page, pdf_bytes):
             
         bw, bh = page.rect.width, page.rect.height
         
-        tl_lat, tl_lon = final_solver(0, 0)
-        tr_lat, tr_lon = final_solver(bw, 0)
-        br_lat, br_lon = final_solver(bw, bh)
-        bl_lat, bl_lon = final_solver(0, bh)
+        # PDF native: Y cresce para CIMA. PyMuPDF: Y cresce para BAIXO.
+        # Invertemos o eixo Y para compensar:
+        tl_lat, tl_lon = final_solver(0, bh)    # PyMuPDF bottom-left = PDF top-left (NW)
+        tr_lat, tr_lon = final_solver(bw, bh)   # PyMuPDF bottom-right = PDF top-right (NE)
+        br_lat, br_lon = final_solver(bw, 0)    # PyMuPDF top-right = PDF bottom-right (SE)
+        bl_lat, bl_lon = final_solver(0, 0)     # PyMuPDF top-left = PDF bottom-left (SW)
         
         return {
             "type": "Sentinel_Bytescan",
