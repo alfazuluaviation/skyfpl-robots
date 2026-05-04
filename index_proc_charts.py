@@ -220,49 +220,35 @@ def extract_georef(doc, page, pdf_bytes):
         
         for box in unique_boxes:
             x0, y0, x1, y1 = box
-            bw_orig = x1 - x0
-            bh_orig = y1 - y0
+            bw = x1 - x0
+            bh = y1 - y0
             
-            for sx in range(90, 111):
-                scale_x = sx / 100.0
-                for sy in range(90, 111):
-                    scale_y = sy / 100.0
-                    
-                    bw = bw_orig * scale_x
-                    bh = bh_orig * scale_y
-                    
-                    # Centralizar a escala na caixa
-                    cx = x0 + bw_orig / 2.0
-                    cy = y0 + bh_orig / 2.0
-                    scaled_x0 = cx - bw / 2.0
-                    scaled_y0 = cy - bh / 2.0
-                    
-                    trial_scaled = []
-                    for i in range(0, len(lpts), 2):
-                        lx = lpts[i]
-                        ly = lpts[i+1]
-                        
-                        # 1. Calcular coordenada no Native PDF (Y-up)
-                        native_px = scaled_x0 + lx * bw
-                        native_py = scaled_y0 + ly * bh
-                        
-                        # 2. Converter para PyMuPDF space (Y-down) baseado na altura da página
-                        px = native_px
-                        py = H - native_py
-                        trial_scaled.extend([px, py])
-                        
-                    pdf_corners = trial_scaled[:8]
-                    
-                    tp_solver = solve_affine_4point(pdf_corners, processed_gpts[:8])
-                    if tp_solver:
-                        res = 0
-                        for j in range(0, min(8, len(processed_gpts)), 2):
-                            lat, lng = tp_solver(trial_scaled[j], trial_scaled[j+1])
-                            res += abs(lat - processed_gpts[j]) + abs(lng - processed_gpts[j+1])
-                        
-                        if res < best_residual:
-                            best_residual = res
-                            final_solver = tp_solver
+            trial_scaled = []
+            for i in range(0, len(lpts), 2):
+                lx = lpts[i]
+                ly = lpts[i+1]
+                
+                # 1. Calcular coordenada no Native PDF (Y-up)
+                native_px = x0 + lx * bw
+                native_py = y0 + ly * bh
+                
+                # 2. Converter para PyMuPDF space (Y-down) baseado na altura da página
+                px = native_px
+                py = H - native_py
+                trial_scaled.extend([px, py])
+                
+            pdf_corners = trial_scaled[:8]
+            
+            tp_solver = solve_affine_4point(pdf_corners, processed_gpts[:8])
+            if tp_solver:
+                res = 0
+                for j in range(0, min(8, len(processed_gpts)), 2):
+                    lat, lng = tp_solver(trial_scaled[j], trial_scaled[j+1])
+                    res += abs(lat - processed_gpts[j]) + abs(lng - processed_gpts[j+1])
+                
+                if res < best_residual:
+                    best_residual = res
+                    final_solver = tp_solver
         
         if not final_solver:
             # Fallback (already normalized if we ever reach here, but unlikely)
