@@ -197,36 +197,58 @@ def extract_georef(doc, page, pdf_bytes):
         byte_boxes = []
         for key in ['NeatLine', 'BBox', 'MediaBox', 'CropBox', 'TrimBox']:
             for box in find_dict_boxes(local_buf, key):
-                byte_boxes.append(fitz.Rect(box[0], box[1], box[2], box[3]))
+                byte_boxes.append(box) # box is (x0, y0, x1, y1) in Native PDF (Y-up)
         
-        # Combinar com boxes do PyMuPDF
-        all_boxes = byte_boxes + [page.rect, page.cropbox, page.mediabox]
+        H = page.rect.height
+        W = page.rect.width
+        
+        # Combinar com boxes do PyMuPDF convertidas para Native PDF
+        all_native_boxes = byte_boxes + [
+            (page.rect.x0, H - page.rect.y1, page.rect.x1, H - page.rect.y0),
+            (page.cropbox.x0, H - page.cropbox.y1, page.cropbox.x1, H - page.cropbox.y0) if page.cropbox else None,
+            (page.mediabox.x0, H - page.mediabox.y1, page.mediabox.x1, H - page.mediabox.y0) if page.mediabox else None
+        ]
+        
         unique_boxes = []
-        for b in all_boxes:
-            if b.width > 0 and b.height > 0:
-                if not any(abs(b.x0 - ub.x0) < 1 and abs(b.y0 - ub.y0) < 1 and abs(b.width - ub.width) < 1 for ub in unique_boxes):
+        for b in all_native_boxes:
+            if b and b[2] - b[0] > 0 and b[3] - b[1] > 0:
+                if not any(abs(b[0] - ub[0]) < 1 and abs(b[1] - ub[1]) < 1 and abs(b[2] - ub[2]) < 1 for ub in unique_boxes):
                     unique_boxes.append(b)
                 
         best_residual = float('inf')
         final_solver = None
         
         for box in unique_boxes:
-            bx, by = box.x0, box.y0
-            bw_orig, bh_orig = box.width, box.height
-            if bw_orig <= 0 or bh_orig <= 0: continue
+            x0, y0, x1, y1 = box
+            bw_orig = x1 - x0
+            bh_orig = y1 - y0
             
             for sx in range(90, 111):
                 scale_x = sx / 100.0
                 for sy in range(90, 111):
                     scale_y = sy / 100.0
-                    bw, bh = bw_orig * scale_x, bh_orig * scale_y
+                    
+                    bw = bw_orig * scale_x
+                    bh = bh_orig * scale_y
+                    
+                    # Centralizar a escala na caixa
+                    cx = x0 + bw_orig / 2.0
+                    cy = y0 + bh_orig / 2.0
+                    scaled_x0 = cx - bw / 2.0
+                    scaled_y0 = cy - bh / 2.0
+                    
                     trial_scaled = []
                     for i in range(0, len(lpts), 2):
                         lx = lpts[i]
                         ly = lpts[i+1]
-                        # CRITICAL FIX: Flip Y axis. PDF native is Y-up, PyMuPDF image is Y-down.
-                        px = bx + lx * bw
-                        py = (by + bh) - ly * bh
+                        
+                        # 1. Calcular coordenada no Native PDF (Y-up)
+                        native_px = scaled_x0 + lx * bw
+                        native_py = scaled_y0 + ly * bh
+                        
+                        # 2. Converter para PyMuPDF space (Y-down) baseado na altura da página
+                        px = native_px
+                        py = H - native_py
                         trial_scaled.extend([px, py])
                         
                     pdf_corners = trial_scaled[:8]
