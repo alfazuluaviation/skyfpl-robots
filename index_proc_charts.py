@@ -89,46 +89,131 @@ def add_telemetry_log(message):
 
 # ─── Motor de Geografia e Imagem (ICA 96-1) ──────────────────────────────────
 
-def extract_georef(doc, page):
+import math
+import re
+
+def solve_cramer_3x3(points):
+    n = len(points)
+    if n < 3: return None
+    sumX = sum(p['x'] for p in points)
+    sumY = sum(p['y'] for p in points)
+    sumV = sum(p['v'] for p in points)
+    sumXX = sum(p['x']*p['x'] for p in points)
+    sumYY = sum(p['y']*p['y'] for p in points)
+    sumXY = sum(p['x']*p['y'] for p in points)
+    sumXV = sum(p['x']*p['v'] for p in points)
+    sumYV = sum(p['y']*p['v'] for p in points)
+    
+    det = n*(sumXX*sumYY - sumXY*sumXY) - sumX*(sumX*sumYY - sumY*sumXY) + sumY*(sumX*sumXY - sumY*sumXX)
+    if abs(det) < 1e-12: return None
+    
+    a = (sumV*(sumXX*sumYY - sumXY*sumXY) - sumX*(sumXV*sumYY - sumYV*sumXY) + sumY*(sumXV*sumXY - sumYV*sumXX)) / det
+    b = (n*(sumXV*sumYY - sumYV*sumXY) - sumV*(sumX*sumYY - sumY*sumXY) + sumY*(sumX*sumYV - sumY*sumXV)) / det
+    c = (n*(sumXX*sumYV - sumXY*sumXV) - sumX*(sumX*sumYV - sumY*sumXV) + sumV*(sumX*sumXY - sumY*sumXX)) / det
+    return {'a': a, 'b': b, 'c': c}
+
+def solve_affine_4point(pdf_corners, geo_corners):
+    lat_points = []
+    lng_points = []
+    valid = 0
+    for i in range(4):
+        if abs(pdf_corners[i*2]) < 0.001 and abs(pdf_corners[i*2+1]) < 0.001: continue
+        if abs(geo_corners[i*2]) < 0.001 and abs(geo_corners[i*2+1]) < 0.001: continue
+        lat_points.append({'x': pdf_corners[i*2], 'y': pdf_corners[i*2+1], 'v': geo_corners[i*2]})
+        lng_points.append({'x': pdf_corners[i*2], 'y': pdf_corners[i*2+1], 'v': geo_corners[i*2+1]})
+        valid += 1
+        
+    if valid < 3: return None
+    lat_params = solve_cramer_3x3(lat_points)
+    lng_params = solve_cramer_3x3(lng_points)
+    if not lat_params or not lng_params: return None
+    
+    def solver(px, py):
+        lat = lat_params['a']*px + lat_params['b']*py + lat_params['c']
+        lng = lng_params['a']*px + lng_params['b']*py + lng_params['c']
+        return [lat, lng]
+    return solver
+
+def from_meters(x, y):
+    lng = (x / 20037508.34) * 180.0
+    lat = (y / 20037508.34) * 180.0
+    lat = (180.0 / math.pi) * (2 * math.atan(math.exp((lat * math.pi) / 180.0)) - math.pi / 2)
+    return [lat, lng]
+
+def extract_georef(doc, page, pdf_bytes):
     """
-    Extrai metadados GeoPDF reais (VP/Measure) para georreferenciamento tático.
-    Implementa a extração dos dicionários de calibração do padrão OGC/Adobe.
+    Motor Tático Sentinel Bytescan: Lê o PDF cru buscando os arrays do DECEA
+    e resolve a matriz de distorção LCC na nuvem para entregar cantos limpos ao App.
     """
     try:
-        # 🛡️ V14.1: Extração profunda de objetos PDF
-        xref = page.xref
-        vp_raw = doc.xref_get_key(xref, "VP")
+        buf = pdf_bytes.decode('latin1', errors='ignore')
+        gpts_match = re.search(r'/GPTS\s*\[([^\]]+)\]', buf)
+        lpts_match = re.search(r'/LPTS\s*\[([^\]]+)\]', buf)
         
-        if vp_raw[0] == '[': # Lista de Viewports
-             # Simplificação: pegamos o primeiro Viewport (padrão DECEA)
-             # Extraímos o conteúdo entre colchetes se necessário, mas PyMuPDF
-             # pode acessar via xref direta se soubermos o ID.
-             pass
-
-        # Tentativa via engine nativa do PyMuPDF (mais estável)
-        geo_info = {"type": "STANDALONE", "precision": "high", "calibration": None}
-        
-        # O DECEA costuma usar Viewports (VP) com dicionários Measure
-        # Vamos buscar por assinaturas de georreferenciamento no objeto da página
-        page_dict = page.get_text("dict") # Apenas para trigger de carregamento
-        
-        # 🚀 Busca exaustiva por Viewports (VP)
-        vps = page.get_viewports()
-        if vps:
-            geo_info["type"] = "GeoPDF_VP"
-            # vps é uma lista de dicts com 'bbox', 'measure', etc.
-            geo_info["calibration"] = vps[0] 
-            return geo_info
+        if not gpts_match or not lpts_match:
+            vps = page.get_viewports()
+            if vps: return {"type": "GeoPDF_VP", "calibration": vps[0]}
+            return None
             
-        # Fallback: Busca manual por metadados WGS84 no texto (Baixa Precisão)
-        text_content = page.get_text().upper()
-        if "WGS 84" in text_content or "SIRGAS" in text_content:
-            geo_info["type"] = "TEXT_HINT"
-            return geo_info
+        gpts_raw = gpts_match.group(1).replace(',', ' ').split()
+        lpts_raw = lpts_match.group(1).replace(',', ' ').split()
+        
+        gpts = [float(x) for x in gpts_raw if x.strip()]
+        lpts = [float(x) for x in lpts_raw if x.strip()]
+        if len(gpts) < 8 or len(lpts) < 8: return None
+        
+        scale_divisor = 1.0
+        if 500 < abs(gpts[0]) < 100000:
+            scale_divisor = 1000.0
             
+        processed_gpts = [v / scale_divisor for v in gpts]
+        
+        if any(abs(v) > 500 for v in processed_gpts):
+            for i in range(0, len(processed_gpts), 2):
+                lat, lng = from_meters(processed_gpts[i+1], processed_gpts[i])
+                processed_gpts[i], processed_gpts[i+1] = lat, lng
+                
+        rect = page.rect
+        bw, bh, bx, by = rect.width, rect.height, rect.x0, rect.y0
+        
+        is_normalized = all(abs(v) <= 1.1 for v in lpts)
+        if is_normalized:
+            scaled_lpts = [(v * bw + bx) if i % 2 == 0 else (v * bh + by) for i, v in enumerate(lpts)]
+        else:
+            scaled_lpts = lpts
+            
+        pdf_corners = scaled_lpts[:8]
+        geo_corners = [
+            processed_gpts[6], processed_gpts[7], # NW -> TL
+            processed_gpts[4], processed_gpts[5], # NE -> TR
+            processed_gpts[2], processed_gpts[3], # SE -> BR
+            processed_gpts[0], processed_gpts[1]  # SW -> BL
+        ]
+        
+        solver = solve_affine_4point(pdf_corners, geo_corners)
+        if not solver: return None
+        
+        tl_lat, tl_lon = solver(0, 0)
+        tr_lat, tr_lon = solver(bw, 0)
+        br_lat, br_lon = solver(bw, bh)
+        bl_lat, bl_lon = solver(0, bh)
+        
+        return {
+            "type": "Sentinel_Bytescan",
+            "calibration": {
+                "measure": {
+                    "gpts": [
+                        bl_lat, bl_lon,
+                        br_lat, br_lon,
+                        tr_lat, tr_lon,
+                        tl_lat, tl_lon
+                    ]
+                }
+            }
+        }
     except Exception as e:
         log.debug(f"GeoRef Skip: {e}")
-    return None
+        return None
 
 def process_pdf_to_jpg(pdf_content):
     """Converte PDF para JPEG 250 DPI e extrai calibração geodésica."""
@@ -137,8 +222,8 @@ def process_pdf_to_jpg(pdf_content):
         if doc.page_count == 0: return None, None
         
         page = doc[0]
-        # 🛰️ V14.1: Ativação do Motor de Precisão
-        geo_data = extract_georef(doc, page)
+        # 🛰️ V14.2: Ativação do Motor de Precisão Sentinel Bytescan
+        geo_data = extract_georef(doc, page, pdf_content)
         
         zoom = 250 / 72
         mat = fitz.Matrix(zoom, zoom)
@@ -154,7 +239,7 @@ def process_pdf_to_jpg(pdf_content):
             "dpi": 250, 
             "geo": geo_data,
             "processed_at": datetime.now(timezone.utc).isoformat(),
-            "version": "14.1-lambert-engine"
+            "version": "14.2-sentinel-bytescan"
         }
         doc.close()
         return buffer.getvalue(), meta
