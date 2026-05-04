@@ -174,12 +174,38 @@ def extract_georef(doc, page, pdf_bytes):
                 lat, lng = from_meters(processed_gpts[i+1], processed_gpts[i])
                 processed_gpts[i], processed_gpts[i+1] = lat, lng
                 
-        # Boxes to try
-        boxes = [page.rect, page.cropbox, page.mediabox]
+        # Extração de BBox dos bytes crus (idêntico ao findDictBox do Web App)
+        gpts_idx = gpts_match.start()
+        search_start = max(0, gpts_idx - 10000)
+        search_end = min(len(buf), gpts_idx + 10000)
+        local_buf = buf[search_start:search_end]
+        
+        def find_dict_boxes(text, key):
+            boxes = []
+            pattern = re.compile(r'/' + key + r'\s*\[([0-9.\-\s]+)\]')
+            for m in pattern.finditer(text):
+                nums = [float(x) for x in m.group(1).strip().split() if x.strip()]
+                if len(nums) >= 4:
+                    if len(nums) >= 8:
+                        xs = [nums[i] for i in range(0, len(nums), 2)]
+                        ys = [nums[i] for i in range(1, len(nums), 2)]
+                        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+                    else:
+                        boxes.append(tuple(nums[:4]))
+            return boxes
+        
+        byte_boxes = []
+        for key in ['NeatLine', 'BBox', 'MediaBox', 'CropBox', 'TrimBox']:
+            for box in find_dict_boxes(local_buf, key):
+                byte_boxes.append(fitz.Rect(box[0], box[1], box[2], box[3]))
+        
+        # Combinar com boxes do PyMuPDF
+        all_boxes = byte_boxes + [page.rect, page.cropbox, page.mediabox]
         unique_boxes = []
-        for b in boxes:
-            if not any(abs(b.x0 - ub.x0) < 1 and abs(b.y0 - ub.y0) < 1 and abs(b.width - ub.width) < 1 for ub in unique_boxes):
-                unique_boxes.append(b)
+        for b in all_boxes:
+            if b.width > 0 and b.height > 0:
+                if not any(abs(b.x0 - ub.x0) < 1 and abs(b.y0 - ub.y0) < 1 and abs(b.width - ub.width) < 1 for ub in unique_boxes):
+                    unique_boxes.append(b)
                 
         best_residual = float('inf')
         final_solver = None
