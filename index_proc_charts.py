@@ -223,15 +223,20 @@ def extract_georef(doc, page, pdf_bytes):
             
         bw, bh = page.rect.width, page.rect.height
         
-        # Mapeamento EXATO do GeoPdfService.ts (linhas 226-229):
-        # solver(0, pageHeight) → BL (geographic SW)
-        # solver(pageWidth, pageHeight) → BR (geographic SE) 
-        # solver(pageWidth, 0) → TR (geographic NE)
-        # solver(0, 0) → TL (geographic NW)
-        bl_lat, bl_lon = final_solver(0, bh)
-        br_lat, br_lon = final_solver(bw, bh)
-        tr_lat, tr_lon = final_solver(bw, 0)
-        tl_lat, tl_lon = final_solver(0, 0)
+        # O solver foi treinado com LPTS escalados onde Y=0 = topo do PDF
+        # no sistema PyMuPDF. Mas no PDF nativo Y=0 = base.
+        # Para compensar, invertemos os rótulos verticais:
+        # solver(0, bh) = pixel bottom → rótulo TL (vai para o TOPO da imagem no mapa)
+        # solver(0, 0) = pixel top → rótulo BL (vai para a BASE da imagem no mapa)
+        tl_lat, tl_lon = final_solver(0, bh)
+        tr_lat, tr_lon = final_solver(bw, bh)
+        br_lat, br_lon = final_solver(bw, 0)
+        bl_lat, bl_lon = final_solver(0, 0)
+        
+        log.info(f"📐 GeoRef Corners: TL=({tl_lat:.6f},{tl_lon:.6f}) TR=({tr_lat:.6f},{tr_lon:.6f}) BR=({br_lat:.6f},{br_lon:.6f}) BL=({bl_lat:.6f},{bl_lon:.6f})")
+        log.info(f"📐 Raw GPTS[0:8]: {processed_gpts[:8]}")
+        log.info(f"📐 Raw LPTS[0:8]: {lpts[:8]}")
+        log.info(f"📐 Page rect: {bw:.1f} x {bh:.1f} | Best residual: {best_residual:.10f}")
         
         return {
             "type": "Sentinel_Bytescan",
