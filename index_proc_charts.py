@@ -107,9 +107,10 @@ def solve_cramer_3x3(points):
     det = n*(sumXX*sumYY - sumXY*sumXY) - sumX*(sumX*sumYY - sumY*sumXY) + sumY*(sumX*sumXY - sumY*sumXX)
     if abs(det) < 1e-12: return None
     
-    a = (sumV*(sumXX*sumYY - sumXY*sumXY) - sumX*(sumXV*sumYY - sumYV*sumXY) + sumY*(sumXV*sumXY - sumYV*sumXX)) / det
-    b = (n*(sumXV*sumYY - sumYV*sumXY) - sumV*(sumX*sumYY - sumY*sumXY) + sumY*(sumX*sumYV - sumY*sumXV)) / det
-    c = (n*(sumXX*sumYV - sumXY*sumXV) - sumX*(sumX*sumYV - sumY*sumXV) + sumV*(sumX*sumXY - sumY*sumXX)) / det
+    a = (sumXV*(sumYY*n - sumY*sumY) - sumXY*(sumYV*n - sumV*sumY) + sumX*(sumYV*sumY - sumYY*sumV)) / det
+    b = (sumXX*(sumYV*n - sumV*sumY) - sumXV*(sumXY*n - sumX*sumY) + sumX*(sumXY*sumV - sumYV*sumX)) / det
+    c = (sumXX*(sumYY*sumV - sumY*sumYV) - sumXY*(sumXY*sumV - sumX*sumYV) + sumXV*(sumXY*sumY - sumYY*sumX)) / det
+    
     return {'a': a, 'b': b, 'c': c}
 
 def solve_affine_4point(pdf_corners, geo_corners):
