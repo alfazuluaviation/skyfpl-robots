@@ -220,8 +220,15 @@ def extract_georef(doc, page, pdf_bytes):
                 for sy in range(90, 111):
                     scale_y = sy / 100.0
                     bw, bh = bw_orig * scale_x, bh_orig * scale_y
-                    
-                    trial_scaled = [(v * bw + bx) if i % 2 == 0 else (v * bh + by) for i, v in enumerate(lpts)]
+                    trial_scaled = []
+                    for i in range(0, len(lpts), 2):
+                        lx = lpts[i]
+                        ly = lpts[i+1]
+                        # CRITICAL FIX: Flip Y axis. PDF native is Y-up, PyMuPDF image is Y-down.
+                        px = bx + lx * bw
+                        py = (by + bh) - ly * bh
+                        trial_scaled.extend([px, py])
+                        
                     pdf_corners = trial_scaled[:8]
                     
                     tp_solver = solve_affine_4point(pdf_corners, processed_gpts[:8])
@@ -236,28 +243,18 @@ def extract_georef(doc, page, pdf_bytes):
                             final_solver = tp_solver
         
         if not final_solver:
-            # Fallback direto (Mapeamento explícito)
-            pdf_corners = lpts[:8]
-            geo_corners = [
-                processed_gpts[6], processed_gpts[7], # NW -> TL
-                processed_gpts[4], processed_gpts[5], # NE -> TR
-                processed_gpts[2], processed_gpts[3], # SE -> BR
-                processed_gpts[0], processed_gpts[1]  # SW -> BL
-            ]
-            final_solver = solve_affine_4point(pdf_corners, geo_corners)
+            # Fallback (already normalized if we ever reach here, but unlikely)
+            final_solver = solve_affine_4point(lpts[:8], processed_gpts[:8])
             if not final_solver: return None
             
         bw, bh = page.rect.width, page.rect.height
         
-        # O solver foi treinado com LPTS escalados onde Y=0 = topo do PDF
-        # no sistema PyMuPDF. Mas no PDF nativo Y=0 = base.
-        # Para compensar, invertemos os rótulos verticais:
-        # solver(0, bh) = pixel bottom → rótulo TL (vai para o TOPO da imagem no mapa)
-        # solver(0, 0) = pixel top → rótulo BL (vai para a BASE da imagem no mapa)
-        tl_lat, tl_lon = final_solver(0, bh)
-        tr_lat, tr_lon = final_solver(bw, bh)
-        br_lat, br_lon = final_solver(bw, 0)
-        bl_lat, bl_lon = final_solver(0, 0)
+        # O solver agora está treinado CORRETAMENTE no espaço de coordenadas do PyMuPDF (Y-down).
+        # Então 0,0 é top-left. E bw, bh é bottom-right.
+        tl_lat, tl_lon = final_solver(0, 0)
+        tr_lat, tr_lon = final_solver(bw, 0)
+        br_lat, br_lon = final_solver(bw, bh)
+        bl_lat, bl_lon = final_solver(0, bh)
         
         log.info(f"📐 GeoRef Corners: TL=({tl_lat:.6f},{tl_lon:.6f}) TR=({tr_lat:.6f},{tr_lon:.6f}) BR=({br_lat:.6f},{br_lon:.6f}) BL=({bl_lat:.6f},{bl_lon:.6f})")
         log.info(f"📐 Raw GPTS[0:8]: {processed_gpts[:8]}")
