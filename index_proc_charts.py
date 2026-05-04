@@ -173,30 +173,59 @@ def extract_georef(doc, page, pdf_bytes):
                 lat, lng = from_meters(processed_gpts[i+1], processed_gpts[i])
                 processed_gpts[i], processed_gpts[i+1] = lat, lng
                 
-        rect = page.rect
-        bw, bh, bx, by = rect.width, rect.height, rect.x0, rect.y0
+        # Boxes to try
+        boxes = [page.rect, page.cropbox, page.mediabox]
+        unique_boxes = []
+        for b in boxes:
+            if not any(abs(b.x0 - ub.x0) < 1 and abs(b.y0 - ub.y0) < 1 and abs(b.width - ub.width) < 1 for ub in unique_boxes):
+                unique_boxes.append(b)
+                
+        best_residual = float('inf')
+        final_solver = None
         
-        is_normalized = all(abs(v) <= 1.1 for v in lpts)
-        if is_normalized:
-            scaled_lpts = [(v * bw + bx) if i % 2 == 0 else (v * bh + by) for i, v in enumerate(lpts)]
-        else:
-            scaled_lpts = lpts
+        for box in unique_boxes:
+            bx, by = box.x0, box.y0
+            bw_orig, bh_orig = box.width, box.height
+            if bw_orig <= 0 or bh_orig <= 0: continue
             
-        pdf_corners = scaled_lpts[:8]
-        geo_corners = [
-            processed_gpts[6], processed_gpts[7], # NW -> TL
-            processed_gpts[4], processed_gpts[5], # NE -> TR
-            processed_gpts[2], processed_gpts[3], # SE -> BR
-            processed_gpts[0], processed_gpts[1]  # SW -> BL
-        ]
+            for sx in range(90, 111):
+                scale_x = sx / 100.0
+                for sy in range(90, 111):
+                    scale_y = sy / 100.0
+                    bw, bh = bw_orig * scale_x, bh_orig * scale_y
+                    
+                    trial_scaled = [(v * bw + bx) if i % 2 == 0 else (v * bh + by) for i, v in enumerate(lpts)]
+                    pdf_corners = trial_scaled[:8]
+                    
+                    tp_solver = solve_affine_4point(pdf_corners, processed_gpts[:8])
+                    if tp_solver:
+                        res = 0
+                        for j in range(0, min(8, len(processed_gpts)), 2):
+                            lat, lng = tp_solver(trial_scaled[j], trial_scaled[j+1])
+                            res += abs(lat - processed_gpts[j]) + abs(lng - processed_gpts[j+1])
+                        
+                        if res < best_residual:
+                            best_residual = res
+                            final_solver = tp_solver
         
-        solver = solve_affine_4point(pdf_corners, geo_corners)
-        if not solver: return None
+        if not final_solver:
+            # Fallback direto (Mapeamento explícito)
+            pdf_corners = lpts[:8]
+            geo_corners = [
+                processed_gpts[6], processed_gpts[7], # NW -> TL
+                processed_gpts[4], processed_gpts[5], # NE -> TR
+                processed_gpts[2], processed_gpts[3], # SE -> BR
+                processed_gpts[0], processed_gpts[1]  # SW -> BL
+            ]
+            final_solver = solve_affine_4point(pdf_corners, geo_corners)
+            if not final_solver: return None
+            
+        bw, bh = page.rect.width, page.rect.height
         
-        tl_lat, tl_lon = solver(0, 0)
-        tr_lat, tr_lon = solver(bw, 0)
-        br_lat, br_lon = solver(bw, bh)
-        bl_lat, bl_lon = solver(0, bh)
+        tl_lat, tl_lon = final_solver(0, 0)
+        tr_lat, tr_lon = final_solver(bw, 0)
+        br_lat, br_lon = final_solver(bw, bh)
+        bl_lat, bl_lon = final_solver(0, bh)
         
         return {
             "type": "Sentinel_Bytescan",
