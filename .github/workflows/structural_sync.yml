@@ -1,9 +1,9 @@
-name: Structural Airspace Sync (AIXM 5.1)
+﻿name: "🛰️ SkyFPL - Robô Processador de Espaços Aéreos Estruturais"
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 5 * * *' # Diariamente às 05:00 UTC
+    - cron: '0 5 * * *'
 
 jobs:
   sync:
@@ -17,17 +17,17 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: aixm-airspaces/package-lock.json
+          cache-dependency-path: aixm-structural/package-lock.json
 
       - name: Install Dependencies
         run: |
-          cd aixm-airspaces
-          npm ci
+          cd aixm-structural
+          npm install
 
       - name: Run Structural Extractor
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          cd aixm-airspaces
-          node structural_extractor.mjs
+          cd aixm-structural
+          node extractor.mjs
