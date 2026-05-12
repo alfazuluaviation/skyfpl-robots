@@ -279,6 +279,7 @@ async function runSync() {
                                 uom_upper: area.uom_upper,
                                 lowerLimit: area.lowerLimit,
                                 uom_lower: area.uom_lower,
+                                full_aixm_node: area.raw, // Salvando o nó bruto para auditoria
                                 processed_at: new Date().toISOString(),
                                 source: 'SkyFPL Structural Robot (AIXM 5.1)'
                             }
