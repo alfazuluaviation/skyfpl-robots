@@ -166,23 +166,26 @@ async function runSync() {
         const jsonObj2 = parser2.parse(xmlText);
         const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-        // 1. Indexar Serviços e Frequências
+        // 1. Indexar Serviços, Unidades e Frequências
         console.log('📻 [ROBOT] Indexando Frequências e Serviços...');
-        const serviceMap = {}; // designator -> frequencies[]
+        const serviceMap = {}; // nome/designator -> frequencies[]
         
         members.forEach(member => {
-            const service = member.Service || member.ApproachControlService || member.AreaControlService || member.AerodromeControlService;
-            if (!service) return;
+            // Tenta encontrar qualquer tipo de serviço ou unidade
+            const entity = member.Service || member.ApproachControlService || member.AreaControlService || 
+                           member.AerodromeControlService || member.Unit || member.AirTrafficControlService;
+            if (!entity) return;
 
-            const timeSlice = (Array.isArray(service.timeSlice) ? service.timeSlice : [service.timeSlice])[0]?.ServiceTimeSlice;
-            if (!timeSlice) return;
+            const timeSlice = (Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice])[0];
+            const data = timeSlice?.ServiceTimeSlice || timeSlice?.UnitTimeSlice || timeSlice?.AirTrafficControlServiceTimeSlice;
+            if (!data) return;
 
-            const name = timeSlice.name;
-            const designator = timeSlice.designator;
+            const name = data.name;
+            const designator = data.designator;
             
-            // Frequências
+            // Coletar Frequências (podem estar em radioCommunicationChannel ou em associações de unidade)
             const frequencies = [];
-            const channels = Array.isArray(timeSlice.radioCommunicationChannel) ? timeSlice.radioCommunicationChannel : [timeSlice.radioCommunicationChannel];
+            const channels = Array.isArray(data.radioCommunicationChannel) ? data.radioCommunicationChannel : [data.radioCommunicationChannel];
             
             channels.forEach(ch => {
                 const channel = ch?.RadioCommunicationChannel;
@@ -192,10 +195,13 @@ async function runSync() {
                 if (freq) frequencies.push(`${freq} ${uom}`);
             });
 
-            if (designator) {
-                if (!serviceMap[designator]) serviceMap[designator] = [];
-                serviceMap[designator].push(...frequencies);
-            }
+            // Indexar por Designador (ex: SBWA) e por Nome (ex: AMAZONAS)
+            const keys = [designator, name].filter(Boolean);
+            keys.forEach(k => {
+                const normalizedKey = k.toString().toUpperCase();
+                if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
+                serviceMap[normalizedKey].push(...frequencies);
+            });
         });
 
         // 2. Processar Espaços Aéreos
