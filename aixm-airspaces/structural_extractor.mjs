@@ -184,7 +184,7 @@ async function runSync() {
                     const data = obj[k];
                     if (data) {
                         let val = data.val || data['#text'] || (typeof data !== 'object' ? data : null);
-                        if (typeof val === 'object' && val['#text']) val = val['#text'];
+                        if (val && typeof val === 'object' && val['#text']) val = val['#text'];
                         
                         const uom = data['@_uom'] || 'MHz';
                         if (val && !isNaN(parseFloat(val))) {
