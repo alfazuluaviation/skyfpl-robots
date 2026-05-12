@@ -171,7 +171,7 @@ async function runSync() {
             const xmlText = await zip.files[xmlFileName].async('string');
 
             // --- SONDA EXPERIMENTAL (Debug Probe) ---
-            const probes = ['119.1', '128.6'];
+            const probes = ['119.1', '128.6', '122.500', '122,500'];
             probes.forEach(p => {
                 const idx = xmlText.indexOf(p);
                 if (idx !== -1) {
@@ -304,19 +304,23 @@ async function runSync() {
 
             // Fallback: Extração via Regex nas Observações (Limpa RTF primeiro)
             if (finalFrequencies.length === 0 && area.observacoes) {
-                // Limpeza básica de RTF para não atrapalhar o Regex
                 const cleanObs = area.observacoes
-                    .replace(/\\['][a-f0-9]{2}/g, '') // Remove caracteres hex do RTF
-                    .replace(/\\[a-z0-9]+/g, ' ')      // Remove comandos RTF (\par, \b, etc)
-                    .replace(/[{}]/g, '');            // Remove chaves
+                    .replace(/\\['][a-f0-9]{2}/g, '') 
+                    .replace(/\\[a-z0-9]+/g, ' ')     
+                    .replace(/[{}]/g, '');            
+
+                if (area.ident === 'SBWB_01') {
+                    console.log(`🧪 [DEBUG] Observações SBWB_01 (Limpa): ${cleanObs.substring(0, 100)}...`);
+                }
 
                 const freqRegex = /(\d{3}[.,]\d{2,3})/g;
                 let m;
                 while ((m = freqRegex.exec(cleanObs)) !== null) {
                     const f = m[1].replace(',', '.');
                     const num = parseFloat(f);
-                    if (num >= 108 && num <= 137) { // Faixa VHF Aeronáutica
+                    if (num >= 108 && num <= 137) { 
                         finalFrequencies.push(`${num.toFixed(3)} MHz`);
+                        if (area.ident === 'SBWB_01') console.log(`🎯 [DEBUG] Frequência capturada para SBWB_01: ${num}`);
                     }
                 }
             }
