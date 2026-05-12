@@ -228,12 +228,22 @@ async function runSync() {
                 const notes = extractAllNotes(timeSlice);
                 const obs = toTacticalCase(notes.join(' / ')) || 'SEM OBSERVAÇÕES';
 
-                // Tentar vincular frequências pelo designator ou nome
+                // Tentar vincular frequências pelo designator ou nome (busca inteligente)
+                const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() || '';
+                const normIdent = normalize(ident);
+                const normName = normalize(name);
+
                 let freqs = serviceMap[ident] || [];
+                
                 if (freqs.length === 0) {
-                    // Busca por aproximação de nome se falhar o designator
-                    const matchingService = Object.keys(serviceMap).find(k => name.includes(k) || k.includes(ident));
-                    if (matchingService) freqs = serviceMap[matchingService];
+                    const matchingKey = Object.keys(serviceMap).find(k => {
+                        const normKey = normalize(k);
+                        return normKey.includes(normIdent) || 
+                               normIdent.includes(normKey) || 
+                               normKey.includes(normName) || 
+                               normName.includes(normKey);
+                    });
+                    if (matchingKey) freqs = serviceMap[matchingKey];
                 }
 
                 enrichedData.push({
