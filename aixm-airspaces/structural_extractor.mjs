@@ -164,8 +164,19 @@ async function runSync() {
         const enrichedData = [];
 
         for (const xmlFileName of xmlFiles) {
-            console.log(`🔍 [ROBOT] Processando: ${xmlFileName}`);
+            console.log(`🔍 [ROBOT] Analisando: ${xmlFileName}`);
             const xmlText = await zip.files[xmlFileName].async('string');
+
+            // --- SONDA EXPERIMENTAL (Debug Probe) ---
+            const probes = ['119.1', '128.6'];
+            probes.forEach(p => {
+                const idx = xmlText.indexOf(p);
+                if (idx !== -1) {
+                    console.log(`🎯 [SONDA] Valor '${p}' encontrado no arquivo ${xmlFileName}!`);
+                    console.log(`📝 [SONDA] Contexto: ...${xmlText.substring(idx - 100, idx + 100)}...`);
+                }
+            });
+            // ----------------------------------------
             const parser2 = new XMLParser({ 
                 ignoreAttributes: false, 
                 attributeNamePrefix: "@_", 
