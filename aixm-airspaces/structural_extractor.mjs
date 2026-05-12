@@ -222,7 +222,8 @@ async function runSync() {
                 const airspace = member.Airspace;
                 if (!airspace) return;
 
-                const timeSlice = (airspace.timeSlice || [])
+                const timeSlices = Array.isArray(airspace.timeSlice) ? airspace.timeSlice : (airspace.timeSlice ? [airspace.timeSlice] : []);
+                const timeSlice = timeSlices
                     .find(ts => ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation))?.AirspaceTimeSlice;
                 
                 if (timeSlice && structuralTypes.includes(timeSlice.type)) {
