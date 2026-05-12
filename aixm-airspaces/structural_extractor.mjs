@@ -166,66 +166,56 @@ async function runSync() {
         const jsonObj2 = parser2.parse(xmlText);
         const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-        // 1. Indexar Serviços, Unidades e Frequências (Lógica Agressiva)
-        console.log('📻 [ROBOT] Iniciando varredura global de frequências...');
+        // 1. Indexar Serviços, Unidades e Frequências (Lógica Universal)
+        console.log('📻 [ROBOT] Iniciando varredura universal de frequências...');
         const serviceMap = {}; // nome/designator -> frequencies[]
         
         members.forEach(member => {
-            // Busca por qualquer entidade que possa conter comunicações
-            const entity = member.Service || member.ApproachControlService || member.AreaControlService || 
-                           member.AerodromeControlService || member.Unit || member.AirTrafficControlService ||
-                           member.RadioCommunicationChannel; // Também busca canais diretos
-            
-            if (!entity) return;
+            // Varre todas as propriedades do membro para encontrar entidades com frequências
+            const keys = Object.keys(member);
+            keys.forEach(key => {
+                const entity = member[key];
+                if (!entity || typeof entity !== 'object') return;
 
-            // Se for um RadioCommunicationChannel direto (raro, mas possível)
-            if (entity.transmissionFrequency) {
-                const freqData = entity.transmissionFrequency;
-                const freqVal = freqData.val || freqData['#text'] || freqData;
-                const uom = freqData['@_uom'] || 'MHz';
-                if (freqVal && typeof freqVal !== 'object') {
-                    const name = entity.name || 'COMM';
-                    if (!serviceMap[name.toUpperCase()]) serviceMap[name.toUpperCase()] = [];
-                    serviceMap[name.toUpperCase()].push(`${freqVal} ${uom}`);
-                    return;
-                }
-            }
+                const timeSlices = Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice];
+                timeSlices.forEach(ts => {
+                    // Tenta extrair dados de qualquer tipo de TimeSlice
+                    const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
+                    if (!data || typeof data !== 'object') return;
 
-            // Lógica para Entidades Complexas (Service/Unit)
-            const timeSlices = Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice];
-            timeSlices.forEach(ts => {
-                const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
-                if (!data) return;
-
-                const name = data.name;
-                const designator = data.designator;
-                
-                const channels = Array.isArray(data.radioCommunicationChannel) ? data.radioCommunicationChannel : [data.radioCommunicationChannel];
-                const frequencies = [];
-
-                channels.forEach(ch => {
-                    const channel = ch?.RadioCommunicationChannel;
-                    if (!channel) return;
+                    const name = data.name;
+                    const designator = data.designator;
                     
-                    const freqData = channel.transmissionFrequency;
-                    if (!freqData) return;
-
-                    // Tenta capturar o valor de múltiplas formas (val, #text, ou direto)
-                    let val = freqData.val || freqData['#text'] || freqData;
-                    if (typeof val === 'object' && val['#text']) val = val['#text'];
+                    // Busca por canais de rádio em qualquer propriedade
+                    const frequencies = [];
+                    const dataKeys = Object.keys(data);
                     
-                    const uom = freqData['@_uom'] || 'MHz';
-                    if (val && typeof val !== 'object') frequencies.push(`${val} ${uom}`);
-                });
+                    dataKeys.forEach(dk => {
+                        if (dk.toLowerCase().includes('radiocommunicationchannel')) {
+                            const channels = Array.isArray(data[dk]) ? data[dk] : [data[dk]];
+                            channels.forEach(ch => {
+                                const channel = ch?.RadioCommunicationChannel || ch;
+                                const freqData = channel?.transmissionFrequency;
+                                if (!freqData) return;
 
-                if (frequencies.length > 0) {
-                    const keys = [designator, name].filter(Boolean);
-                    keys.forEach(k => {
-                        const normalizedKey = k.toString().toUpperCase();
-                        if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
-                        serviceMap[normalizedKey].push(...frequencies);
+                                let val = freqData.val || freqData['#text'] || freqData;
+                                if (typeof val === 'object' && val['#text']) val = val['#text'];
+                                
+                                const uom = freqData['@_uom'] || 'MHz';
+                                if (val && typeof val !== 'object') frequencies.push(`${val} ${uom}`);
+                            });
+                        }
                     });
-                }
+
+                    if (frequencies.length > 0) {
+                        const sKeys = [designator, name].filter(Boolean);
+                        sKeys.forEach(k => {
+                            const normalizedKey = k.toString().toUpperCase();
+                            if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
+                            serviceMap[normalizedKey].push(...frequencies);
+                        });
+                    }
+                });
             });
         });
         
@@ -262,7 +252,7 @@ async function runSync() {
                 const notes = extractAllNotes(timeSlice);
                 const obs = toTacticalCase(notes.join(' / ')) || 'SEM OBSERVAÇÕES';
 
-                // Tentar vincular frequências pelo designator ou nome (busca inteligente / Fuzzy Match)
+                // Tentar vincular frequências
                 const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
                 const normIdent = normalize(ident);
                 const normName = normalize(name);
@@ -272,10 +262,8 @@ async function runSync() {
                 if (freqs.length === 0) {
                     const matchingKey = Object.keys(serviceMap).find(k => {
                         const normKey = normalize(k);
-                        // 1. Match exato ou contido
                         if (normKey.includes(normIdent) || normIdent.includes(normKey)) return true;
                         if (normKey.includes(normName) || normName.includes(normKey)) return true;
-                        // 2. Fuzzy match por prefixo (primeiros 6 caracteres)
                         if (normName.length >= 6 && normKey.startsWith(normName.substring(0, 6))) return true;
                         if (normKey.length >= 6 && normName.startsWith(normKey.substring(0, 6))) return true;
                         return false;
@@ -299,7 +287,7 @@ async function runSync() {
             }
         });
 
-        console.log(`📊 [ROBOT] ${enrichedData.length} áreas estruturais encontradas. Sincronizando Supabase...`);
+        console.log(`📊 [ROBOT] ${enrichedData.length} áreas encontradas. Sincronizando Supabase...`);
 
         let count = 0;
         for (const area of enrichedData) {
@@ -307,27 +295,34 @@ async function runSync() {
                 .from('airspace_snapshots')
                 .select('id, raw_properties')
                 .eq('ident', area.ident)
-                .eq('type', area.type)
                 .eq('is_current', true)
-                .limit(1)
                 .maybeSingle();
 
+            const snapshotData = {
+                ident: area.ident,
+                name: area.name,
+                type: area.type,
+                upperlimit: parseInt(area.upperLimit) || null,
+                uplimituni: area.uom_upper,
+                lowerlimit: parseInt(area.lowerLimit) || null,
+                lowerlimituni: area.uom_lower,
+                is_current: true,
+                raw_properties: {
+                    ...(existing?.raw_properties || {}),
+                    aip_data: {
+                        horario: area.horario,
+                        observacoes: area.observacoes,
+                        frequencias: area.frequencias,
+                        upperLimit: area.upperLimit,
+                        uom_upper: area.uom_upper,
+                        lowerLimit: area.lowerLimit,
+                        uom_lower: area.uom_lower,
+                        full_aixm_node: area.raw
+                    }
+                }
+            };
+
             if (existing) {
-                const { error } = await supabase
-                    .from('airspace_snapshots')
-                    .update({
-                        raw_properties: {
-                            ...(existing.raw_properties || {}),
-                            aip_data: {
-                                horario: area.horario,
-                                observacoes: area.observacoes,
-                                frequencias: area.frequencias,
-                                upperLimit: area.upperLimit,
-                                uom_upper: area.uom_upper,
-                                lowerLimit: area.lowerLimit,
-                                uom_lower: area.uom_lower,
-                                full_aixm_node: area.raw, // Salvando o nó bruto para auditoria
-                                processed_at: new Date().toISOString(),
                                 source: 'SkyFPL Structural Robot (AIXM 5.1)'
                             }
                         }
