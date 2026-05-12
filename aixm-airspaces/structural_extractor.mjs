@@ -234,20 +234,23 @@ async function runSync() {
                 const notes = extractAllNotes(timeSlice);
                 const obs = toTacticalCase(notes.join(' / ')) || 'SEM OBSERVAÇÕES';
 
-                // Tentar vincular frequências pelo designator ou nome (busca inteligente)
-                const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase() || '';
+                // Tentar vincular frequências pelo designator ou nome (busca inteligente / Fuzzy Match)
+                const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
                 const normIdent = normalize(ident);
                 const normName = normalize(name);
 
-                let freqs = serviceMap[ident] || [];
+                let freqs = serviceMap[ident?.toUpperCase()] || [];
                 
                 if (freqs.length === 0) {
                     const matchingKey = Object.keys(serviceMap).find(k => {
                         const normKey = normalize(k);
-                        return normKey.includes(normIdent) || 
-                               normIdent.includes(normKey) || 
-                               normKey.includes(normName) || 
-                               normName.includes(normKey);
+                        // 1. Match exato ou contido
+                        if (normKey.includes(normIdent) || normIdent.includes(normKey)) return true;
+                        if (normKey.includes(normName) || normName.includes(normKey)) return true;
+                        // 2. Fuzzy match por prefixo (primeiros 6 caracteres)
+                        if (normName.length >= 6 && normKey.startsWith(normName.substring(0, 6))) return true;
+                        if (normKey.length >= 6 && normName.startsWith(normKey.substring(0, 6))) return true;
+                        return false;
                     });
                     if (matchingKey) freqs = serviceMap[matchingKey];
                 }
