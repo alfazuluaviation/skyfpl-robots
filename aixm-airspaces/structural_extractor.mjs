@@ -166,43 +166,71 @@ async function runSync() {
         const jsonObj2 = parser2.parse(xmlText);
         const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-        // 1. Indexar Serviços, Unidades e Frequências
-        console.log('📻 [ROBOT] Indexando Frequências e Serviços...');
+        // 1. Indexar Serviços, Unidades e Frequências (Lógica Agressiva)
+        console.log('📻 [ROBOT] Iniciando varredura global de frequências...');
         const serviceMap = {}; // nome/designator -> frequencies[]
         
         members.forEach(member => {
-            // Tenta encontrar qualquer tipo de serviço ou unidade
+            // Busca por qualquer entidade que possa conter comunicações
             const entity = member.Service || member.ApproachControlService || member.AreaControlService || 
-                           member.AerodromeControlService || member.Unit || member.AirTrafficControlService;
+                           member.AerodromeControlService || member.Unit || member.AirTrafficControlService ||
+                           member.RadioCommunicationChannel; // Também busca canais diretos
+            
             if (!entity) return;
 
-            const timeSlice = (Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice])[0];
-            const data = timeSlice?.ServiceTimeSlice || timeSlice?.UnitTimeSlice || timeSlice?.AirTrafficControlServiceTimeSlice;
-            if (!data) return;
+            // Se for um RadioCommunicationChannel direto (raro, mas possível)
+            if (entity.transmissionFrequency) {
+                const freqData = entity.transmissionFrequency;
+                const freqVal = freqData.val || freqData['#text'] || freqData;
+                const uom = freqData['@_uom'] || 'MHz';
+                if (freqVal && typeof freqVal !== 'object') {
+                    const name = entity.name || 'COMM';
+                    if (!serviceMap[name.toUpperCase()]) serviceMap[name.toUpperCase()] = [];
+                    serviceMap[name.toUpperCase()].push(`${freqVal} ${uom}`);
+                    return;
+                }
+            }
 
-            const name = data.name;
-            const designator = data.designator;
-            
-            // Coletar Frequências (podem estar em radioCommunicationChannel ou em associações de unidade)
-            const frequencies = [];
-            const channels = Array.isArray(data.radioCommunicationChannel) ? data.radioCommunicationChannel : [data.radioCommunicationChannel];
-            
-            channels.forEach(ch => {
-                const channel = ch?.RadioCommunicationChannel;
-                if (!channel) return;
-                const freq = channel.transmissionFrequency?.val || channel.transmissionFrequency;
-                const uom = channel.transmissionFrequency?.['@_uom'] || 'MHz';
-                if (freq) frequencies.push(`${freq} ${uom}`);
-            });
+            // Lógica para Entidades Complexas (Service/Unit)
+            const timeSlices = Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice];
+            timeSlices.forEach(ts => {
+                const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
+                if (!data) return;
 
-            // Indexar por Designador (ex: SBWA) e por Nome (ex: AMAZONAS)
-            const keys = [designator, name].filter(Boolean);
-            keys.forEach(k => {
-                const normalizedKey = k.toString().toUpperCase();
-                if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
-                serviceMap[normalizedKey].push(...frequencies);
+                const name = data.name;
+                const designator = data.designator;
+                
+                const channels = Array.isArray(data.radioCommunicationChannel) ? data.radioCommunicationChannel : [data.radioCommunicationChannel];
+                const frequencies = [];
+
+                channels.forEach(ch => {
+                    const channel = ch?.RadioCommunicationChannel;
+                    if (!channel) return;
+                    
+                    const freqData = channel.transmissionFrequency;
+                    if (!freqData) return;
+
+                    // Tenta capturar o valor de múltiplas formas (val, #text, ou direto)
+                    let val = freqData.val || freqData['#text'] || freqData;
+                    if (typeof val === 'object' && val['#text']) val = val['#text'];
+                    
+                    const uom = freqData['@_uom'] || 'MHz';
+                    if (val && typeof val !== 'object') frequencies.push(`${val} ${uom}`);
+                });
+
+                if (frequencies.length > 0) {
+                    const keys = [designator, name].filter(Boolean);
+                    keys.forEach(k => {
+                        const normalizedKey = k.toString().toUpperCase();
+                        if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
+                        serviceMap[normalizedKey].push(...frequencies);
+                    });
+                }
             });
         });
+        
+        const totalServices = Object.keys(serviceMap).length;
+        console.log(`📡 [ROBOT] Varredura finalizada. ${totalServices} serviços/unidades indexados com frequências.`);
 
         // 2. Processar Espaços Aéreos
         console.log('🌍 [ROBOT] Processando Espaços Aéreos...');
