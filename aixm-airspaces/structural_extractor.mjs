@@ -202,7 +202,7 @@ async function runSync() {
 
                 if (frequencies.length > 0) {
                     const entity = Object.values(member)[0];
-                    const timeSlices = entity?.timeSlice || [];
+                    const timeSlices = Array.isArray(entity?.timeSlice) ? entity.timeSlice : (entity?.timeSlice ? [entity.timeSlice] : []);
                     timeSlices.forEach(ts => {
                         const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
                         if (!data) return;
