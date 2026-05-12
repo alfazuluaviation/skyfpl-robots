@@ -155,7 +155,10 @@ async function runSync() {
         const zip = await JSZip.loadAsync(zipData);
         fs.unlinkSync(tempPath);
         
-        const xmlFiles = Object.keys(zip.files).filter(f => f.endsWith('.xml'));
+        const allFiles = Object.keys(zip.files);
+        console.log(`📦 [ROBOT] Arquivos no ZIP: ${allFiles.join(', ')}`);
+
+        const xmlFiles = allFiles.filter(f => f.endsWith('.xml'));
         if (xmlFiles.length === 0) throw new Error('Nenhum arquivo XML encontrado no ZIP.');
         
         console.log(`📄 [ROBOT] Encontrados ${xmlFiles.length} arquivos XML. Iniciando processamento global...`);
@@ -298,6 +301,18 @@ async function runSync() {
             }
             
             const finalFrequencies = [...new Set(freqs)];
+
+            // Fallback: Extração via Regex nas Observações (Caso a frequência esteja no texto)
+            if (finalFrequencies.length === 0 && area.observacoes) {
+                const freqRegex = /(\d{3}[.,]\d{3})/g;
+                let m;
+                while ((m = freqRegex.exec(area.observacoes)) !== null) {
+                    const f = m[1].replace(',', '.');
+                    if (parseFloat(f) > 100) { // Evita pegar números aleatórios que não sejam frequências VHF
+                        finalFrequencies.push(`${f} MHz`);
+                    }
+                }
+            }
 
             const { data: existing } = await supabase
                 .from('airspace_snapshots')
