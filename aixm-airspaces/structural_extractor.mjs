@@ -178,32 +178,36 @@ async function runSync() {
                 return;
             }
 
-            if (obj.transmissionFrequency || obj.RadioCommunicationChannel) {
-                const ch = obj.RadioCommunicationChannel || obj;
-                const freqData = ch.transmissionFrequency;
-                if (freqData) {
-                    let val = freqData.val || freqData['#text'] || freqData;
-                    if (typeof val === 'object' && val['#text']) val = val['#text'];
-                    const uom = freqData['@_uom'] || 'MHz';
-                    if (val && typeof val !== 'object') targetList.push(`${val} ${uom}`);
+            for (const k in obj) {
+                // Busca por qualquer chave que contenha 'frequency'
+                if (k.toLowerCase().includes('frequency')) {
+                    const data = obj[k];
+                    if (data) {
+                        let val = data.val || data['#text'] || (typeof data !== 'object' ? data : null);
+                        if (typeof val === 'object' && val['#text']) val = val['#text'];
+                        
+                        const uom = data['@_uom'] || 'MHz';
+                        if (val && !isNaN(parseFloat(val))) {
+                            targetList.push(`${val} ${uom}`);
+                        }
+                    }
                 }
+                // Continua a busca recursiva
+                findFrequencies(obj[k], targetList);
             }
-
-            Object.keys(obj).forEach(k => findFrequencies(obj[k], targetList));
         };
 
         members.forEach(member => {
-            const entity = Object.values(member)[0];
-            if (!entity || typeof entity !== 'object') return;
-
             const frequencies = [];
-            findFrequencies(entity, frequencies);
+            findFrequencies(member, frequencies);
 
             if (frequencies.length > 0) {
-                const timeSlices = Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice];
+                const entity = Object.values(member)[0];
+                const timeSlices = Array.isArray(entity?.timeSlice) ? entity.timeSlice : [entity?.timeSlice];
                 timeSlices.forEach(ts => {
                     const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
-                    const sKeys = [data?.designator, data?.name].filter(Boolean);
+                    if (!data) return;
+                    const sKeys = [data.designator, data.name].filter(Boolean);
                     sKeys.forEach(k => {
                         const normalizedKey = k.toString().toUpperCase();
                         if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
