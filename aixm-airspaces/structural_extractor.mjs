@@ -323,23 +323,27 @@ async function runSync() {
             };
 
             if (existing) {
-                                source: 'SkyFPL Structural Robot (AIXM 5.1)'
-                            }
-                        }
-                    })
+                // Atualiza existente
+                const { error: updateError } = await supabase
+                    .from('airspace_snapshots')
+                    .update(snapshotData)
                     .eq('id', existing.id);
                 
-                if (!error) {
-                    count++;
-                } else {
-                    console.warn(`⚠️ [ROBOT] Erro ao atualizar ${area.type} ${area.ident}:`, error.message);
-                }
+                if (!updateError) count++;
+                else console.error(`❌ Erro ao atualizar ${area.ident}:`, updateError.message);
             } else {
-                console.log(`ℹ️ [ROBOT] Ignorando ${area.type} ${area.ident}: Não encontrada no banco (is_current=true).`);
+                // CRIA NOVO (Extração 100%)
+                console.log(`✨ [ROBOT] Criando novo registro: ${area.type} ${area.ident}`);
+                const { error: insertError } = await supabase
+                    .from('airspace_snapshots')
+                    .insert(snapshotData);
+                
+                if (!insertError) count++;
+                else console.error(`❌ Erro ao criar ${area.ident}:`, insertError.message);
             }
         }
 
-        console.log(`✅ [ROBOT] Sincronização concluída! ${count} registros atualizados.`);
+        console.log(`✅ [ROBOT] Sincronização concluída! ${count} registros processados.`);
 
     } catch (err) {
         console.error('❌ [ROBOT] Erro fatal:', err.message);
