@@ -166,13 +166,19 @@ async function runSync() {
         const jsonObj2 = parser2.parse(xmlText);
         const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-        // 1. Indexar Serviços, Unidades e Frequências (Busca Recursiva Profunda)
+        // 1. Indexar Serviços, Unidades e Frequências (Busca Recursiva Profunda corrigida para Arrays)
         console.log('📻 [ROBOT] Iniciando busca recursiva de frequências...');
         const serviceMap = {}; // nome/designator -> frequencies[]
         
         const findFrequencies = (obj, targetList) => {
             if (!obj || typeof obj !== 'object') return;
             
+            // Se for um Array, percorre cada item
+            if (Array.isArray(obj)) {
+                obj.forEach(item => findFrequencies(item, targetList));
+                return;
+            }
+
             // Se encontrar um canal de rádio
             if (obj.transmissionFrequency || obj.RadioCommunicationChannel) {
                 const ch = obj.RadioCommunicationChannel || obj;
@@ -185,11 +191,14 @@ async function runSync() {
                 }
             }
 
-            Object.keys(obj).forEach(k => findFrequencies(obj[k], targetList));
+            // Continua a busca em todas as propriedades
+            Object.keys(obj).forEach(k => {
+                if (k !== 'timeSlice') findFrequencies(obj[k], targetList); // Evita loop infinito em referências circulares se houver
+            });
         };
 
         members.forEach(member => {
-            const entity = Object.values(member)[0]; // Pega o objeto principal do membro (Service, Unit, etc)
+            const entity = Object.values(member)[0];
             if (!entity || typeof entity !== 'object') return;
 
             const frequencies = [];
@@ -226,7 +235,12 @@ async function runSync() {
             
             if (timeSlice && structuralTypes.includes(timeSlice.type)) {
                 const ident = String(timeSlice.designator || '');
-                const nam = timeSlice.name || ''; // Usando nam internamente para alinhar com o banco
+                const nam = timeSlice.name || '';
+                
+                // Mapeamento de Tipo para evitar erro de Constraint no Supabase
+                // Se o banco não aceita CTA, mapeamos para TMA (que é estruturalmente similar)
+                let dbType = timeSlice.type;
+                if (dbType === 'CTA') dbType = 'TMA'; 
                 
                 // Horários
                 const activation = (Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation])[0]?.AirspaceActivation;
