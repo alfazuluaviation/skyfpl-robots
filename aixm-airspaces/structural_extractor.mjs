@@ -166,57 +166,47 @@ async function runSync() {
         const jsonObj2 = parser2.parse(xmlText);
         const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-        // 1. Indexar Serviços, Unidades e Frequências (Lógica Universal)
-        console.log('📻 [ROBOT] Iniciando varredura universal de frequências...');
+        // 1. Indexar Serviços, Unidades e Frequências (Busca Recursiva Profunda)
+        console.log('📻 [ROBOT] Iniciando busca recursiva de frequências...');
         const serviceMap = {}; // nome/designator -> frequencies[]
         
-        members.forEach(member => {
-            // Varre todas as propriedades do membro para encontrar entidades com frequências
-            const keys = Object.keys(member);
-            keys.forEach(key => {
-                const entity = member[key];
-                if (!entity || typeof entity !== 'object') return;
+        const findFrequencies = (obj, targetList) => {
+            if (!obj || typeof obj !== 'object') return;
+            
+            // Se encontrar um canal de rádio
+            if (obj.transmissionFrequency || obj.RadioCommunicationChannel) {
+                const ch = obj.RadioCommunicationChannel || obj;
+                const freqData = ch.transmissionFrequency;
+                if (freqData) {
+                    let val = freqData.val || freqData['#text'] || freqData;
+                    if (typeof val === 'object' && val['#text']) val = val['#text'];
+                    const uom = freqData['@_uom'] || 'MHz';
+                    if (val && typeof val !== 'object') targetList.push(`${val} ${uom}`);
+                }
+            }
 
+            Object.keys(obj).forEach(k => findFrequencies(obj[k], targetList));
+        };
+
+        members.forEach(member => {
+            const entity = Object.values(member)[0]; // Pega o objeto principal do membro (Service, Unit, etc)
+            if (!entity || typeof entity !== 'object') return;
+
+            const frequencies = [];
+            findFrequencies(entity, frequencies);
+
+            if (frequencies.length > 0) {
                 const timeSlices = Array.isArray(entity.timeSlice) ? entity.timeSlice : [entity.timeSlice];
                 timeSlices.forEach(ts => {
-                    // Tenta extrair dados de qualquer tipo de TimeSlice
                     const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
-                    if (!data || typeof data !== 'object') return;
-
-                    const name = data.name;
-                    const designator = data.designator;
-                    
-                    // Busca por canais de rádio em qualquer propriedade
-                    const frequencies = [];
-                    const dataKeys = Object.keys(data);
-                    
-                    dataKeys.forEach(dk => {
-                        if (dk.toLowerCase().includes('radiocommunicationchannel')) {
-                            const channels = Array.isArray(data[dk]) ? data[dk] : [data[dk]];
-                            channels.forEach(ch => {
-                                const channel = ch?.RadioCommunicationChannel || ch;
-                                const freqData = channel?.transmissionFrequency;
-                                if (!freqData) return;
-
-                                let val = freqData.val || freqData['#text'] || freqData;
-                                if (typeof val === 'object' && val['#text']) val = val['#text'];
-                                
-                                const uom = freqData['@_uom'] || 'MHz';
-                                if (val && typeof val !== 'object') frequencies.push(`${val} ${uom}`);
-                            });
-                        }
+                    const sKeys = [data?.designator, data?.name].filter(Boolean);
+                    sKeys.forEach(k => {
+                        const normalizedKey = k.toString().toUpperCase();
+                        if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
+                        serviceMap[normalizedKey].push(...frequencies);
                     });
-
-                    if (frequencies.length > 0) {
-                        const sKeys = [designator, name].filter(Boolean);
-                        sKeys.forEach(k => {
-                            const normalizedKey = k.toString().toUpperCase();
-                            if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
-                            serviceMap[normalizedKey].push(...frequencies);
-                        });
-                    }
                 });
-            });
+            }
         });
         
         const totalServices = Object.keys(serviceMap).length;
@@ -236,7 +226,7 @@ async function runSync() {
             
             if (timeSlice && structuralTypes.includes(timeSlice.type)) {
                 const ident = String(timeSlice.designator || '');
-                const name = timeSlice.name || '';
+                const nam = timeSlice.name || ''; // Usando nam internamente para alinhar com o banco
                 
                 // Horários
                 const activation = (Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation])[0]?.AirspaceActivation;
@@ -255,7 +245,7 @@ async function runSync() {
                 // Tentar vincular frequências
                 const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
                 const normIdent = normalize(ident);
-                const normName = normalize(name);
+                const normName = normalize(nam);
 
                 let freqs = serviceMap[ident?.toUpperCase()] || [];
                 
@@ -273,7 +263,7 @@ async function runSync() {
 
                 enrichedData.push({
                     ident,
-                    name,
+                    nam,
                     type: timeSlice.type,
                     upperLimit: timeSlice.upperLimit?.val || timeSlice.upperLimit,
                     uom_upper: timeSlice.upperLimit?.['@_uom'] || 'FL',
@@ -300,7 +290,7 @@ async function runSync() {
 
             const snapshotData = {
                 ident: area.ident,
-                name: area.name,
+                nam: area.nam, // CORRIGIDO: name -> nam
                 type: area.type,
                 upperlimit: parseInt(area.upperLimit) || null,
                 uplimituni: area.uom_upper,
