@@ -173,13 +173,11 @@ async function runSync() {
         const findFrequencies = (obj, targetList) => {
             if (!obj || typeof obj !== 'object') return;
             
-            // Se for um Array, percorre cada item
             if (Array.isArray(obj)) {
                 obj.forEach(item => findFrequencies(item, targetList));
                 return;
             }
 
-            // Se encontrar um canal de rádio
             if (obj.transmissionFrequency || obj.RadioCommunicationChannel) {
                 const ch = obj.RadioCommunicationChannel || obj;
                 const freqData = ch.transmissionFrequency;
@@ -191,10 +189,7 @@ async function runSync() {
                 }
             }
 
-            // Continua a busca em todas as propriedades
-            Object.keys(obj).forEach(k => {
-                if (k !== 'timeSlice') findFrequencies(obj[k], targetList); // Evita loop infinito em referências circulares se houver
-            });
+            Object.keys(obj).forEach(k => findFrequencies(obj[k], targetList));
         };
 
         members.forEach(member => {
@@ -237,10 +232,9 @@ async function runSync() {
                 const ident = String(timeSlice.designator || '');
                 const nam = timeSlice.name || '';
                 
-                // Mapeamento de Tipo para evitar erro de Constraint no Supabase
-                // Se o banco não aceita CTA, mapeamos para TMA (que é estruturalmente similar)
+                // Mapeamento agressivo para evitar erros de Constraint (FIR/CTA -> TMA)
                 let dbType = timeSlice.type;
-                if (dbType === 'CTA') dbType = 'TMA'; 
+                if (dbType === 'CTA' || dbType === 'FIR') dbType = 'TMA'; 
                 
                 // Horários
                 const activation = (Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation])[0]?.AirspaceActivation;
@@ -278,7 +272,8 @@ async function runSync() {
                 enrichedData.push({
                     ident,
                     nam,
-                    type: timeSlice.type,
+                    type: dbType, // AGORA SIM: usando o tipo aceito pelo banco
+                    originalType: timeSlice.type,
                     upperLimit: timeSlice.upperLimit?.val || timeSlice.upperLimit,
                     uom_upper: timeSlice.upperLimit?.['@_uom'] || 'FL',
                     lowerLimit: timeSlice.lowerLimit?.val || timeSlice.lowerLimit,
