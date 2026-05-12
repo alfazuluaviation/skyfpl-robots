@@ -1,4 +1,4 @@
-﻿name: "🛰️ SkyFPL - Robô Processador de Espaços Aéreos Estruturais"
+name: "🛰️ SkyFPL - Robô Processador de Espaços Aéreos Estruturais"
 
 on:
   workflow_dispatch:
@@ -17,11 +17,11 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: aixm-structural/package-lock.json
+          cache-dependency-path: aixm-airspaces/package-lock.json
 
       - name: Install Dependencies
         run: |
-          cd aixm-structural
+          cd aixm-airspaces
           npm install
 
       - name: Run Structural Extractor
@@ -29,5 +29,5 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
-          cd aixm-structural
-          node extractor.mjs
+          cd aixm-airspaces
+          node structural_extractor.mjs

@@ -101,29 +101,64 @@ async function runSync() {
     console.log('🚀 [ROBOT-STRUCTURAL] Iniciando extração de TMA, CTR, FIR, CTA...');
     
     try {
-        console.log('🔍 [ROBOT] Consultando catálogo oficial...');
+        console.log('🔍 [ROBOT] Consultando catálogo oficial via Edge Function...');
         const DISCOVERY_URL = `${SUPABASE_URL}/functions/v1/fetch-aisweb-data`;
         const discoveryRes = await axios.post(DISCOVERY_URL, 
             { area: 'pub', type: 'aixm' },
             { headers: { 'Authorization': `Bearer ${SUPABASE_KEY}` } }
         );
 
+        if (!discoveryRes.data?.success) {
+            throw new Error('Falha ao descobrir link: ' + (discoveryRes.data?.error || 'Erro desconhecido'));
+        }
+
         const parser = new XMLParser({ ignoreAttributes: false, removeNSPrefix: true });
         const jsonObj = parser.parse(discoveryRes.data.xml);
-        const items = Array.isArray(jsonObj.aisweb?.pub?.item) ? jsonObj.aisweb.pub.item : [jsonObj.aisweb.pub.item];
-        const selectedItem = items.find(i => String(i.name).toLowerCase().includes('completo')) || items[0];
-        let dynamicLink = (selectedItem?.link || selectedItem?.file || '').replace(']]>', '').replace('<![CDATA[', '').split('">')[0].trim();
+        const items = jsonObj.aisweb?.pub?.item || [];
+        const itemsArray = Array.isArray(items) ? items : [items];
+        
+        const selectedItem = itemsArray.find(item => {
+            const name = String(item.name || '').toLowerCase();
+            return name.includes('completo') || name.includes('snapshot') || name.includes('full');
+        }) || itemsArray[0];
 
-        console.log(`📦 [ROBOT] Baixando AIXM: ${dynamicLink}`);
+        let dynamicLink = selectedItem?.link || selectedItem?.file || '';
+        if (typeof dynamicLink === 'object') dynamicLink = dynamicLink['#text'] || '';
+        
+        if (!dynamicLink) {
+            console.error('📦 XML recebido:', discoveryRes.data.xml);
+            throw new Error('Não foi possível encontrar o link de download no catálogo do DECEA.');
+        }
+
+        // Limpeza agressiva: remover CDATA e sufixos estranhos
+        dynamicLink = dynamicLink.replace(']]>', '').replace('<![CDATA[', '').split('">')[0].trim();
+
+        console.log(`🛰️ [ROBOT] Link Autorizado: ${dynamicLink}`);
+        
         const tempPath = './aixm_structural_temp.zip';
         const { execSync } = await import('child_process');
-        execSync(`curl -L -A "Mozilla/5.0" -H "Referer: https://aisweb.decea.mil.br/" -o ${tempPath} "${dynamicLink}"`, { stdio: 'inherit' });
+        
+        console.log('📦 [ROBOT] Iniciando download direto via CURL...');
+        const curlCmd = `curl -L -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" \
+            -H "Referer: https://aisweb.decea.mil.br/?i=download" \
+            --connect-timeout 60 \
+            --retry 3 \
+            -o ${tempPath} "${dynamicLink}"`;
+
+        execSync(curlCmd, { stdio: 'inherit' });
+
+        if (!fs.existsSync(tempPath) || fs.statSync(tempPath).size < 1000000) {
+            throw new Error('O arquivo baixado pelo CURL é muito pequeno ou não existe.');
+        }
 
         const zipData = fs.readFileSync(tempPath);
         const zip = await JSZip.loadAsync(zipData);
         fs.unlinkSync(tempPath);
         
         const xmlFileName = Object.keys(zip.files).find(f => f.endsWith('.xml'));
+        if (!xmlFileName) throw new Error('XML não encontrado no arquivo ZIP.');
+        
+        console.log(`📄 [ROBOT] Extraindo XML: ${xmlFileName}`);
         const xmlText = await zip.files[xmlFileName].async('text');
         
         console.log('🔍 [ROBOT] Analisando XML...');
@@ -235,7 +270,7 @@ async function runSync() {
                     .from('airspace_snapshots')
                     .update({
                         raw_properties: {
-                            ...existing.raw_properties,
+                            ...(existing.raw_properties || {}),
                             aip_data: {
                                 horario: area.horario,
                                 observacoes: area.observacoes,
@@ -251,7 +286,13 @@ async function runSync() {
                     })
                     .eq('id', existing.id);
                 
-                if (!error) count++;
+                if (!error) {
+                    count++;
+                } else {
+                    console.warn(`⚠️ [ROBOT] Erro ao atualizar ${area.type} ${area.ident}:`, error.message);
+                }
+            } else {
+                console.log(`ℹ️ [ROBOT] Ignorando ${area.type} ${area.ident}: Não encontrada no banco (is_current=true).`);
             }
         }
 
