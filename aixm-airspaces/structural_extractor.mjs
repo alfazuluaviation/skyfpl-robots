@@ -155,145 +155,138 @@ async function runSync() {
         const zip = await JSZip.loadAsync(zipData);
         fs.unlinkSync(tempPath);
         
-        const xmlFileName = Object.keys(zip.files).find(f => f.endsWith('.xml'));
-        if (!xmlFileName) throw new Error('XML não encontrado no arquivo ZIP.');
+        const xmlFiles = Object.keys(zip.files).filter(f => f.endsWith('.xml'));
+        if (xmlFiles.length === 0) throw new Error('Nenhum arquivo XML encontrado no ZIP.');
         
-        console.log(`📄 [ROBOT] Extraindo XML: ${xmlFileName}`);
-        const xmlText = await zip.files[xmlFileName].async('text');
+        console.log(`📄 [ROBOT] Encontrados ${xmlFiles.length} arquivos XML. Iniciando processamento global...`);
         
-        console.log('🔍 [ROBOT] Analisando XML...');
-        const parser2 = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_", removeNSPrefix: true });
-        const jsonObj2 = parser2.parse(xmlText);
-        const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
-
-        // 1. Indexar Serviços, Unidades e Frequências (Busca Recursiva Profunda corrigida para Arrays)
-        console.log('📻 [ROBOT] Iniciando busca recursiva de frequências...');
         const serviceMap = {}; // nome/designator -> frequencies[]
-        
-        const findFrequencies = (obj, targetList) => {
-            if (!obj || typeof obj !== 'object') return;
-            
-            if (Array.isArray(obj)) {
-                obj.forEach(item => findFrequencies(item, targetList));
-                return;
-            }
-
-            for (const k in obj) {
-                // Busca por qualquer chave que contenha 'frequency'
-                if (k.toLowerCase().includes('frequency')) {
-                    const data = obj[k];
-                    if (data) {
-                        let val = data.val || data['#text'] || (typeof data !== 'object' ? data : null);
-                        if (val && typeof val === 'object' && val['#text']) val = val['#text'];
-                        
-                        const uom = data['@_uom'] || 'MHz';
-                        if (val && !isNaN(parseFloat(val))) {
-                            targetList.push(`${val} ${uom}`);
-                        }
-                    }
-                }
-                // Continua a busca recursiva
-                findFrequencies(obj[k], targetList);
-            }
-        };
-
-        members.forEach(member => {
-            const frequencies = [];
-            findFrequencies(member, frequencies);
-
-            if (frequencies.length > 0) {
-                const entity = Object.values(member)[0];
-                const timeSlices = Array.isArray(entity?.timeSlice) ? entity.timeSlice : [entity?.timeSlice];
-                timeSlices.forEach(ts => {
-                    const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
-                    if (!data) return;
-                    const sKeys = [data.designator, data.name].filter(Boolean);
-                    sKeys.forEach(k => {
-                        const normalizedKey = k.toString().toUpperCase();
-                        if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
-                        serviceMap[normalizedKey].push(...frequencies);
-                    });
-                });
-            }
-        });
-        
-        const totalServices = Object.keys(serviceMap).length;
-        console.log(`📡 [ROBOT] Varredura finalizada. ${totalServices} serviços/unidades indexados com frequências.`);
-
-        // 2. Processar Espaços Aéreos
-        console.log('🌍 [ROBOT] Processando Espaços Aéreos...');
-        const structuralTypes = ['TMA', 'CTR', 'FIR', 'CTA'];
         const enrichedData = [];
 
-        members.forEach(member => {
-            const airspace = member.Airspace;
-            if (!airspace) return;
+        for (const xmlFileName of xmlFiles) {
+            console.log(`🔍 [ROBOT] Processando: ${xmlFileName}`);
+            const xmlText = await zip.files[xmlFileName].async('string');
+            const parser2 = new XMLParser({ 
+                ignoreAttributes: false, 
+                attributeNamePrefix: "@_", 
+                removeNSPrefix: true,
+                alwaysArray: ["hasMember", "timeSlice", "radioCommunicationChannel", "translatedNote"]
+            });
+            const jsonObj2 = parser2.parse(xmlText);
+            const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
 
-            const timeSlice = (Array.isArray(airspace.timeSlice) ? airspace.timeSlice : [airspace.timeSlice])
-                .find(ts => ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation))?.AirspaceTimeSlice;
-            
-            if (timeSlice && structuralTypes.includes(timeSlice.type)) {
-                const ident = String(timeSlice.designator || '');
-                const nam = timeSlice.name || '';
-                
-                // Mapeamento agressivo para evitar erros de Constraint (FIR/CTA -> TMA)
-                let dbType = timeSlice.type;
-                if (dbType === 'CTA' || dbType === 'FIR') dbType = 'TMA'; 
-                
-                // Horários
-                const activation = (Array.isArray(timeSlice.activation) ? timeSlice.activation : [timeSlice.activation])[0]?.AirspaceActivation;
-                let horario = 'CONSULTAR NOTAM';
-                if (activation?.timeInterval?.Timesheet) {
-                    const ts = activation.timeInterval.Timesheet;
-                    if (ts.startEvent === 'SR' && ts.endEvent === 'SS') horario = 'Do nascer ao pôr do sol';
-                    else if (ts.startTime === '00:00' && ts.endTime === '00:00') horario = 'H24';
-                    else if (ts.startTime && ts.endTime) horario = `${ts.startTime} - ${ts.endTime} UTC`;
+            // 1. Indexar Frequências (Busca Recursiva Profunda)
+            const findFrequencies = (obj, targetList) => {
+                if (!obj || typeof obj !== 'object') return;
+                if (Array.isArray(obj)) {
+                    obj.forEach(item => findFrequencies(item, targetList));
+                    return;
                 }
+                for (const k in obj) {
+                    if (k.toLowerCase().includes('frequency')) {
+                        const data = obj[k];
+                        if (data) {
+                            let val = data.val || data['#text'] || (typeof data !== 'object' ? data : null);
+                            if (val && typeof val === 'object' && val['#text']) val = val['#text'];
+                            const uom = data['@_uom'] || 'MHz';
+                            if (val && !isNaN(parseFloat(val))) targetList.push(`${val} ${uom}`);
+                        }
+                    }
+                    findFrequencies(obj[k], targetList);
+                }
+            };
 
-                // Observações
-                const notes = extractAllNotes(timeSlice);
-                const obs = toTacticalCase(notes.join(' / ')) || 'SEM OBSERVAÇÕES';
+            members.forEach(member => {
+                const frequencies = [];
+                findFrequencies(member, frequencies);
 
-                // Tentar vincular frequências
-                const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
-                const normIdent = normalize(ident);
-                const normName = normalize(nam);
-
-                let freqs = serviceMap[ident?.toUpperCase()] || [];
-                
-                if (freqs.length === 0) {
-                    const matchingKey = Object.keys(serviceMap).find(k => {
-                        const normKey = normalize(k);
-                        if (normKey.includes(normIdent) || normIdent.includes(normKey)) return true;
-                        if (normKey.includes(normName) || normName.includes(normKey)) return true;
-                        if (normName.length >= 6 && normKey.startsWith(normName.substring(0, 6))) return true;
-                        if (normKey.length >= 6 && normName.startsWith(normKey.substring(0, 6))) return true;
-                        return false;
+                if (frequencies.length > 0) {
+                    const entity = Object.values(member)[0];
+                    const timeSlices = entity?.timeSlice || [];
+                    timeSlices.forEach(ts => {
+                        const data = ts?.ServiceTimeSlice || ts?.UnitTimeSlice || ts?.AirTrafficControlServiceTimeSlice || ts;
+                        if (!data) return;
+                        const sKeys = [data.designator, data.name].filter(Boolean);
+                        sKeys.forEach(k => {
+                            const normalizedKey = k.toString().toUpperCase();
+                            if (!serviceMap[normalizedKey]) serviceMap[normalizedKey] = [];
+                            serviceMap[normalizedKey].push(...frequencies);
+                        });
                     });
-                    if (matchingKey) freqs = serviceMap[matchingKey];
                 }
+            });
 
-                enrichedData.push({
-                    ident,
-                    nam,
-                    type: dbType, // AGORA SIM: usando o tipo aceito pelo banco
-                    originalType: timeSlice.type,
-                    upperLimit: timeSlice.upperLimit?.val || timeSlice.upperLimit,
-                    uom_upper: timeSlice.upperLimit?.['@_uom'] || 'FL',
-                    lowerLimit: timeSlice.lowerLimit?.val || timeSlice.lowerLimit,
-                    uom_lower: timeSlice.lowerLimit?.['@_uom'] || 'FL',
-                    horario,
-                    observacoes: obs,
-                    frequencias: [...new Set(freqs)],
-                    raw: timeSlice
-                });
-            }
-        });
+            // 2. Coletar Espaços Aéreos (apenas se houver Airspace no arquivo)
+            const structuralTypes = ['TMA', 'CTR', 'FIR', 'CTA'];
+            members.forEach(member => {
+                const airspace = member.Airspace;
+                if (!airspace) return;
 
-        console.log(`📊 [ROBOT] ${enrichedData.length} áreas encontradas. Sincronizando Supabase...`);
+                const timeSlice = (airspace.timeSlice || [])
+                    .find(ts => ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(ts.AirspaceTimeSlice?.interpretation))?.AirspaceTimeSlice;
+                
+                if (timeSlice && structuralTypes.includes(timeSlice.type)) {
+                    const ident = String(timeSlice.designator || '');
+                    const nam = timeSlice.name || '';
+                    
+                    let dbType = timeSlice.type;
+                    if (dbType === 'CTA' || dbType === 'FIR') dbType = 'TMA'; 
 
+                    const activation = (timeSlice.activation || [])[0]?.AirspaceActivation;
+                    let horario = 'CONSULTAR NOTAM';
+                    if (activation?.timeInterval?.Timesheet) {
+                        const ts = activation.timeInterval.Timesheet;
+                        if (ts.startEvent === 'SR' && ts.endEvent === 'SS') horario = 'Do nascer ao pôr do sol';
+                        else if (ts.startTime === '00:00' && ts.endTime === '00:00') horario = 'H24';
+                        else if (ts.startTime && ts.endTime) horario = `${ts.startTime} - ${ts.endTime} UTC`;
+                    }
+
+                    const notes = extractAllNotes(timeSlice);
+                    const obs = toTacticalCase(notes.join(' / ')) || 'SEM OBSERVAÇÕES';
+
+                    enrichedData.push({
+                        ident,
+                        nam,
+                        type: dbType,
+                        originalType: timeSlice.type,
+                        upperLimit: timeSlice.upperLimit?.val || timeSlice.upperLimit,
+                        uom_upper: timeSlice.upperLimit?.['@_uom'] || 'FL',
+                        lowerLimit: timeSlice.lowerLimit?.val || timeSlice.lowerLimit,
+                        uom_lower: timeSlice.lowerLimit?.['@_uom'] || 'FL',
+                        horario,
+                        observacoes: obs,
+                        raw: timeSlice
+                    });
+                }
+            });
+        }
+        
+        console.log(`📡 [ROBOT] Varredura finalizada. ${Object.keys(serviceMap).length} serviços/unidades indexados.`);
+
+        // 3. Vincular Frequências e Sincronizar Supabase
+        console.log('🌍 [ROBOT] Vinculando Frequências e Sincronizando Supabase...');
+        const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
+        
         let count = 0;
         for (const area of enrichedData) {
+            const normIdent = normalize(area.ident);
+            const normName = normalize(area.nam);
+            let freqs = serviceMap[area.ident?.toUpperCase()] || [];
+
+            if (freqs.length === 0) {
+                const matchingKey = Object.keys(serviceMap).find(k => {
+                    const normKey = normalize(k);
+                    if (normKey.includes(normIdent) || normIdent.includes(normKey)) return true;
+                    if (normKey.includes(normName) || normName.includes(normKey)) return true;
+                    if (normName.length >= 6 && normKey.startsWith(normName.substring(0, 6))) return true;
+                    if (normKey.length >= 6 && normName.startsWith(normKey.substring(0, 6))) return true;
+                    return false;
+                });
+                if (matchingKey) freqs = serviceMap[matchingKey];
+            }
+            
+            const finalFrequencies = [...new Set(freqs)];
+
             const { data: existing } = await supabase
                 .from('airspace_snapshots')
                 .select('id, raw_properties')
