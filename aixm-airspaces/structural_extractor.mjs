@@ -302,14 +302,21 @@ async function runSync() {
             
             const finalFrequencies = [...new Set(freqs)];
 
-            // Fallback: Extração via Regex nas Observações (Caso a frequência esteja no texto)
+            // Fallback: Extração via Regex nas Observações (Limpa RTF primeiro)
             if (finalFrequencies.length === 0 && area.observacoes) {
-                const freqRegex = /(\d{3}[.,]\d{3})/g;
+                // Limpeza básica de RTF para não atrapalhar o Regex
+                const cleanObs = area.observacoes
+                    .replace(/\\['][a-f0-9]{2}/g, '') // Remove caracteres hex do RTF
+                    .replace(/\\[a-z0-9]+/g, ' ')      // Remove comandos RTF (\par, \b, etc)
+                    .replace(/[{}]/g, '');            // Remove chaves
+
+                const freqRegex = /(\d{3}[.,]\d{2,3})/g;
                 let m;
-                while ((m = freqRegex.exec(area.observacoes)) !== null) {
+                while ((m = freqRegex.exec(cleanObs)) !== null) {
                     const f = m[1].replace(',', '.');
-                    if (parseFloat(f) > 100) { // Evita pegar números aleatórios que não sejam frequências VHF
-                        finalFrequencies.push(`${f} MHz`);
+                    const num = parseFloat(f);
+                    if (num >= 108 && num <= 137) { // Faixa VHF Aeronáutica
+                        finalFrequencies.push(`${num.toFixed(3)} MHz`);
                     }
                 }
             }
