@@ -335,7 +335,7 @@ async function runSync() {
                     aip_data: {
                         horario: area.horario,
                         observacoes: area.observacoes,
-                        frequencias: area.frequencias,
+                        frequencias: [...new Set(finalFrequencies)],
                         upperLimit: area.upperLimit,
                         uom_upper: area.uom_upper,
                         lowerLimit: area.lowerLimit,
