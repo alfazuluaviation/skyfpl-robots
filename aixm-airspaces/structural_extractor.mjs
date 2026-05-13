@@ -18,8 +18,12 @@ function toTacticalCase(str) {
 
 function cleanRtf(str) {
     if (!str || typeof str !== 'string') return '';
-    if (!str.includes('\\rtf') && !str.includes('{\\')) return str;
-    let clean = str;
+    // Limpar HTML entities primeiro (&#13; &#10; etc)
+    let clean = str.replace(/&#\d+;/g, ' ');
+    // Se não contém RTF, retorna limpo
+    if (!clean.includes('\\rtf') && !clean.includes('{\\')) {
+        return clean.replace(/\s+/g, ' ').trim();
+    }
     // Decodificar caracteres hex RTF (\' seguido de hex)
     clean = clean.replace(/\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
     // Remover blocos de controle aninhados {\fonttbl...}, {\colortbl...}, etc
@@ -170,16 +174,43 @@ async function runSync() {
                                 const ident = String(ts.designator || '');
                                 // Evitar duplicatas entre pacotes (manter o mais recente)
                                 if (!enrichedData.find(e => e.ident === ident)) {
+                                    // Extrair limites verticais (múltiplos caminhos possíveis no AIXM 5.1)
+                                    const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
+                                    const layer = ts.class?.AirspaceLayerClass?.associatedLevels?.AirspaceLayer;
+                                    const upperObj = vol?.upperLimit || layer?.upperLimit || ts.upperLimit;
+                                    const lowerObj = vol?.lowerLimit || layer?.lowerLimit || ts.lowerLimit;
+
+                                    // Extrair classificação do espaço aéreo (A, B, C, D, E, G)
+                                    const classification = ts.class?.AirspaceLayerClass?.classification || '';
+
+                                    // Extrair horário de ativação
+                                    let schedule = 'H24';
+                                    const timesheet = ts.activation?.AirspaceActivation?.timeInterval?.Timesheet;
+                                    if (timesheet) {
+                                        if (timesheet.day === 'ANY' && timesheet.startTime === '00:00' && timesheet.endTime === '00:00') {
+                                            schedule = 'H24';
+                                        } else {
+                                            schedule = `${timesheet.startTime || '00:00'}–${timesheet.endTime || '00:00'} UTC`;
+                                        }
+                                    }
+
+                                    // Extrair referência de limite (MSL, STD, SFC)
+                                    const upperRef = vol?.upperLimitReference || layer?.upperLimitReference || 'STD';
+                                    const lowerRef = vol?.lowerLimitReference || layer?.lowerLimitReference || 'MSL';
+
                                     enrichedData.push({
                                         ident,
                                         nam: ts.name || '',
                                         type: (ts.type === 'CTA' || ts.type === 'FIR') ? 'TMA' : ts.type,
                                         originalType: ts.type,
-                                        upperLimit: ts.upperLimit?.val || ts.upperLimit,
-                                        uom_upper: ts.upperLimit?.['@_uom'] || 'FL',
-                                        lowerLimit: ts.lowerLimit?.val || ts.lowerLimit,
-                                        uom_lower: ts.lowerLimit?.['@_uom'] || 'FL',
-                                        horario: 'H24',
+                                        upperLimit: upperObj?.['#text'] ?? upperObj?.val ?? upperObj,
+                                        uom_upper: upperObj?.['@_uom'] || (upperRef === 'STD' ? 'FL' : 'FT'),
+                                        lowerLimit: lowerObj?.['#text'] ?? lowerObj?.val ?? lowerObj,
+                                        uom_lower: lowerObj?.['@_uom'] || (lowerRef === 'MSL' ? 'FT' : 'FL'),
+                                        upperRef,
+                                        lowerRef,
+                                        classification,
+                                        horario: schedule,
                                         observacoes: toTacticalCase(cleanRtf(extractAllNotes(ts).join(' / '))) || 'SEM OBSERVAÇÕES',
                                         raw: ts
                                     });
@@ -283,6 +314,9 @@ async function runSync() {
                     ...(existing?.raw_properties || {}),
                     aip_data: {
                         horario: area.horario,
+                        classificacao: area.classification || '',
+                        upper_ref: area.upperRef || 'STD',
+                        lower_ref: area.lowerRef || 'MSL',
                         observacoes: area.observacoes,
                         frequencias: [...new Set(finalFrequencies)],
                         full_aixm_node: area.raw
