@@ -240,13 +240,66 @@ async function runSync() {
                                         layer = classes[0].AirspaceLayerClass?.associatedLevels?.AirspaceLayer;
                                         
                                         // Se houver múltiplas camadas (como na SBWH_01), pegar o range total
-                                        if (classes.length > 1) {
-                                            console.log(`   💡 [ROBOT] Área Multicamada detectada: ${ident}`);
-                                        }
-                                    }
+                                    // NOVO: Extrair limites de múltiplas camadas (class) e calcular envelope total
+                                    const classes = Array.isArray(ts.class) ? ts.class : (ts.class ? [ts.class] : []);
+                                    let absoluteMax = -Infinity;
+                                    let absoluteMin = Infinity;
+                                    let maxUom = 'FL';
+                                    let minUom = 'FT';
+                                    let maxRef = 'STD';
+                                    let minRef = 'MSL';
+                                    const layerDetails = [];
 
-                                    const upperObj = vol?.upperLimit || layer?.upperLimit || ts.upperLimit;
-                                    const lowerObj = vol?.lowerLimit || layer?.lowerLimit || ts.lowerLimit;
+                                    if (classes.length > 0) {
+                                        classes.forEach(c => {
+                                            const lClass = c.AirspaceLayerClass;
+                                            const classification = lClass?.classification || 'N/A';
+                                            const layer = lClass?.associatedLevels?.AirspaceLayer;
+                                            
+                                            const up = layer?.upperLimit?.['#text'] ?? layer?.upperLimit?.val ?? layer?.upperLimit;
+                                            const lo = layer?.lowerLimit?.['#text'] ?? layer?.lowerLimit?.val ?? layer?.lowerLimit;
+                                            const uRef = layer?.upperLimitReference || 'STD';
+                                            const lRef = layer?.lowerLimitReference || 'MSL';
+                                            const uUom = layer?.upperLimit?.['@_uom'] || (uRef === 'STD' ? 'FL' : 'FT');
+                                            const lUom = layer?.lowerLimit?.['@_uom'] || (lRef === 'MSL' ? 'FT' : 'FL');
+
+                                            const upVal = parseInt(String(up));
+                                            const loVal = parseInt(String(lo));
+
+                                            // Guardar detalhes da camada para o log/observações
+                                            layerDetails.push(`Classe ${classification}: ${upVal}${uUom}/${loVal}${lUom}`);
+
+                                            // Calcular teto máximo (considerando FL > FT simplificadamente ou valores brutos)
+                                            if (!isNaN(upVal) && upVal > absoluteMax) {
+                                                absoluteMax = upVal;
+                                                maxUom = uUom;
+                                                maxRef = uRef;
+                                            }
+                                            // Calcular base mínima (critério rigoroso SFC)
+                                            if (!isNaN(loVal)) {
+                                                if (lRef === 'SFC' || lRef === 'GND' || loVal === 0) {
+                                                    absoluteMin = 0;
+                                                    minUom = 'FT';
+                                                    minRef = 'SFC';
+                                                } else if (loVal < absoluteMin) {
+                                                    absoluteMin = loVal;
+                                                    minUom = lUom;
+                                                    minRef = lRef;
+                                                }
+                                            }
+                                        });
+                                    } else {
+                                        // Fallback se não houver camadas definidas em 'class'
+                                        const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
+                                        const up = vol?.upperLimit?.['#text'] ?? vol?.upperLimit?.val ?? vol?.upperLimit ?? ts.upperLimit;
+                                        const lo = vol?.lowerLimit?.['#text'] ?? vol?.lowerLimit?.val ?? vol?.lowerLimit ?? ts.lowerLimit;
+                                        absoluteMax = parseInt(String(up));
+                                        absoluteMin = parseInt(String(lo));
+                                        maxUom = vol?.upperLimit?.['@_uom'] || 'FL';
+                                        minUom = vol?.lowerLimit?.['@_uom'] || 'FT';
+                                        maxRef = vol?.upperLimitReference || 'STD';
+                                        minRef = vol?.lowerLimitReference || 'MSL';
+                                    }
 
                                     // Extrair horário de ativação
                                     let schedule = 'H24';
@@ -259,24 +312,26 @@ async function runSync() {
                                         }
                                     }
 
-                                    // Extrair referência de limite (MSL, STD, SFC)
-                                    const upperRef = vol?.upperLimitReference || layer?.upperLimitReference || 'STD';
-                                    const lowerRef = vol?.lowerLimitReference || layer?.lowerLimitReference || 'MSL';
+                                    const auditNotes = [];
+                                    if (classes.length > 1) auditNotes.push(`Múltiplas camadas detectadas (${classes.length})`);
+                                    if (minRef === 'SFC') auditNotes.push('Base confirmada como Superfície (SFC)');
 
                                     enrichedData.push({
                                         ident,
                                         nam: ts.name || '',
                                         type: (ts.type === 'CTA' || ts.type === 'FIR') ? 'TMA' : ts.type,
                                         originalType: ts.type,
-                                        upperLimit: upperObj?.['#text'] ?? upperObj?.val ?? upperObj,
-                                        uom_upper: upperObj?.['@_uom'] || (upperRef === 'STD' ? 'FL' : 'FT'),
-                                        lowerLimit: lowerObj?.['#text'] ?? lowerObj?.val ?? lowerObj,
-                                        uom_lower: lowerObj?.['@_uom'] || (lowerRef === 'MSL' ? 'FT' : 'FL'),
-                                        upperRef,
-                                        lowerRef,
-                                        classification,
+                                        upperLimit: absoluteMax === -Infinity ? null : absoluteMax,
+                                        uom_upper: maxUom,
+                                        lowerLimit: absoluteMin === Infinity ? null : absoluteMin,
+                                        uom_lower: minUom,
+                                        upperRef: maxRef,
+                                        lowerRef: minRef,
+                                        classification: classes[0]?.AirspaceLayerClass?.classification || '',
                                         horario: schedule,
                                         observacoes: toTacticalCase(cleanRtf(extractAllNotes(ts).join(' / '))) || 'SEM OBSERVAÇÕES',
+                                        layerSummary: layerDetails.join(' | '),
+                                        auditNotes,
                                         raw: ts
                                     });
                                 }
@@ -363,18 +418,23 @@ async function runSync() {
                 }
             }
 
+            // Determinar Status de Auditoria
+            // Se houver notas de auditoria (múltiplas camadas, etc), marcar como PENDING
+            const status = area.auditNotes.length > 0 ? 'PENDING' : 'AUDITED';
+
             // Sincronizar Supabase
-            const { data: existing } = await supabase.from('airspace_snapshots').select('id, raw_properties').eq('ident', area.ident).eq('is_current', true).maybeSingle();
+            const { data: existing } = await supabase.from('airspace_snapshots').select('id, raw_properties, status').eq('ident', area.ident).eq('is_current', true).maybeSingle();
 
             const snapshotData = {
                 ident: area.ident,
                 nam: area.nam,
                 type: area.type,
-                upperlimit: parseInt(area.upperLimit) || null,
+                upperlimit: area.upperLimit,
                 uplimituni: area.uom_upper,
-                lowerlimit: parseInt(area.lowerLimit) || null,
+                lowerlimit: area.lowerLimit,
                 lowerlimituni: area.uom_lower,
                 is_current: true,
+                status: (existing?.status === 'VALIDATED') ? 'VALIDATED' : status, // Preservar validação manual
                 raw_properties: {
                     ...(existing?.raw_properties || {}),
                     aip_data: {
@@ -383,6 +443,8 @@ async function runSync() {
                         upper_ref: area.upperRef || 'STD',
                         lower_ref: area.lowerRef || 'MSL',
                         observacoes: area.observacoes,
+                        camadas: area.layerSummary,
+                        audit_log: area.auditNotes,
                         frequencias: [...new Set(finalFrequencies)],
                         full_aixm_node: area.raw
                     }
