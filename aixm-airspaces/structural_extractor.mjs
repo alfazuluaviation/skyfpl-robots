@@ -16,6 +16,46 @@ function toTacticalCase(str) {
     return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
 }
 
+function cleanRtf(str) {
+    if (!str || typeof str !== 'string') return '';
+    if (!str.includes('\\rtf') && !str.includes('{\\')) return str;
+    let clean = str;
+    // Decodificar caracteres hex RTF (\' seguido de hex)
+    clean = clean.replace(/\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    // Remover blocos de controle aninhados {\fonttbl...}, {\colortbl...}, etc
+    let prev = '';
+    while (prev !== clean) { prev = clean; clean = clean.replace(/\{[^{}]*\}/g, ''); }
+    // Remover palavras de controle restantes (\par, \b0, \fs22, etc)
+    clean = clean.replace(/\\[a-z]+\d*\s?/gi, ' ');
+    // Remover chaves e espaços múltiplos
+    clean = clean.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+    return clean || '';
+}
+
+function findAipMatches(aipFrequencies, areaName, originalType) {
+    const normalize = (s) => s?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '') || '';
+    const normName = normalize(areaName);
+    const normType = normalize(originalType); // TMA, CTR, FIR, CTA
+    const allKeys = Object.keys(aipFrequencies);
+    if (normName.length < 3) return [];
+
+    // Fase 1: Encontrar TODOS os candidatos que contêm o nome
+    const candidates = allKeys.filter(k => normalize(k).includes(normName));
+    if (candidates.length === 0) return [];
+
+    // Fase 2: Filtrar por mesmo tipo (TMA, FIR, CTR, CTA)
+    const sameType = candidates.filter(k => normalize(k).includes(normType));
+
+    // Fase 3: Separar exatos (sem SECT) de setores
+    const exact = sameType.filter(k => !normalize(k).includes('SECT'));
+    const sectors = sameType.filter(k => normalize(k).includes('SECT'));
+
+    // Prioridade: exato > setores do mesmo tipo > primeiro candidato genérico
+    if (exact.length > 0) return exact;
+    if (sectors.length > 0) return sectors;
+    return candidates.length > 0 ? [candidates[0]] : [];
+}
+
 function extractAllNotes(timeSlice) {
     const notes = [];
     if (timeSlice.annotation?.Note?.translatedNote) {
@@ -140,7 +180,7 @@ async function runSync() {
                                         lowerLimit: ts.lowerLimit?.val || ts.lowerLimit,
                                         uom_lower: ts.lowerLimit?.['@_uom'] || 'FL',
                                         horario: 'H24',
-                                        observacoes: toTacticalCase(extractAllNotes(ts).join(' / ')) || 'SEM OBSERVAÇÕES',
+                                        observacoes: toTacticalCase(cleanRtf(extractAllNotes(ts).join(' / '))) || 'SEM OBSERVAÇÕES',
                                         raw: ts
                                     });
                                 }
@@ -188,43 +228,42 @@ async function runSync() {
 
             const finalFrequencies = [...new Set(freqs)];
 
-            // Fallback Regex nas Notas (Limpeza RTF)
+            // Fallback Regex nas Notas (já limpas de RTF)
             if (finalFrequencies.length === 0 && area.observacoes) {
-                const cleanObs = area.observacoes.replace(/\\['][a-f0-9]{2}/g, '').replace(/\\[a-z0-9]+/g, ' ').replace(/[{}]/g, '');
                 const freqRegex = /(\d{3}[.,]\d{2,3})/g;
                 let m;
-                while ((m = freqRegex.exec(cleanObs)) !== null) {
+                while ((m = freqRegex.exec(area.observacoes)) !== null) {
                     const f = m[1].replace(',', '.');
                     const num = parseFloat(f);
                     if (num >= 108 && num <= 137) finalFrequencies.push(`${num.toFixed(3)} MHz`);
                 }
             }
 
-            // Enriquecimento Híbrido: Merge com o AIP Brasil
-            let aipMatch = aipFrequencies[area.ident?.toUpperCase()];
-            if (!aipMatch) {
-                // Tenta achar pelo nome (ex: AIP = "AMAZONICA TMA", AIXM = "AMAZONICA")
-                const matchingKey = Object.keys(aipFrequencies).find(k => {
-                    const nk = normalize(k);
-                    // Checa se o nome do AIXM está contido no nome do AIP (ou vice-versa)
-                    // Ignora matches muito curtos para não ter falso positivo
-                    if (normName.length > 3 && (nk.includes(normName) || normName.includes(nk))) {
-                        return true;
-                    }
-                    return false;
-                });
-                if (matchingKey) {
-                    aipMatch = aipFrequencies[matchingKey];
-                    console.log(`🔗 [MERGE HÍBRIDO] Sucesso: AIXM (${area.nam}) vinculado com AIP (${matchingKey})`);
-                }
-            }
+            // Enriquecimento Híbrido: Match Inteligente por Tipo + Agregação Multi-Setor
+            const aipMatchKeys = findAipMatches(aipFrequencies, area.nam, area.originalType || area.type);
 
-            if (aipMatch) {
-                if (aipMatch.frequencias) finalFrequencies.push(...aipMatch.frequencias.map(f => `${f.replace(' MHz', '')} MHz`));
-                if (aipMatch.horario) area.horario = aipMatch.horario;
-                // Só substitui a observação se a original estiver vazia para não perder notas ricas do AIXM
-                if (aipMatch.observacoes && area.observacoes === 'SEM OBSERVAÇÕES') {
-                    area.observacoes = aipMatch.observacoes;
+            if (aipMatchKeys.length > 0) {
+                const aggregatedFreqs = [];
+                let bestHorario = '';
+                let bestObs = '';
+
+                aipMatchKeys.forEach(key => {
+                    const data = aipFrequencies[key];
+                    if (data.frequencias) {
+                        aggregatedFreqs.push(...data.frequencias.map(f => f.includes('MHz') ? f : `${f} MHz`));
+                    }
+                    if (data.horario && !bestHorario) bestHorario = data.horario;
+                    if (data.observacoes && !bestObs) bestObs = data.observacoes;
+                });
+
+                finalFrequencies.push(...aggregatedFreqs);
+                if (bestHorario) area.horario = bestHorario;
+                if (bestObs && area.observacoes === 'SEM OBSERVAÇÕES') area.observacoes = bestObs;
+
+                if (aipMatchKeys.length === 1) {
+                    console.log(`🔗 [MERGE] ${area.nam} (${area.originalType}) → ${aipMatchKeys[0]} (${[...new Set(aggregatedFreqs)].length} freqs)`);
+                } else {
+                    console.log(`🔗 [MERGE] ${area.nam} (${area.originalType}) → ${aipMatchKeys.length} setores agregados (${[...new Set(aggregatedFreqs)].length} freqs únicas)`);
                 }
             }
 
