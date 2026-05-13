@@ -156,6 +156,17 @@ async function runSync() {
         console.log(`📡 [ROBOT] Varredura finalizada. ${Object.keys(serviceMap).length} órgãos indexados.`);
         console.log(`🌍 [ROBOT] Sincronizando ${enrichedData.length} áreas estruturais...`);
 
+        // NOVO: Ler frequências do Extrator Auxiliar AIP (Arquitetura Híbrida)
+        let aipFrequencies = {};
+        try {
+            if (fs.existsSync('./aip_frequencies.json')) {
+                aipFrequencies = JSON.parse(fs.readFileSync('./aip_frequencies.json', 'utf8'));
+                console.log(`📚 [ROBOT-AIP] Carregadas frequências estruturais do AIP para ${Object.keys(aipFrequencies).length} órgãos.`);
+            }
+        } catch (e) {
+            console.log('⚠️ [ROBOT-AIP] Aviso: Arquivo aip_frequencies.json não encontrado ou inválido. Usando apenas dados do AIXM.');
+        }
+
         const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
 
         for (const area of enrichedData) {
@@ -186,6 +197,17 @@ async function runSync() {
                     const f = m[1].replace(',', '.');
                     const num = parseFloat(f);
                     if (num >= 108 && num <= 137) finalFrequencies.push(`${num.toFixed(3)} MHz`);
+                }
+            }
+
+            // Enriquecimento Híbrido: Merge com o AIP Brasil
+            const aipMatch = aipFrequencies[area.ident?.toUpperCase()];
+            if (aipMatch) {
+                if (aipMatch.frequencias) finalFrequencies.push(...aipMatch.frequencias.map(f => `${f.replace(' MHz', '')} MHz`));
+                if (aipMatch.horario) area.horario = aipMatch.horario;
+                // Só substitui a observação se a original estiver vazia para não perder notas ricas do AIXM
+                if (aipMatch.observacoes && area.observacoes === 'SEM OBSERVAÇÕES') {
+                    area.observacoes = aipMatch.observacoes;
                 }
             }
 

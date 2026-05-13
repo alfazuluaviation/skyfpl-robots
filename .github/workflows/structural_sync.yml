@@ -19,10 +19,25 @@ jobs:
           cache: 'npm'
           cache-dependency-path: aixm-airspaces/package-lock.json
 
-      - name: Install Dependencies
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pdfplumber urllib3
+
+      - name: Install Node Dependencies
         run: |
           cd aixm-airspaces
           npm install
+
+      - name: Run AIP Frequency Extractor (Híbrido)
+        run: |
+          cd aixm-airspaces
+          python aip_frequency_extractor.py
 
       - name: Run Structural Extractor
         env:
