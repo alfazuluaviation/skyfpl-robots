@@ -2,7 +2,7 @@ import fs from 'fs';
 import axios from 'axios';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
-import { createClient } from '@supabase/supabase-base';
+import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
