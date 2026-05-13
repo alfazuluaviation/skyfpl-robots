@@ -227,19 +227,6 @@ async function runSync() {
                                 const ident = String(ts.designator || '');
                                 // Evitar duplicatas entre pacotes (manter o mais recente)
                                 if (!enrichedData.find(e => e.ident === ident)) {
-                                    // Extrair limites verticais (múltiplos caminhos possíveis no AIXM 5.1)
-                                    const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
-                                    
-                                    // NOVO: Extrair limites de múltiplas camadas (class) se existirem
-                                    const classes = Array.isArray(ts.class) ? ts.class : (ts.class ? [ts.class] : []);
-                                    let layer = null;
-                                    let classification = '';
-                                    
-                                    if (classes.length > 0) {
-                                        classification = classes[0].AirspaceLayerClass?.classification || '';
-                                        layer = classes[0].AirspaceLayerClass?.associatedLevels?.AirspaceLayer;
-                                        
-                                        // Se houver múltiplas camadas (como na SBWH_01), pegar o range total
                                     // NOVO: Extrair limites de múltiplas camadas (class) e calcular envelope total
                                     const classes = Array.isArray(ts.class) ? ts.class : (ts.class ? [ts.class] : []);
                                     let absoluteMax = -Infinity;
@@ -267,15 +254,17 @@ async function runSync() {
                                             const loVal = parseInt(String(lo));
 
                                             // Guardar detalhes da camada para o log/observações
-                                            layerDetails.push(`Classe ${classification}: ${upVal}${uUom}/${loVal}${lUom}`);
+                                            if (!isNaN(upVal) || !isNaN(loVal)) {
+                                                layerDetails.push(`Classe ${classification}: ${upVal || '?'}${uUom}/${loVal || '?'}${lUom}`);
+                                            }
 
-                                            // Calcular teto máximo (considerando FL > FT simplificadamente ou valores brutos)
+                                            // Calcular teto máximo
                                             if (!isNaN(upVal) && upVal > absoluteMax) {
                                                 absoluteMax = upVal;
                                                 maxUom = uUom;
                                                 maxRef = uRef;
                                             }
-                                            // Calcular base mínima (critério rigoroso SFC)
+                                            // Calcular base mínima (critério SFC)
                                             if (!isNaN(loVal)) {
                                                 if (lRef === 'SFC' || lRef === 'GND' || loVal === 0) {
                                                     absoluteMin = 0;
@@ -305,7 +294,7 @@ async function runSync() {
                                     let schedule = 'H24';
                                     const timesheet = ts.activation?.AirspaceActivation?.timeInterval?.Timesheet;
                                     if (timesheet) {
-                                        if (timesheet.day === 'ANY' && timesheet.startTime === '00:00' && timesheet.endTime === '00:00') {
+                                        if (timesheet.day === 'ANY' && (timesheet.startTime === '00:00' || !timesheet.startTime) && (timesheet.endTime === '00:00' || !timesheet.endTime)) {
                                             schedule = 'H24';
                                         } else {
                                             schedule = `${timesheet.startTime || '00:00'}–${timesheet.endTime || '00:00'} UTC`;
