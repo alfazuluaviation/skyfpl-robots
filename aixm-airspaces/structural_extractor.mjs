@@ -117,10 +117,20 @@ async function runSync() {
         const items = jsonObj.aisweb?.pub?.item || [];
         const itemsArray = Array.isArray(items) ? items : [items];
         
+        console.log(`📦 [ROBOT] Catálogo AIXM encontrado. ${itemsArray.length} itens disponíveis.`);
+        itemsArray.forEach((it, idx) => {
+            console.log(`   [${idx}] Nome: ${it.name} | Data: ${it.date} | Link: ${it.link || it.file}`);
+        });
+
         const selectedItem = itemsArray.find(item => {
             const name = String(item.name || '').toLowerCase();
-            return name.includes('completo') || name.includes('snapshot') || name.includes('full');
+            return (name.includes('completo') || name.includes('full')) && !name.includes('baseline');
+        }) || itemsArray.find(item => {
+            const name = String(item.name || '').toLowerCase();
+            return name.includes('snapshot') || name.includes('baseline');
         }) || itemsArray[0];
+
+        console.log(`🎯 [ROBOT] Item Selecionado: ${selectedItem.name}`);
 
         let dynamicLink = selectedItem?.link || selectedItem?.file || '';
         if (typeof dynamicLink === 'object') dynamicLink = dynamicLink['#text'] || '';
