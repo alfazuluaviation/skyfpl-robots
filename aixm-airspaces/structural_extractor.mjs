@@ -201,7 +201,24 @@ async function runSync() {
             }
 
             // Enriquecimento Híbrido: Merge com o AIP Brasil
-            const aipMatch = aipFrequencies[area.ident?.toUpperCase()];
+            let aipMatch = aipFrequencies[area.ident?.toUpperCase()];
+            if (!aipMatch) {
+                // Tenta achar pelo nome (ex: AIP = "AMAZONICA TMA", AIXM = "AMAZONICA")
+                const matchingKey = Object.keys(aipFrequencies).find(k => {
+                    const nk = normalize(k);
+                    // Checa se o nome do AIXM está contido no nome do AIP (ou vice-versa)
+                    // Ignora matches muito curtos para não ter falso positivo
+                    if (normName.length > 3 && (nk.includes(normName) || normName.includes(nk))) {
+                        return true;
+                    }
+                    return false;
+                });
+                if (matchingKey) {
+                    aipMatch = aipFrequencies[matchingKey];
+                    console.log(`🔗 [MERGE HÍBRIDO] Sucesso: AIXM (${area.nam}) vinculado com AIP (${matchingKey})`);
+                }
+            }
+
             if (aipMatch) {
                 if (aipMatch.frequencias) finalFrequencies.push(...aipMatch.frequencias.map(f => `${f.replace(' MHz', '')} MHz`));
                 if (aipMatch.horario) area.horario = aipMatch.horario;
