@@ -48,23 +48,24 @@ def extract_frequencies(pdf_path):
             total_pages = len(pdf.pages)
             print(f"Total de páginas no AIP: {total_pages}")
             
-            # Fase 1: Identificar páginas que contêm ENR 2.1
+            # Fase 1: Identificar páginas que contêm ENR 2.1 e ENR 2.2
             enr_pages = []
             for i in range(total_pages):
                 page = pdf.pages[i]
                 text = page.extract_text() or ""
-                if 'ENR 2.1' in text:
+                # Capturar ENR 2.1 (TMA/FIR/CTR) e ENR 2.2 (Outros espaços, incl. ATZ)
+                if 'ENR 2.1' in text or 'ENR 2.2' in text:
                     enr_pages.append(i)
             
-            print(f"Encontradas {len(enr_pages)} páginas com ENR 2.1")
+            print(f"Encontradas {len(enr_pages)} páginas com ENR 2.1/2.2")
             
             if not enr_pages:
-                # Fallback: procurar páginas com tabelas que contenham TMA/CTR/FIR
-                print("Buscando por fallback (páginas com TMA/CTR/FIR em tabelas)...")
+                # Fallback: procurar páginas com tabelas que contenham TMA/CTR/FIR/ATZ
+                print("Buscando por fallback (páginas com TMA/CTR/FIR/ATZ em tabelas)...")
                 for i in range(total_pages):
                     page = pdf.pages[i]
                     text = page.extract_text() or ""
-                    if any(kw in text for kw in ['TMA', 'CTR ', 'FIR ', 'APP ', 'ACC ']):
+                    if any(kw in text for kw in ['TMA', 'CTR ', 'FIR ', 'APP ', 'ACC ', 'ATZ ']):
                         tables = page.extract_tables()
                         if tables and len(tables) > 0:
                             for table in tables:
@@ -72,7 +73,7 @@ def extract_frequencies(pdf_path):
                                     for row in table:
                                         if row and len(row) >= 4:
                                             col0 = str(row[0] or "")
-                                            if any(kw in col0.upper() for kw in ['TMA', 'CTR', 'FIR', 'CTA']):
+                                            if any(kw in col0.upper() for kw in ['TMA', 'CTR', 'FIR', 'CTA', 'ATZ']):
                                                 enr_pages.append(i)
                                                 break
                                     if i in enr_pages:
@@ -96,14 +97,14 @@ def extract_frequencies(pdf_path):
                         continue
                     
                     for row in table:
-                        if not row or len(row) < 4:
+                        if not row or len(row) < 3: # ATZs as vezes tem menos colunas
                             continue
                         
                         col0 = str(row[0]) if row[0] else ""
                         col0_upper = col0.upper()
                         
-                        # Filtra apenas linhas que sejam áreas de controle
-                        if not any(kw in col0_upper for kw in ['TMA', 'CTR', 'FIR', 'CTA']):
+                        # Filtra apenas linhas que sejam áreas de controle ou zonas de tráfego
+                        if not any(kw in col0_upper for kw in ['TMA', 'CTR', 'FIR', 'CTA', 'ATZ']):
                             continue
                         
                         # O nome: pegar a primeira linha da coluna 0 (antes da quebra de linha)
@@ -114,6 +115,10 @@ def extract_frequencies(pdf_path):
                         if len(name) < 3 and len(name_lines) > 1:
                             name = name_lines[1].strip().upper()
                         
+                        # Se o nome ainda for curto (ex: "ATZ"), tentar concatenar com a segunda linha
+                        if len(name) < 5 and len(name_lines) > 1:
+                            name = f"{name} {name_lines[1].strip().upper()}"
+
                         # Coluna de Frequências (geralmente col 3 ou col com MHz)
                         freqs = []
                         for col_idx in range(min(len(row), 6)):
@@ -122,42 +127,46 @@ def extract_frequencies(pdf_path):
                                 found = freq_pattern.findall(col_text)
                                 freqs.extend(found)
                         
-                        # Se não encontrou por 'MHZ', tenta na coluna 3 diretamente
-                        if not freqs and len(row) > 3 and row[3]:
-                            freqs_raw = str(row[3])
-                            freqs = freq_pattern.findall(freqs_raw)
+                        # Se não encontrou por 'MHZ', tenta em todas as colunas
+                        if not freqs:
+                            for col in row:
+                                if col:
+                                    found = freq_pattern.findall(str(col))
+                                    freqs.extend(found)
                         
-                        # Observações (última coluna com texto significativo)
+                        # Observações (geralmente a última coluna significativa)
                         obs = ""
-                        if len(row) > 4 and row[4]:
-                            obs = str(row[4]).replace('\n', ' ').strip()
+                        if len(row) >= 4:
+                            obs = str(row[-1]).replace('\n', ' ').strip()
                         
                         # Horário
                         hours = ""
-                        for col_idx in range(min(len(row), 6)):
-                            col_text = str(row[col_idx]) if row[col_idx] else ""
-                            if "H24" in col_text:
-                                hours = "H24"
-                                break
-                            elif "HJ" in col_text:
-                                hours = "HJ"
-                                break
+                        for col in row:
+                            col_text = str(col or "").upper()
+                            if "H24" in col_text: hours = "H24"; break
+                            elif "HJ" in col_text: hours = "HJ"; break
+                            elif "OTR" in col_text: hours = "OTR"; break
                         
-                        if freqs:
+                        if freqs or obs:
                             # Formatar frequências padronizadas
                             formatted_freqs = []
-                            for f in freqs:
+                            for f in list(set(freqs)):
                                 formatted_freqs.append(f"{f} MHz")
                             
-                            print(f"  -> Indexando AIP: {name} ({len(formatted_freqs)} freqs: {', '.join(formatted_freqs)})")
+                            # Limpar o nome para indexação (Remover TMA, CTR do início para facilitar match)
+                            clean_name = name.replace('TMA ', '').replace('CTR ', '').replace('ATZ ', '').strip()
+
+                            print(f"  -> Indexando AIP: {clean_name} ({len(formatted_freqs)} freqs)")
                             
-                            # Se já existe essa chave, merge as frequências
-                            if name in extracted_data:
-                                existing_freqs = extracted_data[name].get('frequencias', [])
+                            # Se já existe essa chave, merge as frequências e obs
+                            if clean_name in extracted_data:
+                                existing_freqs = extracted_data[clean_name].get('frequencias', [])
                                 all_freqs = list(set(existing_freqs + formatted_freqs))
-                                extracted_data[name]['frequencias'] = all_freqs
+                                extracted_data[clean_name]['frequencias'] = all_freqs
+                                if obs and len(obs) > len(extracted_data[clean_name].get('observacoes', '')):
+                                    extracted_data[clean_name]['observacoes'] = obs
                             else:
-                                extracted_data[name] = {
+                                extracted_data[clean_name] = {
                                     'frequencias': formatted_freqs,
                                     'horario': hours,
                                     'observacoes': obs

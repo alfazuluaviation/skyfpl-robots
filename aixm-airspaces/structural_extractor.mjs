@@ -13,7 +13,28 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 function toTacticalCase(str) {
     if (!str) return '';
-    return str.toLowerCase().split(' ').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+    
+    // Lista de acrônimos que devem permanecer em maiúsculo
+    const PROTECTED_ACRONYMS = [
+        'APP', 'TMA', 'CTR', 'FIR', 'ATZ', 'CTA', 'AFIL', 'PLN', 'VFR', 'IFR', 
+        'RNAV', 'RNP', 'RWY', 'TKOF', 'HEL', 'REA', 'REH', 'NM', 'FT', 'FL', 
+        'UTC', 'MSL', 'STD', 'SFC', 'GND', 'AGL', 'VMC', 'SID', 'OMNI', 'TWR', 'ACC'
+    ];
+
+    return str.toLowerCase().split(' ').map(word => {
+        const upper = word.toUpperCase().replace(/[^A-Z]/g, '');
+        if (PROTECTED_ACRONYMS.includes(upper)) return upper;
+        
+        // Tratar casos com hífen ou barra
+        if (word.includes('/') || word.includes('-')) {
+            return word.split(/([/-])/).map(part => {
+                if (PROTECTED_ACRONYMS.includes(part.toUpperCase())) return part.toUpperCase();
+                return part.charAt(0).toUpperCase() + part.slice(1);
+            }).join('');
+        }
+
+        return word.charAt(0).toUpperCase() + word.slice(1);
+    }).join(' ');
 }
 
 function cleanRtf(str) {
@@ -36,50 +57,73 @@ function cleanRtf(str) {
     return clean || '';
 }
 
-function findAipMatches(aipFrequencies, areaName, originalType) {
+function findAipMatches(aipFrequencies, areaName, originalType, designator = '') {
     const normalize = (s) => s?.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]/g, '') || '';
     const normName = normalize(areaName);
-    const normType = normalize(originalType); // TMA, CTR, FIR, CTA
+    const normType = normalize(originalType); // TMA, CTR, FIR, CTA, ATZ
     const allKeys = Object.keys(aipFrequencies);
+    
     if (normName.length < 3) return [];
 
-    // Fase 1: Encontrar TODOS os candidatos que contêm o nome
-    const candidates = allKeys.filter(k => normalize(k).includes(normName));
+    // 1. Tentar match exato com o nome normalizado
+    let candidates = allKeys.filter(k => normalize(k) === normName);
+    
+    // 2. Se falhar, tentar match parcial (contém o nome)
+    if (candidates.length === 0) {
+        candidates = allKeys.filter(k => normalize(k).includes(normName));
+    }
+
+    // 3. Se for um setor (termina com número ou _01), tentar match com a "área mãe"
+    if (candidates.length === 0 && (designator.includes('_') || /\d+$/.test(areaName))) {
+        // Extrair o nome base (ex: "Belo Horizonte" de "Belo Horizonte 1")
+        const baseName = areaName.split(/(_|\d)/)[0].trim();
+        const normBase = normalize(baseName);
+        if (normBase.length >= 3) {
+            candidates = allKeys.filter(k => normalize(k).includes(normBase));
+        }
+    }
+
     if (candidates.length === 0) return [];
 
-    // Fase 2: Filtrar por mesmo tipo (TMA, FIR, CTR, CTA)
+    // Fase de filtragem por tipo para evitar confusão entre TMA e CTR com mesmo nome
     const sameType = candidates.filter(k => normalize(k).includes(normType));
+    if (sameType.length > 0) return sameType;
 
-    // Fase 3: Separar exatos (sem SECT) de setores
-    const exact = sameType.filter(k => !normalize(k).includes('SECT'));
-    const sectors = sameType.filter(k => normalize(k).includes('SECT'));
-
-    // Prioridade: exato > setores do mesmo tipo > primeiro candidato genérico
-    if (exact.length > 0) return exact;
-    if (sectors.length > 0) return sectors;
-    return candidates.length > 0 ? [candidates[0]] : [];
+    return candidates.slice(0, 1);
 }
 
 function extractAllNotes(timeSlice) {
-    if (!timeSlice.annotation?.Note?.translatedNote) return [];
-    const tNotes = Array.isArray(timeSlice.annotation.Note.translatedNote) 
-        ? timeSlice.annotation.Note.translatedNote 
-        : [timeSlice.annotation.Note.translatedNote];
+    if (!timeSlice.annotation) return [];
     
-    // Preferir nota em Português (POR)
-    const porNote = tNotes.find(tn => {
-        const lang = tn.LinguisticNote?.note?.['@_lang'] || '';
-        return lang.toUpperCase() === 'POR' || lang.toUpperCase() === 'PT';
-    });
-    if (porNote) {
-        const text = porNote.LinguisticNote?.note?.['#text'] || porNote.LinguisticNote?.note || '';
-        return text ? [text] : [];
+    // Suportar tanto objeto único quanto array de anotações (comum no DECEA)
+    const annotations = Array.isArray(timeSlice.annotation) ? timeSlice.annotation : [timeSlice.annotation];
+    const extractedTexts = [];
+
+    for (const ann of annotations) {
+        if (!ann.Note?.translatedNote) continue;
+        
+        const tNotes = Array.isArray(ann.Note.translatedNote) 
+            ? ann.Note.translatedNote 
+            : [ann.Note.translatedNote];
+        
+        // Prioridade 1: Nota em Português (POR/PT)
+        const porNote = tNotes.find(tn => {
+            const lang = tn.LinguisticNote?.note?.['@_lang'] || '';
+            return ['POR', 'PT'].includes(lang.toUpperCase());
+        });
+
+        if (porNote) {
+            const text = porNote.LinguisticNote?.note?.['#text'] || porNote.LinguisticNote?.note || '';
+            if (text) extractedTexts.push(text);
+        } else {
+            // Fallback: Primeira nota disponível se não houver POR
+            const first = tNotes[0];
+            const text = first?.LinguisticNote?.note?.['#text'] || first?.LinguisticNote?.note || '';
+            if (text) extractedTexts.push(text);
+        }
     }
-    // Fallback: primeira nota disponível
-    const first = tNotes[0];
-    if (first?.LinguisticNote?.note?.['#text']) return [first.LinguisticNote.note['#text']];
-    if (first?.LinguisticNote?.note) return [first.LinguisticNote.note];
-    return [];
+    
+    return extractedTexts;
 }
 
 async function runSync() {
@@ -177,18 +221,32 @@ async function runSync() {
                         if (airspace) {
                             const aSlices = Array.isArray(airspace.timeSlice) ? airspace.timeSlice : (airspace.timeSlice ? [airspace.timeSlice] : []);
                             const ts = aSlices.find(s => ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(s.AirspaceTimeSlice?.interpretation))?.AirspaceTimeSlice;
-                            if (ts && ['TMA', 'CTR', 'FIR', 'CTA'].includes(ts.type)) {
+                            
+                            // Adicionada ATZ à lista de interesse
+                            if (ts && ['TMA', 'CTR', 'FIR', 'CTA', 'ATZ'].includes(ts.type)) {
                                 const ident = String(ts.designator || '');
                                 // Evitar duplicatas entre pacotes (manter o mais recente)
                                 if (!enrichedData.find(e => e.ident === ident)) {
                                     // Extrair limites verticais (múltiplos caminhos possíveis no AIXM 5.1)
                                     const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
-                                    const layer = ts.class?.AirspaceLayerClass?.associatedLevels?.AirspaceLayer;
+                                    
+                                    // NOVO: Extrair limites de múltiplas camadas (class) se existirem
+                                    const classes = Array.isArray(ts.class) ? ts.class : (ts.class ? [ts.class] : []);
+                                    let layer = null;
+                                    let classification = '';
+                                    
+                                    if (classes.length > 0) {
+                                        classification = classes[0].AirspaceLayerClass?.classification || '';
+                                        layer = classes[0].AirspaceLayerClass?.associatedLevels?.AirspaceLayer;
+                                        
+                                        // Se houver múltiplas camadas (como na SBWH_01), pegar o range total
+                                        if (classes.length > 1) {
+                                            console.log(`   💡 [ROBOT] Área Multicamada detectada: ${ident}`);
+                                        }
+                                    }
+
                                     const upperObj = vol?.upperLimit || layer?.upperLimit || ts.upperLimit;
                                     const lowerObj = vol?.lowerLimit || layer?.lowerLimit || ts.lowerLimit;
-
-                                    // Extrair classificação do espaço aéreo (A, B, C, D, E, G)
-                                    const classification = ts.class?.AirspaceLayerClass?.classification || '';
 
                                     // Extrair horário de ativação
                                     let schedule = 'H24';
@@ -278,7 +336,7 @@ async function runSync() {
             }
 
             // Enriquecimento Híbrido: Match Inteligente por Tipo + Agregação Multi-Setor
-            const aipMatchKeys = findAipMatches(aipFrequencies, area.nam, area.originalType || area.type);
+            const aipMatchKeys = findAipMatches(aipFrequencies, area.nam, area.originalType || area.type, area.ident);
 
             if (aipMatchKeys.length > 0) {
                 const aggregatedFreqs = [];
@@ -339,6 +397,16 @@ async function runSync() {
         }
 
         console.log('✅ [ROBOT] Super Varredura concluída com sucesso!');
+
+        // 🚀 AUTO-PUBLISH: Notificar a Edge Function para gerar os novos GeoJSONs no R2
+        console.log('🚀 [ROBOT] Disparando publicação estrutural para o App...');
+        try {
+            const { data: pubData, error: pubError } = await supabase.functions.invoke('publish-structural-airspace');
+            if (pubError) throw pubError;
+            console.log('✅ [ROBOT] Publicação concluída:', JSON.stringify(pubData.summary));
+        } catch (e) {
+            console.error('⚠️ [ROBOT] Erro ao disparar publicação automática:', e.message);
+        }
     } catch (error) {
         console.error('❌ [ROBOT] Erro fatal:', error.message);
     }
