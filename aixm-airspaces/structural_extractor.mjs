@@ -117,20 +117,25 @@ async function runSync() {
         const items = jsonObj.aisweb?.pub?.item || [];
         const itemsArray = Array.isArray(items) ? items : [items];
         
-        console.log(`📦 [ROBOT] Catálogo AIXM encontrado. ${itemsArray.length} itens disponíveis.`);
+        console.log('--------------------------------------------------');
+        console.log(`🚨 [AUDITORIA] Catálogo AIXM: ${itemsArray.length} pacotes encontrados.`);
         itemsArray.forEach((it, idx) => {
-            console.log(`   [${idx}] Nome: ${it.name} | Data: ${it.date} | Link: ${it.link || it.file}`);
+            console.log(`   👉 [${idx}] Pacote: ${it.name} | Link: ${it.link || it.file}`);
         });
+        console.log('--------------------------------------------------');
 
         const selectedItem = itemsArray.find(item => {
             const name = String(item.name || '').toLowerCase();
-            return (name.includes('completo') || name.includes('full')) && !name.includes('baseline');
+            return name.includes('completo') && !name.includes('baseline');
         }) || itemsArray.find(item => {
             const name = String(item.name || '').toLowerCase();
-            return name.includes('snapshot') || name.includes('baseline');
+            return name.includes('full') && !name.includes('baseline');
+        }) || itemsArray.find(item => {
+            const name = String(item.name || '').toLowerCase();
+            return name.includes('snapshot');
         }) || itemsArray[0];
 
-        console.log(`🎯 [ROBOT] Item Selecionado: ${selectedItem.name}`);
+        console.log(`✅ [ROBOT] Pacote Selecionado para Download: ${selectedItem.name}`);
 
         let dynamicLink = selectedItem?.link || selectedItem?.file || '';
         if (typeof dynamicLink === 'object') dynamicLink = dynamicLink['#text'] || '';
