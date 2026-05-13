@@ -448,16 +448,6 @@ async function runSync() {
         }
 
         console.log('✅ [ROBOT] Super Varredura concluída com sucesso!');
-
-        // 🚀 AUTO-PUBLISH: Notificar a Edge Function para gerar os novos GeoJSONs no R2
-        console.log('🚀 [ROBOT] Disparando publicação estrutural para o App...');
-        try {
-            const { data: pubData, error: pubError } = await supabase.functions.invoke('publish-structural-airspace');
-            if (pubError) throw pubError;
-            console.log('✅ [ROBOT] Publicação concluída:', JSON.stringify(pubData.summary));
-        } catch (e) {
-            console.error('⚠️ [ROBOT] Erro ao disparar publicação automática:', e.message);
-        }
     } catch (error) {
         console.error('❌ [ROBOT] Erro fatal:', error.message);
     }
