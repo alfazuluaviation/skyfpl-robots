@@ -3,11 +3,9 @@ import axios from 'axios';
 import JSZip from 'jszip';
 import { XMLParser } from 'fast-xml-parser';
 import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 
-dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_KEY;
