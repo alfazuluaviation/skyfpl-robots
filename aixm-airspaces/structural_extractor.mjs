@@ -18,21 +18,21 @@ function toTacticalCase(str) {
 
 function cleanRtf(str) {
     if (!str || typeof str !== 'string') return '';
-    // Limpar HTML entities primeiro (&#13; &#10; etc)
+    // Limpar HTML entities (&#13; &#10; etc)
     let clean = str.replace(/&#\d+;/g, ' ');
-    // Se não contém RTF, retorna limpo
     if (!clean.includes('\\rtf') && !clean.includes('{\\')) {
         return clean.replace(/\s+/g, ' ').trim();
     }
     // Decodificar caracteres hex RTF (\' seguido de hex)
     clean = clean.replace(/\\'([0-9a-f]{2})/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
-    // Remover blocos de controle aninhados {\fonttbl...}, {\colortbl...}, etc
-    let prev = '';
-    while (prev !== clean) { prev = clean; clean = clean.replace(/\{[^{}]*\}/g, ''); }
-    // Remover palavras de controle restantes (\par, \b0, \fs22, etc)
+    // Estratégia: Extrair texto após \fsNN (marcador de tamanho de fonte = início do conteúdo no RTF DECEA)
+    const contentMatch = clean.match(/\\fs\d+\s+([\s\S]+?)(?:\\par|$)/);
+    if (contentMatch && contentMatch[1].length > 5) {
+        clean = contentMatch[1];
+    }
+    // Remover control words restantes
     clean = clean.replace(/\\[a-z]+\d*\s?/gi, ' ');
-    // Remover chaves e espaços múltiplos
-    clean = clean.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
+    clean = clean.replace(/[{}\\\*]/g, '').replace(/\s+/g, ' ').trim();
     return clean || '';
 }
 
@@ -61,18 +61,25 @@ function findAipMatches(aipFrequencies, areaName, originalType) {
 }
 
 function extractAllNotes(timeSlice) {
-    const notes = [];
-    if (timeSlice.annotation?.Note?.translatedNote) {
-        const tNotes = Array.isArray(timeSlice.annotation.Note.translatedNote) 
-            ? timeSlice.annotation.Note.translatedNote 
-            : [timeSlice.annotation.Note.translatedNote];
-        
-        tNotes.forEach(tn => {
-            if (tn.LinguisticNote?.note?.['#text']) notes.push(tn.LinguisticNote.note['#text']);
-            else if (tn.LinguisticNote?.note) notes.push(tn.LinguisticNote.note);
-        });
+    if (!timeSlice.annotation?.Note?.translatedNote) return [];
+    const tNotes = Array.isArray(timeSlice.annotation.Note.translatedNote) 
+        ? timeSlice.annotation.Note.translatedNote 
+        : [timeSlice.annotation.Note.translatedNote];
+    
+    // Preferir nota em Português (POR)
+    const porNote = tNotes.find(tn => {
+        const lang = tn.LinguisticNote?.note?.['@_lang'] || '';
+        return lang.toUpperCase() === 'POR' || lang.toUpperCase() === 'PT';
+    });
+    if (porNote) {
+        const text = porNote.LinguisticNote?.note?.['#text'] || porNote.LinguisticNote?.note || '';
+        return text ? [text] : [];
     }
-    return notes;
+    // Fallback: primeira nota disponível
+    const first = tNotes[0];
+    if (first?.LinguisticNote?.note?.['#text']) return [first.LinguisticNote.note['#text']];
+    if (first?.LinguisticNote?.note) return [first.LinguisticNote.note];
+    return [];
 }
 
 async function runSync() {
