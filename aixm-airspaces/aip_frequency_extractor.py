@@ -40,34 +40,45 @@ def download_pdf(url, output_path):
     print("\nDownload concluído.")
 
 def extract_frequencies(pdf_path):
-    print("\nIniciando varredura com pdfplumber...")
+    print("\\nIniciando varredura com pdfplumber...")
     extracted_data = {}
+    import re
     
     try:
         with pdfplumber.open(pdf_path) as pdf:
             total_pages = len(pdf.pages)
             print(f"Total de páginas no AIP: {total_pages}")
             
-            # Aqui focamos apenas nas páginas ENR 2.1 (Pode variar de edição para edição, então fazemos um scan nas primeiras centenas)
-            # Como teste, limitaremos às páginas que mencionam 'ENR 2.1'
-            for i in range(min(total_pages, 500)): # Varredura restrita para evitar timeout inicial
+            for i in range(min(total_pages, 500)):
                 page = pdf.pages[i]
                 text = page.extract_text()
-                if text and 'ENR 2.1' in text and ('SBEG' in text or 'SBBE' in text or 'TMA' in text):
-                    print(f"Encontrada página candidata: {i+1}")
+                if text and 'ENR 2.1' in text:
                     tables = page.extract_tables()
                     for table in tables:
-                        # processar linhas da tabela buscando frequencias como 119.1, 128.6
+                        if not table: continue
                         for row in table:
-                            row_text = str(row)
-                            if '119.1' in row_text or '128.6' in row_text:
-                                print(f"  -> Frequência encontrada na Tabela: {row_text}")
-                                # Mock da extração estruturada
-                                extracted_data['SBEG'] = {
-                                    'frequencias': ['119.100', '128.600'],
-                                    'horario': 'H24',
-                                    'observacoes': 'APP MANAUS'
-                                }
+                            if not row or len(row) < 4: continue
+                            
+                            col0 = str(row[0]) if row[0] else ""
+                            # Filtra apenas linhas que sejam áreas de controle
+                            if 'TMA' in col0 or 'CTR' in col0 or 'FIR' in col0 or 'CTA' in col0:
+                                # O nome geralmente fica na primeira linha da coluna 0
+                                name = col0.split('\\n')[0].strip().upper()
+                                
+                                freqs_raw = str(row[3]) if len(row) > 3 and row[3] else ""
+                                freqs = re.findall(r'1\\d{2}\\.\\d{3}', freqs_raw)
+                                
+                                obs = str(row[4]).replace('\\n', ' ').strip() if len(row) > 4 and row[4] else ""
+                                hours_col = str(row[2]) if len(row) > 2 and row[2] else ""
+                                hours = "H24" if "H24" in hours_col else ""
+                                
+                                if freqs:
+                                    print(f"  -> Indexando AIP: {name} ({len(freqs)} freqs)")
+                                    extracted_data[name] = {
+                                        'frequencias': freqs,
+                                        'horario': hours,
+                                        'observacoes': obs
+                                    }
     except Exception as e:
         print(f"Erro ao processar PDF: {e}")
         
