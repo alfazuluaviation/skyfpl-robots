@@ -302,17 +302,20 @@ async function runSync() {
                                     }
 
                                     const auditNotes = [];
-                                    if (classes.length > 1) auditNotes.push(`Múltiplas camadas detectadas (${classes.length})`);
-                                    if (minRef === 'SFC') auditNotes.push('Base confirmada como Superfície (SFC)');
+                                    if (classes.length > 1) auditNotes.push('MULTIPLAS_CAMADAS');
+                                    if (minRef === 'SFC') auditNotes.push('BASE_SFC');
+                                    if (absoluteMax === null || isNaN(absoluteMax) || absoluteMin === null || isNaN(absoluteMin)) {
+                                        auditNotes.push('ALTITUDE_FALTANDO');
+                                    }
 
                                     enrichedData.push({
                                         ident,
                                         nam: ts.name || '',
                                         type: (ts.type === 'CTA' || ts.type === 'FIR') ? 'TMA' : ts.type,
                                         originalType: ts.type,
-                                        upperLimit: absoluteMax === -Infinity ? null : absoluteMax,
+                                        upperLimit: (absoluteMax === -Infinity || isNaN(absoluteMax)) ? null : absoluteMax,
                                         uom_upper: maxUom,
-                                        lowerLimit: absoluteMin === Infinity ? null : absoluteMin,
+                                        lowerLimit: (absoluteMin === Infinity || isNaN(absoluteMin)) ? null : absoluteMin,
                                         uom_lower: minUom,
                                         upperRef: maxRef,
                                         lowerRef: minRef,
@@ -412,7 +415,30 @@ async function runSync() {
             const status = area.auditNotes.length > 0 ? 'PENDING' : 'AUDITED';
 
             // Sincronizar Supabase
-            const { data: existing } = await supabase.from('airspace_snapshots').select('id, raw_properties, status').eq('ident', area.ident).eq('is_current', true).maybeSingle();
+            const { data: existing } = await supabase.from('airspace_snapshots').select('id, raw_properties, status, upperlimit, lowerlimit, classrmklo').eq('ident', area.ident).eq('is_current', true).maybeSingle();
+
+            if (!existing) {
+                area.auditNotes.push('DADO_NOVO');
+            } else {
+                // Detectar alterações estruturais em relação ao que já temos validado/existente
+                if (existing.upperlimit !== area.upperLimit || existing.lowerlimit !== area.lowerLimit) {
+                    area.auditNotes.push('ALTERACAO_LIMITES');
+                }
+                if (existing.classrmklo !== area.classification) {
+                    area.auditNotes.push('ALTERACAO_CLASSE');
+                }
+            }
+
+            if (finalFrequencies.length === 0) {
+                area.auditNotes.push('FREQUENCIA_FALTANDO');
+            }
+            if (aipMatchKeys.length === 0) {
+                area.auditNotes.push('NOME_NAO_IDENTIFICADO');
+            }
+
+            // Determinar Status de Auditoria
+            const reason = [...new Set(area.auditNotes)].join(', ');
+            const status = area.auditNotes.length > 0 ? 'PENDING' : 'AUDITED';
 
             const snapshotData = {
                 ident: area.ident,
@@ -424,6 +450,7 @@ async function runSync() {
                 lowerlimituni: area.uom_lower,
                 is_current: true,
                 status: (existing?.status === 'VALIDATED') ? 'VALIDATED' : status, // Preservar validação manual
+                pending_reason: (existing?.status === 'VALIDATED') ? null : (reason || null),
                 raw_properties: {
                     ...(existing?.raw_properties || {}),
                     aip_data: {
