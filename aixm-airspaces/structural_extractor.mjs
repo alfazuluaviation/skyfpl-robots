@@ -273,35 +273,50 @@ async function runSync() {
                                             }
 
                                             // Calcular teto máximo
-                                            if (!isNaN(upVal) && upVal > absoluteMax) {
-                                                absoluteMax = upVal;
-                                                maxUom = uUom;
-                                                maxRef = uRef;
-                                            }
-                                            // Calcular base mínima (critério SFC)
-                                            if (!isNaN(loVal)) {
-                                                if (lRef === 'SFC' || lRef === 'GND' || loVal === 0) {
-                                                    absoluteMin = 0;
-                                                    minUom = 'FT';
-                                                    minRef = 'SFC';
-                                                } else if (loVal < absoluteMin) {
-                                                    absoluteMin = loVal;
-                                                    minUom = lUom;
-                                                    minRef = lRef;
-                                                }
                                             }
                                         });
-                                    } else {
-                                        // Fallback se não houver camadas definidas em 'class'
-                                        const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
-                                        const up = vol?.upperLimit?.['#text'] ?? vol?.upperLimit?.val ?? vol?.upperLimit ?? ts.upperLimit;
-                                        const lo = vol?.lowerLimit?.['#text'] ?? vol?.lowerLimit?.val ?? vol?.lowerLimit ?? ts.lowerLimit;
-                                        absoluteMax = extractVal(up);
-                                        absoluteMin = extractVal(lo);
-                                        maxUom = vol?.upperLimit?.['@_uom'] || 'FL';
-                                        minUom = vol?.lowerLimit?.['@_uom'] || 'FT';
-                                        maxRef = vol?.upperLimitReference || 'STD';
-                                        minRef = vol?.lowerLimitReference || 'MSL';
+                                    }
+
+                                    // SEMPRE verificar o bloco de Geometria para complementar ou servir de base
+                                    const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
+                                    if (vol) {
+                                        const up = vol.upperLimit?.['#text'] ?? vol.upperLimit?.val ?? vol.upperLimit;
+                                        const lo = vol.lowerLimit?.['#text'] ?? vol.lowerLimit?.val ?? vol.lowerLimit;
+                                        const upVal = extractVal(up);
+                                        const loVal = extractVal(lo);
+                                        const uRef = vol.upperLimitReference || maxRef;
+                                        const lRef = vol.lowerLimitReference || minRef;
+                                        const uUom = vol.upperLimit?.['@_uom'] || maxUom;
+                                        const lUom = vol.lowerLimit?.['@_uom'] || minUom;
+
+                                        if (upVal !== null && (absoluteMax === -Infinity || upVal > absoluteMax)) {
+                                            absoluteMax = upVal;
+                                            maxUom = uUom;
+                                            maxRef = uRef;
+                                        }
+                                        if (loVal !== null && (absoluteMin === Infinity || loVal < absoluteMin)) {
+                                            absoluteMin = loVal;
+                                            minUom = lUom;
+                                            minRef = lRef;
+                                        }
+                                    }
+
+                                    // Fallback final: se ainda não temos nada, tentar no topo do TimeSlice
+                                    if (absoluteMax === -Infinity) {
+                                        const upVal = extractVal(ts.upperLimit);
+                                        if (upVal !== null) {
+                                            absoluteMax = upVal;
+                                            maxUom = ts.upperLimit?.['@_uom'] || 'FL';
+                                            maxRef = ts.upperLimitReference || 'STD';
+                                        }
+                                    }
+                                    if (absoluteMin === Infinity) {
+                                        const loVal = extractVal(ts.lowerLimit);
+                                        if (loVal !== null) {
+                                            absoluteMin = loVal;
+                                            minUom = ts.lowerLimit?.['@_uom'] || 'FT';
+                                            minRef = ts.lowerLimitReference || 'MSL';
+                                        }
                                     }
 
                                     // Extrair horário de ativação
