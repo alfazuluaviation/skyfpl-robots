@@ -20,9 +20,28 @@ function extractVal(obj) {
     }
     // Caso seja um objeto AIXM com #text ou val
     const val = obj['#text'] ?? obj.val ?? obj.value ?? obj;
-    if (typeof val === 'object') return null;
+    if (val && typeof val === 'object') return null;
     const parsed = parseInt(String(val));
     return isNaN(parsed) ? null : parsed;
+}
+
+function findDeep(obj, targetKey) {
+    if (!obj || typeof obj !== 'object') return null;
+    const entries = Object.entries(obj);
+    
+    // 1. Tentar encontrar no nível atual (Case Insensitive)
+    for (const [key, value] of entries) {
+        if (key.toLowerCase() === targetKey.toLowerCase()) return value;
+    }
+    
+    // 2. Se não achou, mergulhar recursivamente
+    for (const [key, value] of entries) {
+        if (typeof value === 'object') {
+            const found = findDeep(value, targetKey);
+            if (found !== null) return found;
+        }
+    }
+    return null;
 }
 
 function toTacticalCase(str) {
@@ -267,55 +286,44 @@ async function runSync() {
                                             const upVal = extractVal(up);
                                             const loVal = extractVal(lo);
 
-                                            // Guardar detalhes da camada para o log/observações
-                                            if (!isNaN(upVal) || !isNaN(loVal)) {
+                                            if (upVal !== null || loVal !== null) {
                                                 layerDetails.push(`Classe ${classification}: ${upVal || '?'}${uUom}/${loVal || '?'}${lUom}`);
                                             }
 
-                                            // Calcular teto máximo
+                                            if (upVal !== null && (absoluteMax === -Infinity || upVal > absoluteMax)) {
+                                                absoluteMax = upVal;
+                                                maxUom = uUom;
+                                                maxRef = uRef;
+                                            }
+                                            if (loVal !== null && (absoluteMin === Infinity || loVal < absoluteMin)) {
+                                                absoluteMin = loVal;
+                                                minUom = lUom;
+                                                minRef = lRef;
                                             }
                                         });
                                     }
 
-                                    // SEMPRE verificar o bloco de Geometria para complementar ou servir de base
-                                    const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
-                                    if (vol) {
-                                        const up = vol.upperLimit?.['#text'] ?? vol.upperLimit?.val ?? vol.upperLimit;
-                                        const lo = vol.lowerLimit?.['#text'] ?? vol.lowerLimit?.val ?? vol.lowerLimit;
-                                        const upVal = extractVal(up);
-                                        const loVal = extractVal(lo);
-                                        const uRef = vol.upperLimitReference || maxRef;
-                                        const lRef = vol.lowerLimitReference || minRef;
-                                        const uUom = vol.upperLimit?.['@_uom'] || maxUom;
-                                        const lUom = vol.lowerLimit?.['@_uom'] || minUom;
+                                    // BUSCA PROFUNDA (Deep Search) - A "Bomba Atômica" contra dados sumidos
+                                    // Procura em todo o nó da AirspaceTimeSlice por limites (case-insensitive)
+                                    const deepUp = findDeep(ts, 'upperLimit');
+                                    const deepLo = findDeep(ts, 'lowerLimit');
+                                    const deepUpRef = findDeep(ts, 'upperLimitReference');
+                                    const deepLoRef = findDeep(ts, 'lowerLimitReference');
 
-                                        if (upVal !== null && (absoluteMax === -Infinity || upVal > absoluteMax)) {
-                                            absoluteMax = upVal;
-                                            maxUom = uUom;
-                                            maxRef = uRef;
-                                        }
-                                        if (loVal !== null && (absoluteMin === Infinity || loVal < absoluteMin)) {
-                                            absoluteMin = loVal;
-                                            minUom = lUom;
-                                            minRef = lRef;
+                                    if (deepUp !== null) {
+                                        const val = extractVal(deepUp);
+                                        if (val !== null && (absoluteMax === -Infinity || val > absoluteMax)) {
+                                            absoluteMax = val;
+                                            maxUom = deepUp['@_uom'] || (deepUpRef === 'STD' ? 'FL' : 'FT');
+                                            maxRef = deepUpRef || maxRef;
                                         }
                                     }
-
-                                    // Fallback final: se ainda não temos nada, tentar no topo do TimeSlice
-                                    if (absoluteMax === -Infinity) {
-                                        const upVal = extractVal(ts.upperLimit);
-                                        if (upVal !== null) {
-                                            absoluteMax = upVal;
-                                            maxUom = ts.upperLimit?.['@_uom'] || 'FL';
-                                            maxRef = ts.upperLimitReference || 'STD';
-                                        }
-                                    }
-                                    if (absoluteMin === Infinity) {
-                                        const loVal = extractVal(ts.lowerLimit);
-                                        if (loVal !== null) {
-                                            absoluteMin = loVal;
-                                            minUom = ts.lowerLimit?.['@_uom'] || 'FT';
-                                            minRef = ts.lowerLimitReference || 'MSL';
+                                    if (deepLo !== null) {
+                                        const val = extractVal(deepLo);
+                                        if (val !== null && (absoluteMin === Infinity || val < absoluteMin)) {
+                                            absoluteMin = val;
+                                            minUom = deepLo['@_uom'] || (deepLoRef === 'MSL' ? 'FT' : 'FL');
+                                            minRef = deepLoRef || minRef;
                                         }
                                     }
 
@@ -333,7 +341,7 @@ async function runSync() {
                                     const auditNotes = [];
                                     if (classes.length > 1) auditNotes.push('MULTIPLAS_CAMADAS');
                                     if (minRef === 'SFC') auditNotes.push('BASE_SFC');
-                                    if (absoluteMax === null || isNaN(absoluteMax) || absoluteMin === null || isNaN(absoluteMin)) {
+                                    if (absoluteMax === -Infinity || absoluteMin === Infinity) {
                                         auditNotes.push('ALTITUDE_FALTANDO');
                                     }
 
