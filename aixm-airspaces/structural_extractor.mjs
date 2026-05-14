@@ -11,6 +11,20 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
 const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+function extractVal(obj) {
+    if (obj === null || obj === undefined) return null;
+    if (typeof obj === 'number') return obj;
+    if (typeof obj === 'string') {
+        const parsed = parseInt(obj);
+        return isNaN(parsed) ? null : parsed;
+    }
+    // Caso seja um objeto AIXM com #text ou val
+    const val = obj['#text'] ?? obj.val ?? obj.value ?? obj;
+    if (typeof val === 'object') return null;
+    const parsed = parseInt(String(val));
+    return isNaN(parsed) ? null : parsed;
+}
+
 function toTacticalCase(str) {
     if (!str) return '';
     
@@ -250,8 +264,8 @@ async function runSync() {
                                             const uUom = layer?.upperLimit?.['@_uom'] || (uRef === 'STD' ? 'FL' : 'FT');
                                             const lUom = layer?.lowerLimit?.['@_uom'] || (lRef === 'MSL' ? 'FT' : 'FL');
 
-                                            const upVal = parseInt(String(up));
-                                            const loVal = parseInt(String(lo));
+                                            const upVal = extractVal(up);
+                                            const loVal = extractVal(lo);
 
                                             // Guardar detalhes da camada para o log/observações
                                             if (!isNaN(upVal) || !isNaN(loVal)) {
@@ -282,8 +296,8 @@ async function runSync() {
                                         const vol = ts.geometryComponent?.AirspaceGeometryComponent?.theAirspaceVolume?.AirspaceVolume;
                                         const up = vol?.upperLimit?.['#text'] ?? vol?.upperLimit?.val ?? vol?.upperLimit ?? ts.upperLimit;
                                         const lo = vol?.lowerLimit?.['#text'] ?? vol?.lowerLimit?.val ?? vol?.lowerLimit ?? ts.lowerLimit;
-                                        absoluteMax = parseInt(String(up));
-                                        absoluteMin = parseInt(String(lo));
+                                        absoluteMax = extractVal(up);
+                                        absoluteMin = extractVal(lo);
                                         maxUom = vol?.upperLimit?.['@_uom'] || 'FL';
                                         minUom = vol?.lowerLimit?.['@_uom'] || 'FT';
                                         maxRef = vol?.upperLimitReference || 'STD';
@@ -351,8 +365,10 @@ async function runSync() {
         }
 
         const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
+        const processedIdents = new Set();
 
         for (const area of enrichedData) {
+            processedIdents.add(area.ident);
             const normIdent = normalize(area.ident);
             const normName = normalize(area.nam);
             
@@ -417,12 +433,23 @@ async function runSync() {
             if (!existing) {
                 area.auditNotes.push('DADO_NOVO');
             } else {
-                // Detectar alterações estruturais em relação ao que já temos validado/existente
-                if (existing.upperlimit !== area.upperLimit || existing.lowerlimit !== area.lowerLimit) {
-                    area.auditNotes.push('ALTERACAO_LIMITES');
+                // Detectar alterações estruturais refinadas
+                if (area.upperLimit !== null && existing.upperlimit !== area.upperLimit) {
+                    area.auditNotes.push('LIMITE_SUPERIOR_ALTERADO');
                 }
-                if (existing.classrmklo !== area.classification) {
-                    area.auditNotes.push('ALTERACAO_CLASSE');
+                if (area.lowerLimit !== null && existing.lowerlimit !== area.lowerLimit) {
+                    area.auditNotes.push('LIMITE_INFERIOR_ALTERADO');
+                }
+                if (area.classification && existing.classrmklo !== area.classification) {
+                    area.auditNotes.push('CLASSE_ALTERADA');
+                }
+                
+                // Verificar se houve mudança significativa nas frequências
+                const existingFreqs = existing.raw_properties?.aip_data?.frequencias || [];
+                const hasNewFreq = finalFrequencies.some(f => !existingFreqs.includes(f));
+                const lostFreq = existingFreqs.some(f => !finalFrequencies.includes(f));
+                if (hasNewFreq || lostFreq) {
+                    area.auditNotes.push('FREQUENCIAS_MODIFICADAS');
                 }
             }
 
@@ -430,7 +457,7 @@ async function runSync() {
                 area.auditNotes.push('FREQUENCIA_FALTANDO');
             }
             if (aipMatchKeys.length === 0) {
-                area.auditNotes.push('NOME_NAO_IDENTIFICADO');
+                area.auditNotes.push('AIP_DESCONHECIDO');
             }
 
             // Determinar Status de Auditoria
@@ -468,6 +495,25 @@ async function runSync() {
                 await supabase.from('airspace_snapshots').update(snapshotData).eq('id', existing.id);
             } else {
                 await supabase.from('airspace_snapshots').insert(snapshotData);
+            }
+        }
+
+        // FASE 4: Auditoria de Órfãos (Áreas que sumiram do DECEA)
+        console.log('🕵️ [ROBOT-AUDIT] Iniciando busca por áreas removidas pelo DECEA...');
+        const { data: currentItems } = await supabase.from('airspace_snapshots')
+            .select('id, ident, type, nam')
+            .eq('is_current', true);
+        
+        if (currentItems) {
+            for (const item of currentItems) {
+                if (!processedIdents.has(item.ident)) {
+                    console.log(`⚠️ [ROBOT-ALERT] Área ${item.ident} (${item.nam}) não encontrada no novo ciclo. Marcando para auditoria.`);
+                    await supabase.from('airspace_snapshots').update({
+                        status: 'PENDING',
+                        pending_reason: 'REMOVIDO_PELO_DECEA',
+                        is_current: true // Mantemos como true para que o usuário veja a pendência no Dashboard
+                    }).eq('id', item.id);
+                }
             }
         }
 
