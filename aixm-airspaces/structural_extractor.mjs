@@ -410,9 +410,6 @@ async function runSync() {
                 }
             }
 
-            // Determinar Status de Auditoria
-            // Se houver notas de auditoria (múltiplas camadas, etc), marcar como PENDING
-            const status = area.auditNotes.length > 0 ? 'PENDING' : 'AUDITED';
 
             // Sincronizar Supabase
             const { data: existing } = await supabase.from('airspace_snapshots').select('id, raw_properties, status, upperlimit, lowerlimit, classrmklo').eq('ident', area.ident).eq('is_current', true).maybeSingle();
