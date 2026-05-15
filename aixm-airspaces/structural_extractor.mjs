@@ -251,13 +251,15 @@ async function runSync() {
 
                         // 3. Coletar Espaços Aéreos
                         const airspace = member.Airspace;
-                        if (airspace) {
+        if (airspace) {
                             const aSlices = Array.isArray(airspace.timeSlice) ? airspace.timeSlice : (airspace.timeSlice ? [airspace.timeSlice] : []);
                             const ts = aSlices.find(s => ['BASELINE', 'PERMANENT', 'SNAPSHOT'].includes(s.AirspaceTimeSlice?.interpretation))?.AirspaceTimeSlice;
                             
                             // Adicionada ATZ à lista de interesse
                             if (ts && ['TMA', 'CTR', 'FIR', 'CTA', 'ATZ'].includes(ts.type)) {
-                                const ident = String(ts.designator || '');
+                                const isCtr = ts.type === 'CTR';
+                                const ident = isCtr ? `${ts.designator} CTR` : String(ts.designator || '');
+                                
                                 // Evitar duplicatas entre pacotes (manter o mais recente)
                                 if (!enrichedData.find(e => e.ident === ident)) {
                                     // NOVO: Extrair limites de múltiplas camadas (class) e calcular envelope total
@@ -500,6 +502,7 @@ async function runSync() {
                 pending_reason: (existing?.status === 'VALIDATED') ? null : (reason || null),
                 raw_properties: {
                     ...(existing?.raw_properties || {}),
+                    aerodrome_icao: area.raw?.designator || null,
                     aip_data: {
                         horario: area.horario,
                         classificacao: area.classification || '',
