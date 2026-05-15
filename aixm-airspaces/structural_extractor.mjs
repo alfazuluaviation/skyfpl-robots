@@ -257,11 +257,16 @@ async function runSync() {
                             
                             // Adicionada ATZ à lista de interesse
                             if (ts && ['TMA', 'CTR', 'FIR', 'CTA', 'ATZ'].includes(ts.type)) {
-                                const isCtr = ts.type === 'CTR';
-                                const ident = isCtr ? `${ts.designator} CTR` : String(ts.designator || '');
-                                
-                                // Evitar duplicatas entre pacotes (manter o mais recente)
-                                if (!enrichedData.find(e => e.ident === ident)) {
+                                    const isCtr = ts.type === 'CTR';
+                                    const isAcc = ts.type === 'FIR' || ts.type === 'CTA';
+                                    
+                                    // Para ACC (FIR/CTA), o ident é apenas o designador (ex: SBAZ)
+                                    // Para CTR, mantemos o sufixo ' CTR' para evitar colisão com aeródromo
+                                    let ident = String(ts.designator || '');
+                                    if (isCtr) ident = `${ts.designator} CTR`;
+                                    
+                                    // Evitar duplicatas entre pacotes (manter o mais recente)
+                                    if (!enrichedData.find(e => e.ident === ident)) {
                                     // NOVO: Extrair limites de múltiplas camadas (class) e calcular envelope total
                                     const classes = Array.isArray(ts.class) ? ts.class : (ts.class ? [ts.class] : []);
                                     let absoluteMax = -Infinity;
@@ -348,9 +353,10 @@ async function runSync() {
                                     }
 
                                     enrichedData.push({
-                                        ident,
+                                        ident: ident,
                                         nam: ts.name || '',
-                                        type: (ts.type === 'CTA' || ts.type === 'FIR') ? 'TMA' : ts.type,
+                                        designator: ts.designator,
+                                        type: isAcc ? 'FIR' : ts.type,
                                         originalType: ts.type,
                                         upperLimit: (absoluteMax === -Infinity || isNaN(absoluteMax)) ? null : absoluteMax,
                                         uom_upper: maxUom,
