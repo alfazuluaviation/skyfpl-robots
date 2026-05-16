@@ -97,6 +97,9 @@ function findAipMatches(aipFrequencies, areaName, originalType, designator = '')
     const allKeys = Object.keys(aipFrequencies);
     
     if (normName.length < 3) return [];
+    
+    // 0. Match DIRETO por Identificador (ex: SBBS_16) - Padrão Ouro
+    if (designator && aipFrequencies[designator]) return [designator];
 
     // 1. Tentar match exato com o nome normalizado
     let candidates = allKeys.filter(k => normalize(k) === normName);
@@ -263,7 +266,15 @@ async function runSync() {
                                     // Para ACC (FIR/CTA), o ident é apenas o designador (ex: SBAZ)
                                     // Para CTR, mantemos o sufixo ' CTR' para evitar colisão com aeródromo
                                     let ident = String(ts.designator || '');
-                                    if (isCtr) ident = `${ts.designator} CTR`;
+                                    if (isCtr) {
+                                        ident = `${ts.designator} CTR`;
+                                    } else if (isAcc && ts.name && (ts.name.includes('SECT') || ts.name.includes('SETOR'))) {
+                                        // Tentar extrair o número do setor do nome se for FIR/CTA (ex: "Brasília SECT 16" -> SBBS_16)
+                                        const sectorMatch = ts.name.match(/(?:SECT|SETOR)\s*(\d+[A-Z]*)/i);
+                                        if (sectorMatch) {
+                                            ident = `${ts.designator}_${sectorMatch[1]}`;
+                                        }
+                                    }
                                     
                                     // Evitar duplicatas entre pacotes (manter o mais recente)
                                     if (!enrichedData.find(e => e.ident === ident)) {

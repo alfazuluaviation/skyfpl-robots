@@ -320,7 +320,8 @@ if __name__ == "__main__":
     # Isso garante que o robô antigo continua funcionando
     legacy_data = {}
     for r in records:
-        key = f"FIR {r['fir_id']} SECT {r['sector_number']}"
+        # Usar o novo formato IDENT (ex: SBBS_16) como chave para match direto
+        key = f"{r['fir_id']}_{r['sector_number']}"
         if key not in legacy_data:
             legacy_data[key] = {'frequencias': [], 'horario': r['schedule'], 'observacoes': ''}
         legacy_data[key]['frequencias'].append(f"{r['frequency']} MHz")
