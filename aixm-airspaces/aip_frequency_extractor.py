@@ -17,24 +17,45 @@ def get_aip_url():
     return "https://aisweb.decea.gov.br/download/?public=60b181e0-2a0e-4728-9b562fa4ff340fb0.pdf"
 
 def download_pdf(url, output_path):
-    print(f"Iniciando download do AIP ({url})...")
-    response = requests.get(url, stream=True, verify=False)
+    import time
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
     
-    if response.status_code in [301, 302]:
-        url = response.headers.get('Location')
-        response = requests.get(url, stream=True, verify=False)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            print(f"Iniciando download do AIP (Tentativa {attempt+1}/{max_retries})...")
+            response = requests.get(url, stream=True, verify=False, headers=headers, timeout=30)
+            
+            if response.status_code in [301, 302]:
+                url = response.headers.get('Location')
+                response = requests.get(url, stream=True, verify=False, headers=headers, timeout=30)
 
-    total_size = int(response.headers.get('content-length', 0))
-    downloaded = 0
-    with open(output_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            if chunk:
-                f.write(chunk)
-                downloaded += len(chunk)
-                done = int(50 * downloaded / (total_size if total_size > 0 else 100000000))
-                sys.stdout.write(f"\r[{'=' * done}{' ' * (50-done)}] {downloaded//1024} KB")
-                sys.stdout.flush()
-    print("\nDownload concluído.")
+            if response.status_code != 200:
+                print(f"❌ Erro HTTP {response.status_code}. Retentando...")
+                time.sleep(5)
+                continue
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            done = int(50 * downloaded / total_size)
+                            sys.stdout.write(f"\r[{'=' * done}{' ' * (50-done)}] {downloaded//1024} KB")
+                            sys.stdout.flush()
+            print("\nDownload concluído.")
+            return True
+        except Exception as e:
+            print(f"⚠️ Erro no download: {e}. Retentando em 5s...")
+            time.sleep(5)
+    
+    print("❌ Falha crítica: Não foi possível baixar o AIP após várias tentativas.")
+    return False
 
 def classify_service_type(text):
     """
