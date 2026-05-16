@@ -547,21 +547,67 @@ async function runSync() {
             }
         }
 
-        // FASE 4: Auditoria de Órfãos (Áreas que sumiram do DECEA)
-        console.log('🕵️ [ROBOT-AUDIT] Iniciando busca por áreas removidas pelo DECEA...');
+        // FASE 4: Auditoria de Órfãos (Áreas que sumiram do DECEA) e Enriquecimento de Setores WFS
+        console.log('🕵️ [ROBOT-AUDIT] Iniciando auditoria de órfãos e injeção em setores WFS...');
         const { data: currentItems } = await supabase.from('airspace_snapshots')
-            .select('id, ident, type, nam')
+            .select('id, ident, type, nam, raw_properties, status')
             .eq('is_current', true);
         
         if (currentItems) {
             for (const item of currentItems) {
                 if (!processedIdents.has(item.ident)) {
-                    console.log(`⚠️ [ROBOT-ALERT] Área ${item.ident} (${item.nam}) não encontrada no novo ciclo. Marcando para auditoria.`);
-                    await supabase.from('airspace_snapshots').update({
-                        status: 'PENDING',
-                        pending_reason: 'REMOVIDO_PELO_DECEA',
-                        is_current: true // Mantemos como true para que o usuário veja a pendência no Dashboard
-                    }).eq('id', item.id);
+                    // É um setor de FIR vindo do GeoServer WFS? (ex: SBBS_16, SBAZ_01AL)
+                    if (item.type === 'FIR' && (item.ident.includes('_') || /\d/.test(item.ident))) {
+                        // Enriquecer este setor com os dados do AIP (PDF)
+                        const aipMatchKeys = findAipMatches(aipFrequencies, item.nam, item.type, item.ident);
+                        
+                        if (aipMatchKeys.length > 0) {
+                            const aggregatedFreqs = [];
+                            let bestHorario = '';
+                            let bestObs = '';
+
+                            aipMatchKeys.forEach(key => {
+                                const data = aipFrequencies[key];
+                                if (data.frequencias) aggregatedFreqs.push(...data.frequencias.map(f => f.includes('MHz') ? f : `${f} MHz`));
+                                if (data.horario && !bestHorario) bestHorario = data.horario;
+                                if (data.observacoes && !bestObs) bestObs = data.observacoes;
+                            });
+
+                            const finalFrequencies = [...new Set(aggregatedFreqs)];
+                            console.log(`🔗 [WFS-INJECT] ${item.ident} (${item.nam}) recebeu ${finalFrequencies.length} frequências do PDF.`);
+
+                            // Atualizar o banco com os dados recém-injetados
+                            await supabase.from('airspace_snapshots').update({
+                                status: (item.status === 'VALIDATED') ? 'VALIDATED' : 'AUDITED',
+                                pending_reason: null,
+                                raw_properties: {
+                                    ...(item.raw_properties || {}),
+                                    aip_data: {
+                                        horario: bestHorario,
+                                        observacoes: bestObs,
+                                        frequencias: finalFrequencies,
+                                        audit_log: ['ENRIQUECIDO_VIA_WFS_HIBRIDO']
+                                    }
+                                }
+                            }).eq('id', item.id);
+                            
+                        } else {
+                            // É um setor, mas não tem frequências no PDF.
+                            console.log(`⚠️ [WFS-MISSING] Setor WFS ${item.ident} sem frequências no AIP. Mantendo como pendente.`);
+                            await supabase.from('airspace_snapshots').update({
+                                status: 'PENDING',
+                                pending_reason: 'FALTAM_DADOS_AIP',
+                            }).eq('id', item.id);
+                        }
+                    } else {
+                        // Realmente é um órfão (foi removido no novo AIXM)
+                        console.log(`⚠️ [ROBOT-ALERT] Área ${item.ident} (${item.nam}) não encontrada no novo ciclo. Marcando para auditoria.`);
+                        await supabase.from('airspace_snapshots').update({
+                            status: 'PENDING',
+                            pending_reason: 'REMOVIDO_PELO_DECEA',
+                            is_current: true // Mantemos como true para que o usuário veja a pendência no Dashboard
+                        }).eq('id', item.id);
+                    }
                 }
             }
         }
