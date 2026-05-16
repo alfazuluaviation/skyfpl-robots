@@ -328,5 +328,6 @@ if __name__ == "__main__":
     
     with open('aip_frequencies.json', 'w', encoding='utf-8') as f:
         json.dump(legacy_data, f, indent=4, ensure_ascii=False)
+    print(f"✅ Arquivo de intercâmbio aip_frequencies.json gerado com sucesso.")
     
     print(f"\n[SUCESSO] Extração por setor concluída! {len(records)} frequências mapeadas.")

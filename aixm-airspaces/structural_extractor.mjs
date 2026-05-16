@@ -214,7 +214,10 @@ async function runSync() {
                         alwaysArray: ["hasMember", "timeSlice", "radioCommunicationChannel"]
                     });
                     const jsonObj2 = parser2.parse(xmlText);
-                    const members = jsonObj2.AIXMBasicMessage?.hasMember || [];
+                    // Suporte flexível para diferentes raízes de XML (com ou sem namespace prefixado)
+                    const root = jsonObj2.AIXMBasicMessage || jsonObj2.message || jsonObj2[Object.keys(jsonObj2)[0]];
+                    const members = root?.hasMember || [];
+                    console.log(`   💎 Encontrados ${members.length} elementos no XML.`);
 
                     members.forEach(member => {
                         // 1. Busca Literal de Frequências (Scanner de Deep Object)
@@ -382,6 +385,7 @@ async function runSync() {
                                         auditNotes,
                                         raw: ts
                                     });
+                                    console.log(`   📍 [DETECTOR] Área Detectada: ${ident} (${ts.name}) - Tipo: ${ts.type}`);
                                 }
                             }
                         }
@@ -400,10 +404,12 @@ async function runSync() {
         try {
             if (fs.existsSync('./aip_frequencies.json')) {
                 aipFrequencies = JSON.parse(fs.readFileSync('./aip_frequencies.json', 'utf8'));
-                console.log(`📚 [ROBOT-AIP] Carregadas frequências estruturais do AIP para ${Object.keys(aipFrequencies).length} órgãos.`);
+                console.log(`📚 [ROBOT-AIP] Sucesso: Carregadas frequências do PDF para ${Object.keys(aipFrequencies).length} setores.`);
+            } else {
+                console.log('⚠️ [ROBOT-AIP] Alerta: Arquivo aip_frequencies.json NÃO ENCONTRADO no diretório atual.');
             }
         } catch (e) {
-            console.log('⚠️ [ROBOT-AIP] Aviso: Arquivo aip_frequencies.json não encontrado ou inválido. Usando apenas dados do AIXM.');
+            console.log(`❌ [ROBOT-AIP] Erro ao ler frequências do PDF: ${e.message}`);
         }
 
         const normalize = (str) => str?.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9]/g, "") || '';
