@@ -197,9 +197,18 @@ def extract_sector_frequencies(pdf_path):
                             # Extrair prioridade a partir do texto ao redor da frequência
                             priority = extract_priority(full_row_text)
                             
+                            # Limpeza do Setor para o padrão WFS (ex: 0100 -> 01, 1600 -> 16)
+                            clean_sector = current_sector
+                            if clean_sector.endswith('00') and len(clean_sector) >= 4:
+                                clean_sector = clean_sector[:-2]
+                            
+                            # Garantir 2 dígitos para setores puramente numéricos (ex: 1 -> 01)
+                            if clean_sector.isdigit():
+                                clean_sector = clean_sector.zfill(2)
+                            
                             record = {
                                 'fir_id': current_fir,
-                                'sector_number': current_sector,
+                                'sector_number': clean_sector,
                                 'service_type': service_type,
                                 'frequency': freq,
                                 'priority': priority,
@@ -219,7 +228,7 @@ def extract_sector_frequencies(pdf_path):
                             
                             if not is_dup:
                                 all_records.append(record)
-                                print(f"  → {current_fir} S-{current_sector:04s} | {service_type:7s} | {freq} MHz | {priority:5s} | {schedule}")
+                                print(f"  → {current_fir}_{clean_sector} | {service_type:7s} | {freq} MHz | {priority:5s} | {schedule}")
             
             print(f"\n📊 Total: {len(all_records)} frequências por setor extraídas")
             
