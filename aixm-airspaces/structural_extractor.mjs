@@ -101,6 +101,29 @@ function findAipMatches(aipFrequencies, areaName, originalType, designator = '')
     // 0. Match DIRETO por Identificador (ex: SBBS_16) - Padrão Ouro
     if (designator && aipFrequencies[designator]) return [designator];
 
+    // MATCH INTELIGENTE PARA CTA (ex: CURITIBA 1 -> SBCW_01)
+    if (originalType === 'CTA') {
+        const firPrefixes = {
+            'CURITIBA': 'SBCW',
+            'AMAZONICA': 'SBAZ',
+            'BRASILIA': 'SBBS',
+            'RECIFE': 'SBRE',
+            'ATLANTICO': 'SBAO'
+        };
+        const ctaMatch = areaName.match(/([A-ZÂÊÎÔÛÁÉÍÓÚÃÕ]+)\s+(\d+[A-Z]*)/i);
+        if (ctaMatch) {
+            const base = normalize(ctaMatch[1]);
+            let sector = ctaMatch[2];
+            if (/^\d$/.test(sector)) sector = '0' + sector; // 1 -> 01
+            
+            const prefixKey = Object.keys(firPrefixes).find(k => normalize(k) === base);
+            if (prefixKey) {
+                const generatedId = `${firPrefixes[prefixKey]}_${sector}`;
+                if (aipFrequencies[generatedId]) return [generatedId];
+            }
+        }
+    }
+
     // 1. Tentar match exato com o nome normalizado
     let candidates = allKeys.filter(k => normalize(k) === normName);
     

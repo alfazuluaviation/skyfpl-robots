@@ -103,7 +103,8 @@ def extract_sector_frequencies(pdf_path):
     """
     print("\nIniciando varredura com pdfplumber (Extração por Setor)...")
     
-    freq_pattern = re.compile(r'(1[0-2]\d\.\d{3}|13[0-7]\.\d{3})')
+    # Regex melhorada para VHF (118-137 MHz) e HF Oceânico (4 a 5 dígitos + KHZ)
+    freq_pattern = re.compile(r'(1[0-2]\d\.\d{3}|13[0-7]\.\d{3}|\d{4,5}\s*KHZ)', re.IGNORECASE)
     # Regex melhorada para capturar sub-setores como 16AL, 16AU, 01B
     sector_pattern = re.compile(r'SECT?\s*(\d+[A-Z]{0,2})', re.IGNORECASE)
     fir_pattern = re.compile(r'FIR\s+(\w+)', re.IGNORECASE)
@@ -249,7 +250,11 @@ def extract_sector_frequencies(pdf_path):
                             
                             if not is_dup:
                                 all_records.append(record)
-                                print(f"  → {current_fir}_{clean_sector} | {service_type:7s} | {freq} MHz | {priority:5s} | {schedule}")
+                                # Limpeza para o log de exibição
+                                freq_print = freq.upper()
+                                if 'HZ' not in freq_print:
+                                    freq_print += ' MHz'
+                                print(f"  → {current_fir}_{clean_sector} | {service_type:7s} | {freq_print:11s} | {priority:5s} | {schedule}")
             
             print(f"\n📊 Total: {len(all_records)} frequências por setor extraídas")
             
@@ -324,8 +329,13 @@ if __name__ == "__main__":
         key = f"{r['fir_id']}_{r['sector_number']}"
         if key not in legacy_data:
             legacy_data[key] = {'frequencias': [], 'horario': r['schedule'], 'observacoes': ''}
-        legacy_data[key]['frequencias'].append(f"{r['frequency']} MHz")
-    
+        
+        freq_str = str(r['frequency']).upper()
+        if 'HZ' not in freq_str:
+            freq_str += " MHz"
+            
+        legacy_data[key]['frequencias'].append(freq_str)
+
     with open('aip_frequencies.json', 'w', encoding='utf-8') as f:
         json.dump(legacy_data, f, indent=4, ensure_ascii=False)
     print(f"✅ Arquivo de intercâmbio aip_frequencies.json gerado com sucesso.")
