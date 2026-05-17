@@ -134,10 +134,21 @@ def extract_sector_frequencies(pdf_path):
                 if 'FIR' in text and ('SECT' in text.upper() or 'SETOR' in text.upper()):
                     fir_sector_pages.append(i)
             
-            print(f"Encontradas {len(fir_sector_pages)} páginas com setores de FIR")
+            print(f"Encontradas {len(fir_sector_pages)} páginas âncora com setores de FIR")
             
-            # Processar cada página
-            for page_idx in fir_sector_pages:
+            if not fir_sector_pages:
+                return
+
+            # Para capturar tabelas que transbordam (overflow) para páginas seguintes sem a palavra 'SECT',
+            # vamos processar o bloco contínuo de páginas onde os setores estão.
+            start_page = min(fir_sector_pages)
+            end_page = max(fir_sector_pages)
+            
+            current_fir = None
+            current_sector = None
+            
+            # Processar o bloco contínuo de páginas do ENR 2.1
+            for page_idx in range(start_page, end_page + 1):
                 page = pdf.pages[page_idx]
                 tables = page.extract_tables()
                 
@@ -147,9 +158,6 @@ def extract_sector_frequencies(pdf_path):
                 for table in tables:
                     if not table:
                         continue
-                    
-                    current_fir = None
-                    current_sector = None
                     
                     for row in table:
                         if not row or len(row) < 2:
