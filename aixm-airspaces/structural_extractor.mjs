@@ -596,6 +596,16 @@ async function runSync() {
                                 if (data.observacoes && !bestObs) bestObs = data.observacoes;
                             });
 
+                            // 👑 Herança Automática: Puxar observações da FIR Mãe extraídas do XML AIXM (ex: Notas de AFIL)
+                            if (!bestObs || bestObs === 'SEM OBSERVAÇÕES') {
+                                const masterIdent = item.ident.split('_')[0]; // ex: SBBS
+                                const masterFir = enrichedData.find(a => a.ident === masterIdent && a.type === 'FIR');
+                                if (masterFir && masterFir.observacoes && masterFir.observacoes !== 'SEM OBSERVAÇÕES') {
+                                    bestObs = masterFir.observacoes;
+                                    console.log(`   📝 [WFS-INJECT] Herdadas observações ricas da FIR Mãe (${masterIdent})`);
+                                }
+                            }
+
                             const finalFrequencies = [...new Set(aggregatedFreqs)];
                             console.log(`🔗 [WFS-INJECT] ${item.ident} (${item.nam}) recebeu ${finalFrequencies.length} frequências do PDF.`);
 
