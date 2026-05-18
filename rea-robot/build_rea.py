@@ -25,7 +25,7 @@ from PIL import Image
 
 # ─── Configurações Gerais ─────────────────────────────────────────────────────
 WMS_URL = "https://geoaisweb.decea.mil.br/geoserver/ICA/wms"
-TILE_SIZE = 256
+TILE_SIZE = 512
 DEFAULT_MIN_ZOOM = 8
 DEFAULT_MAX_ZOOM = 11
 
@@ -127,7 +127,7 @@ def validate_tile_data(raw_data: bytes | None) -> tuple:
             
         # 2. Se a imagem tiver 93% ou mais de pixels branco puro (255, 255, 255),
         # ela representa uma margem branca de papel vazia e deve ser descartada do banco.
-        total_pixels = 256 * 256
+        total_pixels = img_rgb.width * img_rgb.height
         all_colors = img_rgb.getcolors(maxcolors=total_pixels)
         if all_colors:
             white_pixels = 0
