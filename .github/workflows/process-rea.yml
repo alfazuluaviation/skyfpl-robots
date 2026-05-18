@@ -1,0 +1,62 @@
+name: 🛰️ SkyFPL - Robô Processador de Rotas Especiais de Aeronaves (REA)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_codes:
+        description: 'Códigos das cartas (ex: REA_PI_PARINTINS, ou ALL)'
+        required: false
+        default: 'ALL'
+      min_zoom:
+        description: 'Zoom Mínimo (padrão 8)'
+        required: false
+        default: '8'
+      max_zoom:
+        description: 'Zoom Máximo (padrão 11)'
+        required: false
+        default: '11'
+      single_file:
+        description: 'Mesclar em Arquivo Único? (true/false)'
+        required: false
+        default: 'false'
+      workers:
+        description: 'Quantidade de Workers (Threads)'
+        required: false
+        default: '6'
+      run_id:
+        description: 'ID de Execução (Controle Dashboard)'
+        required: false
+        default: 'manual_run'
+
+jobs:
+  process_rea:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do Código
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalar Dependências
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Executar Robô REA
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          CHART_CODES: ${{ github.event.inputs.chart_codes }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom }}
+          SINGLE_FILE: ${{ github.event.inputs.single_file }}
+          WORKERS: ${{ github.event.inputs.workers }}
+          RUN_ID: ${{ github.event.inputs.run_id }}
+        run: |
+          python rea-robot/build_rea.py
