@@ -111,17 +111,33 @@ def tile_bbox_mercator(x: int, y: int, z: int) -> tuple:
 # ─── Validação de Tiles em Branco/Transparentes (1.7KB Threshold) ─────────────
 
 def validate_tile_data(raw_data: bytes | None) -> tuple:
-    """Valida se a imagem retornada é real ou apenas uma área transparente/vazia/sólida."""
+    """Valida se a imagem retornada é real ou apenas uma área transparente/vazia/sólida/branca."""
     if not raw_data:
         return False, None
     
     try:
         img = Image.open(BytesIO(raw_data))
-        # Se a imagem tiver apenas 1 única cor em toda a sua extensão (256x256),
+        img_rgb = img.convert("RGB")
+        
+        # 1. Se a imagem tiver apenas 1 única cor sólida em toda a sua extensão,
         # ela é 100% sólida (cinza, branca, etc.) e deve ser descartada do banco.
-        colors = img.convert("RGB").getcolors(maxcolors=2)
+        colors = img_rgb.getcolors(maxcolors=2)
         if colors and len(colors) == 1:
             return False, None
+            
+        # 2. Se a imagem tiver 93% ou mais de pixels branco puro (255, 255, 255),
+        # ela representa uma margem branca de papel vazia e deve ser descartada do banco.
+        total_pixels = 256 * 256
+        all_colors = img_rgb.getcolors(maxcolors=total_pixels)
+        if all_colors:
+            white_pixels = 0
+            for count, rgb in all_colors:
+                if rgb == (255, 255, 255):
+                    white_pixels = count
+                    break
+            if (white_pixels / total_pixels) >= 0.93:
+                return False, None
+                
     except Exception as e:
         print(f"  [WARN] Erro ao validar cores do tile: {e}")
         return False, None
@@ -143,7 +159,7 @@ def download_wms_tile(x: int, y: int, z: int, session: requests.Session, layer: 
         "WIDTH": str(TILE_SIZE),
         "HEIGHT": str(TILE_SIZE),
         "FORMAT": "image/png",
-        "TRANSPARENT": "FALSE", # 🛡️ Força a renderização da carta completa com relevo/terreno
+        "TRANSPARENT": "TRUE", # 🛡️ Ativa transparência nativa de 32 bits (preserva o relevo e remove fundo de borda)
     }
     
     for attempt in range(5):
