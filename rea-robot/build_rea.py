@@ -136,7 +136,7 @@ def download_wms_tile(x: int, y: int, z: int, session: requests.Session, layer: 
         "WIDTH": str(TILE_SIZE),
         "HEIGHT": str(TILE_SIZE),
         "FORMAT": "image/png",
-        "TRANSPARENT": "TRUE",
+        "TRANSPARENT": "FALSE", # 🛡️ Força a renderização da carta completa com relevo/terreno
     }
     
     for attempt in range(5):
@@ -169,6 +169,7 @@ def init_mbtiles(conn: sqlite3.Connection, name: str, bbox: tuple, min_zoom: int
         ("bounds", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"),
         ("minzoom", str(min_zoom)),
         ("maxzoom", str(max_zoom)),
+        ("scheme", "tms"), # 🛰️ Declara padrão TMS para inversão perfeita do eixo Y no Android
     ]
     
     conn.executemany("INSERT OR REPLACE INTO metadata (name, value) VALUES (?, ?)", metadata)
