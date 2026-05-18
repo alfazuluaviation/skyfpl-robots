@@ -32,7 +32,8 @@ DEFAULT_MAX_ZOOM = 11
 # Lock global para operações simultâneas na base de dados SQLite
 mbtiles_lock = threading.Lock()
 
-# ─── Mapeamento GeogrREA_BBOXES = {
+# ─── Mapeamento Geográfico de Bounding Boxes (BBOX) ───────────────────────────
+REA_BBOXES = {
     "REA_PI_PARINTINS": (-57.38333333333348, -3.233333333333383, -56.09988695433346, -2.166575675133383),
     "REA_WA_TABATINGA": (-70.2833333333323, -4.499999999936604, -69.4666362875323, -3.9164490461366035),
     "REA_WB_BELEM": (-48.94515687303161, -1.8264381348483232, -47.86111774063162, -0.9243103311149891),
