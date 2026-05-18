@@ -390,6 +390,17 @@ def main():
         print("❌ Nenhuma carta válida para processar. Finalizando.")
         sys.exit(1)
         
+    # 🥇 Tabela de Prioridades (Maior peso = Processado por último = Fica no topo do canal Alpha)
+    PRIMARY_CHARTS_PRIORITY = {
+        "REA_WR_BRASILIA": 10,
+        "REA_XP1_SAO_PAULO": 10,
+        "REA_WJ1_RIO_DE_JANEIRO": 10,
+        "REA_XS_SALVADOR": 10,
+        "REA_WF_RECIFE": 10,
+        "REA_WP1_PORTO_ALEGRE": 10,
+    }
+    codes_to_process.sort(key=lambda code: PRIMARY_CHARTS_PRIORITY.get(code, 0))
+    
     charts_total = len(codes_to_process)
     print(f"📦 Cartas selecionadas para processamento: {codes_to_process}")
     print(f"🔍 Modo de arquivo único (Consolidado): {single_file}")
