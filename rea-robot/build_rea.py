@@ -111,12 +111,19 @@ def tile_bbox_mercator(x: int, y: int, z: int) -> tuple:
 # ─── Validação de Tiles em Branco/Transparentes (1.7KB Threshold) ─────────────
 
 def validate_tile_data(raw_data: bytes | None) -> tuple:
-    """Valida se a imagem retornada é real ou apenas uma área transparente/vazia (<2000 bytes)."""
+    """Valida se a imagem retornada é real ou apenas uma área transparente/vazia/sólida."""
     if not raw_data:
         return False, None
     
-    # Se o tamanho da imagem for muito pequeno (< 2.0KB), é uma imagem vazia/transparente
-    if len(raw_data) < 2000:
+    try:
+        img = Image.open(BytesIO(raw_data))
+        # Se a imagem tiver apenas 1 única cor em toda a sua extensão (256x256),
+        # ela é 100% sólida (cinza, branca, etc.) e deve ser descartada do banco.
+        colors = img.convert("RGB").getcolors(maxcolors=2)
+        if colors and len(colors) == 1:
+            return False, None
+    except Exception as e:
+        print(f"  [WARN] Erro ao validar cores do tile: {e}")
         return False, None
         
     return True, raw_data
