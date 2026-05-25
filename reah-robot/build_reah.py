@@ -33,19 +33,37 @@ DEFAULT_MAX_ZOOM = 11
 mbtiles_lock = threading.Lock()
 
 # ─── Mapeamento Geográfico de Bounding Boxes (BBOX) ───────────────────────────
+# BBoxes extraídos diretamente do GetCapabilities do GeoServer DECEA (LatLonBoundingBox)
 REH_BBOXES = {
-    "REH_WJ2_RIO_DE_JANEIRO": (-44.813333333333325, -24.00166666666666, -41.76017583793333, -21.81760169266666),
-    "REH_XP_SAO_PAULO": (-47.89661794556251, -24.503348570316604, -44.395672115362515, -22.285199031516605),
-    "REH_XR_VITORIA": (-40.66666666666665, -20.583333333333336, -39.91648482946665, -19.799779604533324),
-    "REH_BR_COMPLETO": (-70.2833333333323, -30.750250584388976, -34.999969916666664, 0.3000192533333317),
+    # ── Rio de Janeiro / Região Serrana ────────────────────────────────────────
+    "CCV_REH_WJ2_RIO_DE_JANEIRO": (-43.93321557582174, -23.167597156715217, -42.97107698737478, -22.52656143551633),
+    "CCV_REH_WJ1_CABO_FRIO":       (-43.02902427325738, -23.211679759243978, -41.88701812169220, -22.391639786996812),
+    "CCV_REH_WJ3_RIO_DE_JANEIRO": (-43.42943564045275, -23.04769591573280,  -43.06925616418908, -22.805966789642408),
+    # ── São Paulo / Interior ───────────────────────────────────────────────────
+    "CCV_REH_XP2_SAO_PAULO_1":    (-47.03059822493503, -23.839578618082196, -46.30765850004488, -23.308783000203956),
+    "CCV_REH_XP2_SAO_PAULO_2":    (-46.78368278728131, -23.682140083214190, -46.58873787009814, -23.475774297793063),
+    "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": (-46.36124393372854, -23.591320884112307, -45.80977108389402, -22.902794908159528),
+    "CCV_REH_XP1_SOROCABA":        (-47.66008538712948, -23.789128916852338, -46.93448027871988, -23.255110743711647),
+    "CCV_REH_XP2_CAMPINAS":        (-47.27598025312896, -23.438636532995120, -46.72148193047676, -22.750404422034570),
+    # ── Belo Horizonte ─────────────────────────────────────────────────────────
+    "CCV_REH_WH_BELO_HORIZONTE":   (-44.28333333333332, -20.200000000000003, -43.63330986833334, -19.383303851666668),
+    # ── BBOX Global Brasil (envelope de todas as regiões acima) ────────────────
+    "REH_BR_COMPLETO": (-47.66008538712948, -23.839578618082196, -41.88701812169220, -19.383303851666668),
 }
 
-# Camadas correspondentes no GeoServer
+# Camadas correspondentes no GeoServer (CCV = Carta de Corredor Visual — dados reais)
+# ⚠️ IMPORTANTE: usar CCV_REH_* e NÃO CV_REH_* (que retorna imagens 98% transparentes)
 REH_LAYERS = {
-    "REH_WJ2_RIO_DE_JANEIRO": "ICA:CV_REH_WJ2_RIO_DE_JANEIRO",
-    "REH_XP_SAO_PAULO": "ICA:CV_REH_XP_SAO_PAULO",
-    "REH_XR_VITORIA": "ICA:CV_REH_XR_VITORIA",
-    "REH_BR_COMPLETO": "ICA:CV_REH_BR_COMPLETO",
+    "CCV_REH_WJ2_RIO_DE_JANEIRO":      "ICA:CCV_REH_WJ2_RIO_DE_JANEIRO",
+    "CCV_REH_WJ1_CABO_FRIO":           "ICA:CCV_REH_WJ1_CABO_FRIO",
+    "CCV_REH_WJ3_RIO_DE_JANEIRO":      "ICA:CCV_REH_WJ3_RIO_DE_JANEIRO",
+    "CCV_REH_XP2_SAO_PAULO_1":         "ICA:CCV_REH_XP2_SAO_PAULO_1",
+    "CCV_REH_XP2_SAO_PAULO_2":         "ICA:CCV_REH_XP2_SAO_PAULO_2",
+    "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": "ICA:CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "CCV_REH_XP1_SOROCABA":            "ICA:CCV_REH_XP1_SOROCABA",
+    "CCV_REH_XP2_CAMPINAS":            "ICA:CCV_REH_XP2_CAMPINAS",
+    "CCV_REH_WH_BELO_HORIZONTE":       "ICA:CCV_REH_WH_BELO_HORIZONTE",
+    "REH_BR_COMPLETO":                 "ICA:CCV_REH_WH_BELO_HORIZONTE",  # Fallback não usado no modo single_file
 }
 
 # ─── Utilitários Geográficos e de Conversão de Coordenadas ────────────────────
@@ -70,33 +88,37 @@ def tile_bbox_mercator(x: int, y: int, z: int) -> tuple:
 # ─── Validação de Tiles em Branco/Transparentes (1.7KB Threshold) ─────────────
 
 def validate_tile_data(raw_data: bytes | None) -> tuple:
-    """Valida se a imagem retornada é real ou apenas uma área transparente/vazia/sólida/branca."""
+    """Valida se a imagem retornada tem pixels visíveis reais (não apenas transparente/branca).
+    
+    Estratégia RGBA-aware:
+    1. Descarta tiles com 100% de pixels totalmente transparentes (alpha=0).
+    2. Entre os pixels visíveis (alpha > 0), descarta se 100% têm exatamente a mesma cor.
+    3. Descarta se os pixels visíveis são 100% branco puro (255,255,255) — fundo de papel vazio.
+    """
     if not raw_data:
         return False, None
     
     try:
-        img = Image.open(BytesIO(raw_data))
-        img_rgb = img.convert("RGB")
+        img = Image.open(BytesIO(raw_data)).convert("RGBA")
+        pixels = list(img.getdata())
+        total = len(pixels)
         
-        # 1. Se a imagem tiver apenas 1 única cor sólida em toda a sua extensão,
-        # ela é 100% sólida (cinza, branca, etc.) e deve ser descartada do banco.
-        colors = img_rgb.getcolors(maxcolors=2)
-        if colors and len(colors) == 1:
+        # 1. Filtra apenas pixels com alguma opacidade
+        visible = [(r, g, b) for r, g, b, a in pixels if a > 0]
+        
+        if not visible:
+            return False, None  # 100% transparente
+        
+        # 2. Verifica se todos os pixels visíveis têm exatamente a mesma cor
+        unique_colors = set(visible)
+        if len(unique_colors) == 1:
+            return False, None  # Cor sólida única (sem dados reais de carta)
+        
+        # 3. Verifica se 100% dos pixels visíveis são branco puro (papel vazio)
+        white = sum(1 for r, g, b in visible if r == 255 and g == 255 and b == 255)
+        if white / len(visible) >= 1.0:
             return False, None
             
-        # 2. Se a imagem tiver 93% ou mais de pixels branco puro (255, 255, 255),
-        # ela representa uma margem branca de papel vazia e deve ser descartada do banco.
-        total_pixels = img_rgb.width * img_rgb.height
-        all_colors = img_rgb.getcolors(maxcolors=total_pixels)
-        if all_colors:
-            white_pixels = 0
-            for count, rgb in all_colors:
-                if rgb == (255, 255, 255):
-                    white_pixels = count
-                    break
-            if (white_pixels / total_pixels) >= 0.93:
-                return False, None
-                
     except Exception as e:
         print(f"  [WARN] Erro ao validar cores do tile: {e}")
         return False, None
@@ -207,7 +229,7 @@ def process_chart(
     print(f"  [{chart_code}] {total_tiles} tiles identificados para download.")
     
     done = 0
-    layer = REH_LAYERS.get(chart_code, "ICA:CV_REH_BR_COMPLETO")
+    layer = REH_LAYERS.get(chart_code, "ICA:CCV_REH_WH_BELO_HORIZONTE")
     
     # Inicia downloads paralelos
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -341,7 +363,7 @@ def main():
     # Filtra cartas a processar
     if chart_codes_env == "ALL":
         # Ignora o consolidador global da lista primária para evitar looping
-        codes_to_process = [k for k in REH_BBOXES.keys() if k != "REH_BR_COMPLETO"]
+        codes_to_process = [k for k in REH_BBOXES.keys() if k not in ("REH_BR_COMPLETO",)]
     else:
         codes_to_process = [c.strip() for c in chart_codes_env.split(",") if c.strip() in REH_BBOXES]
         
@@ -380,7 +402,7 @@ def main():
                 os.remove(consolidated_path)
                 
             conn = sqlite3.connect(consolidated_path)
-            # Usa o BBOX completo do Brasil para o consolidador
+            # Usa o envelope global de todas as regiões REAH
             global_bbox = REH_BBOXES["REH_BR_COMPLETO"]
             init_mbtiles(conn, "REAH_BRASIL_FULL", global_bbox, min_zoom, max_zoom)
             
