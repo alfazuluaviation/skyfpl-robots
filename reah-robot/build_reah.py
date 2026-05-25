@@ -299,7 +299,7 @@ def upload_progress(
     try:
         r2_client.put_object(
             Bucket=bucket,
-            Key="charts/reah/telemetry.json",
+            Key="reah_progress.json",
             Body=json.dumps(progress_data, indent=2),
             ContentType="application/json",
             CacheControl="no-cache, no-store, must-revalidate"
@@ -360,7 +360,7 @@ def main():
     # Baixa ou inicializa o metadados de progresso existentes no R2
     chart_metadata = {}
     try:
-        progress_obj = r2_client.get_object(Bucket=r2_bucket, Key="charts/reah/telemetry.json")
+        progress_obj = r2_client.get_object(Bucket=r2_bucket, Key="reah_progress.json")
         existing_progress = json.loads(progress_obj["Body"].read().decode("utf-8"))
         chart_metadata = existing_progress.get("metadata", {})
     except Exception:
@@ -406,7 +406,7 @@ def main():
             # Envia arquivo completo para o R2
             print("  [Cloud R2] Enviando arquivo consolidado para o Storage...")
             file_size = os.path.getsize(consolidated_path)
-            r2_key = f"charts/reah/{consolidated_filename}"
+            r2_key = f"reah/{consolidated_filename}"
             r2_client.upload_file(consolidated_path, r2_bucket, r2_key)
             
             # Atualiza o tamanho e timestamp do consolidador na telemetria
@@ -442,7 +442,7 @@ def main():
                 # Upload do arquivo gerado para o R2
                 print(f"  [Cloud R2] Enviando {filename} para o Storage...")
                 file_size = os.path.getsize(local_path)
-                r2_key = f"charts/reah/{filename}"
+                r2_key = f"reah/{filename}"
                 r2_client.upload_file(local_path, r2_bucket, r2_key)
                 
                 # Registra metadados específicos
