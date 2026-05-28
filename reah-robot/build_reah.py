@@ -15,6 +15,7 @@ import math
 import time
 import sqlite3
 import threading
+import re
 from io import BytesIO
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,28 +33,21 @@ DEFAULT_MAX_ZOOM = 11
 # Lock global para operações simultâneas na base de dados SQLite
 mbtiles_lock = threading.Lock()
 
-# ─── Mapeamento Geográfico de Bounding Boxes (BBOX) ───────────────────────────
-# BBoxes extraídos diretamente do GetCapabilities do GeoServer DECEA (LatLonBoundingBox)
-REH_BBOXES = {
-    # ── Rio de Janeiro / Região Serrana ────────────────────────────────────────
+# ─── Mapeamento Geográfico Estático (Fallback) ────────────────────────────────
+REH_BBOXES_STATIC = {
     "CCV_REH_WJ2_RIO_DE_JANEIRO": (-43.93321557582174, -23.167597156715217, -42.97107698737478, -22.52656143551633),
     "CCV_REH_WJ1_CABO_FRIO":       (-43.02902427325738, -23.211679759243978, -41.88701812169220, -22.391639786996812),
     "CCV_REH_WJ3_RIO_DE_JANEIRO": (-43.42943564045275, -23.04769591573280,  -43.06925616418908, -22.805966789642408),
-    # ── São Paulo / Interior ───────────────────────────────────────────────────
     "CCV_REH_XP2_SAO_PAULO_1":    (-47.03059822493503, -23.839578618082196, -46.30765850004488, -23.308783000203956),
-    "CCV_REH_XP2_SAO_PAULO_2":    (-46.78368278728131, -23.682140083214190, -46.58873787009814, -23.475774297793063),
-    "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": (-46.36124393372854, -23.591320884112307, -45.80977108389402, -22.902794908159528),
-    "CCV_REH_XP1_SOROCABA":        (-47.66008538712948, -23.789128916852338, -46.93448027871988, -23.255110743711647),
+    "CCV_REH_XP2_SAO_PAULO_2":    (-46.783682787281315, -23.682140083214190, -46.58873787009814, -23.475774297793063),
+    "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": (-46.361243933728545, -23.591320884112307, -45.80977108389402, -22.902794908159528),
+    "CCV_REH_XP1_SOROCABA":        (-47.660085387129485, -23.789128916852338, -46.93448027871988, -23.255110743711647),
     "CCV_REH_XP2_CAMPINAS":        (-47.27598025312896, -23.438636532995120, -46.72148193047676, -22.750404422034570),
-    # ── Belo Horizonte ─────────────────────────────────────────────────────────
     "CCV_REH_WH_BELO_HORIZONTE":   (-44.28333333333332, -20.200000000000003, -43.63330986833334, -19.383303851666668),
-    # ── BBOX Global Brasil (envelope de todas as regiões acima) ────────────────
-    "REH_BR_COMPLETO": (-47.66008538712948, -23.839578618082196, -41.88701812169220, -19.383303851666668),
+    "REH_BR_COMPLETO": (-47.66008538712948, -23.839578618082196, -39.91660592239991, -19.383303851666668),
 }
 
-# Camadas correspondentes no GeoServer (CCV = Carta de Corredor Visual — dados reais)
-# ⚠️ IMPORTANTE: usar CCV_REH_* e NÃO CV_REH_* (que retorna imagens 98% transparentes)
-REH_LAYERS = {
+REH_LAYERS_STATIC = {
     "CCV_REH_WJ2_RIO_DE_JANEIRO":      "ICA:CCV_REH_WJ2_RIO_DE_JANEIRO",
     "CCV_REH_WJ1_CABO_FRIO":           "ICA:CCV_REH_WJ1_CABO_FRIO",
     "CCV_REH_WJ3_RIO_DE_JANEIRO":      "ICA:CCV_REH_WJ3_RIO_DE_JANEIRO",
@@ -63,8 +57,70 @@ REH_LAYERS = {
     "CCV_REH_XP1_SOROCABA":            "ICA:CCV_REH_XP1_SOROCABA",
     "CCV_REH_XP2_CAMPINAS":            "ICA:CCV_REH_XP2_CAMPINAS",
     "CCV_REH_WH_BELO_HORIZONTE":       "ICA:CCV_REH_WH_BELO_HORIZONTE",
-    "REH_BR_COMPLETO":                 "ICA:CCV_REH_WH_BELO_HORIZONTE",  # Fallback não usado no modo single_file
+    "REH_BR_COMPLETO":                 "ICA:CCV_REH_WH_BELO_HORIZONTE",
 }
+
+def fetch_reh_layers_from_capabilities():
+    url = f"{WMS_URL}?SERVICE=WMS&VERSION=1.1.1&REQUEST=GetCapabilities"
+    try:
+        print("📡 Consultando GetCapabilities do GeoServer DECEA para autodescoberta dinâmica de REH...")
+        r = requests.get(url, timeout=30)
+        if r.status_code != 200:
+            print("⚠️ Falha ao obter GetCapabilities, usando bboxes estáticos.")
+            return None
+        
+        xml_content = r.text
+        layer_blocks = xml_content.split("<Layer")
+        
+        dynamic_bboxes = {}
+        dynamic_layers = {}
+        
+        for block in layer_blocks:
+            name_match = re.search(r"<Name>([^<]+)</Name>", block)
+            if not name_match:
+                continue
+            name = name_match.group(1).strip()
+            
+            # Filtro inteligente e futuro-seguro:
+            # 1. Deve possuir o padrão de nomenclatura de rotas REH do DECEA
+            # 2. Exclui explicitamente camadas de vetor/polígono vazias (iniciadas por CV_)
+            is_reh = False
+            if (name.startswith("CCV_REH_") or name.startswith("CCV_RHE_") or name.startswith("REH_")) and not name.startswith("CV_"):
+                is_reh = True
+                
+            if is_reh:
+                bbox_match = re.search(r"LatLonBoundingBox[^>]+minx=\"([^\"]+)\"[^>]+miny=\"([^\"]+)\"[^>]+maxx=\"([^\"]+)\"[^>]+maxy=\"([^\"]+)\"", block)
+                if bbox_match:
+                    minx = float(bbox_match.group(1))
+                    miny = float(bbox_match.group(2))
+                    maxx = float(bbox_match.group(3))
+                    maxy = float(bbox_match.group(4))
+                    
+                    dynamic_bboxes[name] = (minx, miny, maxx, maxy)
+                    dynamic_layers[name] = f"ICA:{name}"
+                    print(f"  [Autodescoberta] Camada REH encontrada: {name} -> BBOX: ({minx}, {miny}, {maxx}, {maxy})")
+        
+        if dynamic_bboxes:
+            # Calcula o envelope global dinamicamente contendo todas as BBoxes encontradas
+            all_minx = min(b[0] for b in dynamic_bboxes.values())
+            all_miny = min(b[1] for b in dynamic_bboxes.values())
+            all_maxx = max(b[2] for b in dynamic_bboxes.values())
+            all_maxy = max(b[3] for b in dynamic_bboxes.values())
+            dynamic_bboxes["REH_BR_COMPLETO"] = (all_minx, all_miny, all_maxx, all_maxy)
+            dynamic_layers["REH_BR_COMPLETO"] = "ICA:REH_VITORIA"
+            print(f"🌍 BBOX Envelope Global Unificado: {dynamic_bboxes['REH_BR_COMPLETO']}")
+            return dynamic_bboxes, dynamic_layers
+    except Exception as e:
+        print(f"⚠️ Erro ao analisar XML de Capabilities: {e}")
+    return None
+
+# Inicialização Dinâmica dos dados de BBOX
+dynamic_data = fetch_reh_layers_from_capabilities()
+if dynamic_data:
+    REH_BBOXES, REH_LAYERS = dynamic_data
+else:
+    print("⚠️ Usando Bboxes estáticos de fallback.")
+    REH_BBOXES, REH_LAYERS = REH_BBOXES_STATIC, REH_LAYERS_STATIC
 
 # ─── Utilitários Geográficos e de Conversão de Coordenadas ────────────────────
 
