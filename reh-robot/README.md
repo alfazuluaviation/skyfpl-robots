@@ -1,4 +1,4 @@
-﻿# 🚁 SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
+# 🚁 SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
 
 Este robô é responsável por coletar, georreferenciar, mesclar e otimizar as **cartas brasileiras de Rotas Especiais de Helicópteros (REH)** do GeoServer oficial do DECEA via WMS, convertendo-as em arquivos SQLite `.mbtiles` ultra-leves e eficientes no Cloudflare R2.
 
@@ -10,7 +10,7 @@ Este robô é responsável por coletar, georreferenciar, mesclar e otimizar as *
 2.  **Zoom Inteligente (Z8 a Z11):** Respeita estritamente a profundidade padrão de visualização das cartas visuais especiais (Mínimo Z8, Máximo Z11). Pode ser expandido para suportar helipontos em Z13/Z14 no futuro.
 3.  **Fusão Alpha Composite:** Quando múltiplos corredores com áreas geográficas sobrepostas são compilados de forma unificada (modo consolidado), as emendas dos tiles são fundidas de maneira transparente usando PIL/Pillow para evitar cortes bruscos ou falhas de emenda.
 4.  **Otimização SQLite (VACUUM):** Todos os arquivos de banco `.mbtiles` gerados passam por um processo de compactação ativa para reduzir em até 30% o tamanho final de download.
-5.  **Telemetria em Tempo Real (R2 Pipe):** Atualiza um status JSON (`telemetry.json` em `charts/REH/`) a cada progresso incremental com porcentagens e metadados de tamanho físico, permitindo monitoramento remoto em tempo real pelo Dashboard SkyNav Pro.
+5.  **Telemetria em Tempo Real (R2 Pipe):** Atualiza um status JSON (`telemetry.json` em `charts/reh/`) a cada progresso incremental com porcentagens e metadados de tamanho físico, permitindo monitoramento remoto em tempo real pelo Dashboard SkyNav Pro.
 
 ---
 
@@ -50,6 +50,6 @@ export MAX_ZOOM=11
 export SINGLE_FILE="false"
 export WORKERS=4
 
-python REH-robot/build_REH.py
+python reh-robot/build_reh.py
 ```
 

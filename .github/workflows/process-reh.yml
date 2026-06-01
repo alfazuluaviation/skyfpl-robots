@@ -1,4 +1,4 @@
-﻿name: 🚁 SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
+name: 🚁 SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
 
 on:
   workflow_dispatch:
@@ -33,7 +33,7 @@ on:
         default: 'manual_run'
 
 jobs:
-  process_REH:
+  process_reh:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do Código
@@ -63,5 +63,5 @@ jobs:
           WORKERS: ${{ github.event.inputs.workers }}
           RUN_ID: ${{ github.event.inputs.run_id }}
         run: |
-          python REH-robot/build_REH.py
+          python reh-robot/build_reh.py
 

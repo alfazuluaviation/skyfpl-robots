@@ -1,5 +1,5 @@
-﻿{
-  "name": "REH-robot",
+{
+  "name": "reh-robot",
   "version": "1.0.0",
   "description": "Este robô é responsável por coletar, georreferenciar, mesclar e otimizar as **cartas brasileiras de Rotas Especiais de Helicópteros (REH)** do GeoServer oficial do DECEA via WMS, convertendo-as em arquivos SQLite `.mbtiles` ultra-leves e eficientes no Cloudflare R2.",
   "main": "check_png.js",
