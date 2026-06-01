@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-🛰️ SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REAH)
+🛰️ SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
 
-Este robô realiza o download paralelo de tiles de cartas de Corredores Visuais (REAH)
+Este robô realiza o download paralelo de tiles de cartas de Corredores Visuais (REH)
 diretamente do GeoServer do DECEA via WMS (EPSG:3857), aplica mesclagem Alpha Composite 
 nas emendas geográficas e empacota tudo em arquivos SQLite MBTiles otimizados no Cloudflare R2.
 """
@@ -224,7 +224,7 @@ def init_mbtiles(conn: sqlite3.Connection, name: str, bbox: tuple, min_zoom: int
         ("name", name),
         ("type", "overlay"),
         ("version", "1.0.0"),
-        ("description", f"Corredores Visuais REAH - {name}"),
+        ("description", f"Corredores Visuais REH - {name}"),
         ("format", "png"),
         ("bounds", f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}"),
         ("minzoom", str(min_zoom)),
@@ -377,7 +377,7 @@ def upload_progress(
     try:
         r2_client.put_object(
             Bucket=bucket,
-            Key="reah_progress.json",
+            Key="REH_progress.json",
             Body=json.dumps(progress_data, indent=2),
             ContentType="application/json",
             CacheControl="no-cache, no-store, must-revalidate"
@@ -388,13 +388,13 @@ def upload_progress(
 # ─── Função Principal ─────────────────────────────────────────────────────────
 
 def main():
-    print("🚀 Iniciando Motor de Processamento de Rotas Especiais REAH...")
+    print("🚀 Iniciando Motor de Processamento de Rotas Especiais REH...")
     
     # Parâmetros vindos do Ambiente (GitHub Dispatch / Supabase Trigger)
     chart_codes_env = os.environ.get("CHART_CODES", "ALL").strip()
     min_zoom = int(os.environ.get("MIN_ZOOM", DEFAULT_MIN_ZOOM))
     max_zoom = int(os.environ.get("MAX_ZOOM", DEFAULT_MAX_ZOOM))
-    single_file = os.environ.get("SINGLE_FILE", "true").lower() == "true" # For REAH, single file makes sense too
+    single_file = os.environ.get("SINGLE_FILE", "true").lower() == "true" # For REH, single file makes sense too
     workers = int(os.environ.get("WORKERS", "6"))
     run_id = os.environ.get("RUN_ID", "local_dev")
     
@@ -438,11 +438,11 @@ def main():
     # Baixa ou inicializa o metadados de progresso existentes no R2
     chart_metadata = {}
     try:
-        progress_obj = r2_client.get_object(Bucket=r2_bucket, Key="reah_progress.json")
+        progress_obj = r2_client.get_object(Bucket=r2_bucket, Key="REH_progress.json")
         existing_progress = json.loads(progress_obj["Body"].read().decode("utf-8"))
         chart_metadata = existing_progress.get("metadata", {})
     except Exception:
-        print("ℹ️ Nenhum arquivo 'telemetry.json' encontrado no R2 para REAH. Criando novo.")
+        print("ℹ️ Nenhum arquivo 'telemetry.json' encontrado no R2 para REH. Criando novo.")
         
     # Inicializa progresso no R2
     upload_progress(r2_client, r2_bucket, "in_progress", 0.0, codes_to_process[0], 0, charts_total, run_id, chart_metadata)
@@ -450,7 +450,7 @@ def main():
     try:
         if single_file:
             # ─── MODO COMPILAÇÃO GLOBAL (MÚLTIPLOS CORREDORES MESCLADOS EM UM SÓ) ───
-            consolidated_filename = "REAH_BRASIL_FULL.mbtiles"
+            consolidated_filename = "REH_BRASIL_FULL.mbtiles"
             consolidated_path = os.path.join(temp_dir, consolidated_filename)
             
             # Remove base antiga se existir localmente
@@ -458,9 +458,9 @@ def main():
                 os.remove(consolidated_path)
                 
             conn = sqlite3.connect(consolidated_path)
-            # Usa o envelope global de todas as regiões REAH
+            # Usa o envelope global de todas as regiões REH
             global_bbox = REH_BBOXES["REH_BR_COMPLETO"]
-            init_mbtiles(conn, "REAH_BRASIL_FULL", global_bbox, min_zoom, max_zoom)
+            init_mbtiles(conn, "REH_BRASIL_FULL", global_bbox, min_zoom, max_zoom)
             
             for idx, code in enumerate(codes_to_process):
                 bbox = REH_BBOXES[code]
@@ -484,11 +484,11 @@ def main():
             # Envia arquivo completo para o R2
             print("  [Cloud R2] Enviando arquivo consolidado para o Storage...")
             file_size = os.path.getsize(consolidated_path)
-            r2_key = f"reah/{consolidated_filename}"
+            r2_key = f"REH/{consolidated_filename}"
             r2_client.upload_file(consolidated_path, r2_bucket, r2_key)
             
             # Atualiza o tamanho e timestamp do consolidador na telemetria
-            chart_metadata["REAH_BRASIL_FULL"] = {
+            chart_metadata["REH_BRASIL_FULL"] = {
                 "size_bytes": file_size,
                 "updated_at": datetime.utcnow().isoformat() + "Z"
             }
@@ -520,7 +520,7 @@ def main():
                 # Upload do arquivo gerado para o R2
                 print(f"  [Cloud R2] Enviando {filename} para o Storage...")
                 file_size = os.path.getsize(local_path)
-                r2_key = f"reah/{filename}"
+                r2_key = f"REH/{filename}"
                 r2_client.upload_file(local_path, r2_bucket, r2_key)
                 
                 # Registra metadados específicos
@@ -534,13 +534,14 @@ def main():
                     os.remove(local_path)
                     
         # Finalização de sucesso
-        print("\n🏆 Processamento REAH completo com absoluto sucesso!")
+        print("\n🏆 Processamento REH completo com absoluto sucesso!")
         upload_progress(r2_client, r2_bucket, "completed", 100.0, "Sucesso", charts_total, charts_total, run_id, chart_metadata)
         
     except Exception as e:
-        print(f"\n❌ Erro crítico no pipeline do Robô REAH: {e}")
+        print(f"\n❌ Erro crítico no pipeline do Robô REH: {e}")
         upload_progress(r2_client, r2_bucket, "error", 100.0, f"Erro: {str(e)}", 0, charts_total, run_id, chart_metadata)
         sys.exit(1)
 
 if __name__ == "__main__":
     main()
+
