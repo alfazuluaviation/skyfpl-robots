@@ -1,11 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import * as dotenv from 'dotenv';
+import { createRequire } from 'module';
 import { readFile } from 'fs/promises';
-import { createReadStream } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
+
+// Fix para Node.js 20: WebSocket nativo não suportado pelo @supabase/realtime-js
+const require = createRequire(import.meta.url);
+const ws = require('ws');
 
 dotenv.config();
 
@@ -14,7 +18,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // ── Supabase ──────────────────────────────────────────────────────────────────
 const supabase = createClient(
     process.env.SUPABASE_URL || '',
-    process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+    process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+    { realtime: { transport: ws } }  // Fix Node.js 20
 );
 
 // ── Cloudflare R2 (via S3 API) ────────────────────────────────────────────────
