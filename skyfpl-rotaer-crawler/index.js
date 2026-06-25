@@ -33,6 +33,10 @@ const DELAY_MS = 3000;         // 3 segundos entre chamadas ao DECEA
 const DAYS_BEFORE_CYCLE = 2;   // Quantos dias antes do novo ciclo o robô deve rodar
 const BATCH_SIZE = 50;         // Aeródromos por log de progresso
 
+// ── Modo de Teste ─────────────────────────────────────────────────────────────
+const FORCE_RUN = process.env.FORCE_RUN === 'true'; // Ignora a verificação de data AIRAC
+const MAX_AERODROMES = parseInt(process.env.MAX_AERODROMES || '0', 10); // 0 = sem limite
+
 async function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -97,15 +101,21 @@ async function startCrawler() {
 
     console.log(`\n🛫 Ciclo Atual : ${current?.cycle || 'N/A'} (${current?.dateStr || 'N/A'})`);
 
-    if (!shouldRunToday(next)) {
+    if (FORCE_RUN) {
+        console.log(`\n🧪 MODO DE TESTE ATIVADO (FORCE_RUN=true)`);
+        console.log(`   Verificação de data AIRAC ignorada.`);
+        if (MAX_AERODROMES > 0) {
+            console.log(`   Limite de processamento: ${MAX_AERODROMES} aeródromo(s).`);
+        }
+    } else if (!shouldRunToday(next)) {
         console.log(`\n✅ Nenhuma ação necessária hoje. O robô voltará a verificar amanhã.`);
         console.log('   (O próximo ciclo ainda está longe. Encerrando com custo zero.)');
         process.exit(0);
+    } else {
+        console.log(`\n🚨 JANELA DE ATUALIZAÇÃO DETECTADA!`);
+        console.log(`   Ciclo ${next.cycle} entra em vigor em ${next.dateStr}.`);
+        console.log(`   Iniciando raspagem completa do ROTAER...\n`);
     }
-
-    console.log(`\n🚨 JANELA DE ATUALIZAÇÃO DETECTADA!`);
-    console.log(`   Ciclo ${next.cycle} entra em vigor em ${next.dateStr}.`);
-    console.log(`   Iniciando raspagem completa do ROTAER...\n`);
 
     // 2. Buscar lista de todos os aeródromos e helipontos no Supabase
     console.log('📡 Buscando lista de aeródromos no Supabase...');
@@ -132,8 +142,14 @@ async function startCrawler() {
         page++;
     }
 
-    console.log(`✈️  Total de alvos encontrados: ${targets.length}`);
-    console.log(`⏱️  Tempo estimado: ~${Math.round((targets.length * DELAY_MS) / 60000)} minutos\n`);
+    // Aplica limite de teste se MAX_AERODROMES estiver definido
+    if (MAX_AERODROMES > 0 && targets.length > MAX_AERODROMES) {
+        console.log(`🧪 Modo teste: limitando de ${targets.length} para ${MAX_AERODROMES} aeródromo(s)`);
+        targets = targets.slice(0, MAX_AERODROMES);
+    }
+
+    console.log(`✈️  Total de alvos a processar: ${targets.length}`);
+    console.log(`⏱️  Tempo estimado: ~${Math.round((targets.length * DELAY_MS) / 1000)} segundos\n`);
 
     // 3. Loop de raspagem
     const results = {};

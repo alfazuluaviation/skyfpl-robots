@@ -2,6 +2,20 @@ name: 🤖 ROTAER Crawler — Sincronização por Ciclo AIRAC
 
 on:
   workflow_dispatch:        # Permite disparo manual pelo painel do GitHub Actions
+    inputs:
+      force_run:
+        description: '🧪 Forçar execução (ignorar verificação de data AIRAC)?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      max_aerodromes:
+        description: '✂️ Limite de aeródromos (0 = processar TODOS, ex: 5 para teste)'
+        required: false
+        default: '5'
+        type: string
   schedule:
     - cron: '0 2 * * *'    # Executa todo dia às 02:00 UTC (verifica se é hora de rodar)
 
@@ -37,6 +51,9 @@ jobs:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          # ── Modo de Teste (definidos pelos inputs manuais) ────────
+          FORCE_RUN: ${{ github.event.inputs.force_run || 'false' }}
+          MAX_AERODROMES: ${{ github.event.inputs.max_aerodromes || '0' }}
 
       - name: 📋 Verificar Arquivo de Snapshot Gerado
         if: always()
