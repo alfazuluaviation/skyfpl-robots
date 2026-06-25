@@ -1,0 +1,50 @@
+name: 🤖 ROTAER Crawler — Sincronização por Ciclo AIRAC
+
+on:
+  workflow_dispatch:        # Permite disparo manual pelo painel do GitHub Actions
+  schedule:
+    - cron: '0 2 * * *'    # Executa todo dia às 02:00 UTC (verifica se é hora de rodar)
+
+jobs:
+  run-crawler:
+    name: Executar Crawler ROTAER
+    runs-on: ubuntu-latest
+    timeout-minutes: 720   # Limite de 12h (segurança para 6000+ aeródromos com 3s de delay)
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🟢 Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: skyfpl-rotaer-crawler/package-lock.json
+
+      - name: 📦 Instalar Dependências
+        working-directory: skyfpl-rotaer-crawler
+        run: npm ci
+
+      - name: 🤖 Executar Crawler (com Inteligência AIRAC)
+        working-directory: skyfpl-rotaer-crawler
+        run: node index.js
+        env:
+          # ── Supabase ─────────────────────────────────────────────
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # ── Cloudflare R2 ─────────────────────────────────────────
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+
+      - name: 📋 Verificar Arquivo de Snapshot Gerado
+        if: always()
+        working-directory: skyfpl-rotaer-crawler
+        run: |
+          if [ -f rotaer_snapshot.json ]; then
+            echo "✅ Snapshot gerado com sucesso"
+            echo "📦 Tamanho: $(du -sh rotaer_snapshot.json | cut -f1)"
+          else
+            echo "⚠️  Snapshot não encontrado localmente (normal se o upload para R2 foi direto)"
+          fi

@@ -1,0 +1,15 @@
+# Arquivos que NUNCA devem ir para o Git
+.env
+.env.local
+.env.*.local
+
+# Output local do robô (backup)
+rotaer_snapshot.json
+*.json.gz
+
+# Node modules
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
