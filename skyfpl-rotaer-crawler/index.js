@@ -122,29 +122,28 @@ async function startCrawler() {
         console.log(`   Iniciando raspagem completa do ROTAER...\n`);
     }
 
-    // 2. Buscar lista de todos os aeródromos e helipontos no Supabase
-    console.log('📡 Buscando lista de aeródromos no Supabase...');
+    // 2. Buscar lista de todos os aeródromos e helipontos do Cloudflare R2
+    console.log('📡 Buscando lista da malha aérea (latest_navdata.json) no Cloudflare R2...');
     let targets = [];
-    let page = 0;
-    const PAGE_SIZE = 1000;
-
-    while (true) {
-        const { data, error } = await supabase
-            .from('aerodromes')
-            .select('icao, ciad, name, type')
-            .not('icao', 'is', null)
-            .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-            .order('icao');
-
-        if (error) {
-            console.error('❌ Erro ao buscar aeródromos:', error.message);
-            process.exit(1);
-        }
-
-        if (!data || data.length === 0) break;
-        targets = targets.concat(data);
-        if (data.length < PAGE_SIZE) break;
-        page++;
+    try {
+        const response = await fetch('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json');
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const navdata = await response.json();
+        
+        targets = (navdata.data || [])
+            .filter(a => (a.type === 'airport' || a.type === 'heliport') && a.icao)
+            .map(a => ({
+                icao: a.icao,
+                ciad: a.props?.ciad || '',
+                name: a.name || a.props?.nome || '',
+                type: a.type
+            }))
+            .sort((a, b) => a.icao.localeCompare(b.icao));
+            
+        console.log(`✅ ${targets.length} aeródromos válidos filtrados.`);
+    } catch (error) {
+        console.error(`❌ Erro ao baixar latest_navdata.json: ${error.message}`);
+        process.exit(1);
     }
 
     // Aplica limite de teste se MAX_AERODROMES estiver definido
