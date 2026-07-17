@@ -71,10 +71,13 @@ function findNextAiracCycle(calendar) {
     // Ordena do mais próximo ao mais distante
     allCycles.sort((a, b) => a.date - b.date);
 
-    // Ciclo atual = maior data que já passou
-    const current = allCycles.filter(c => c.date <= now).at(-1);
-    // Próximo ciclo = menor data que ainda não chegou
-    const next = allCycles.find(c => c.date > now);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Ciclo atual = maior data que já passou (estritamente menor que hoje)
+    const current = allCycles.filter(c => c.date < today).at(-1);
+    // Próximo ciclo (ou o ciclo que começa hoje)
+    const next = allCycles.find(c => c.date >= today);
 
     return { current, next };
 }

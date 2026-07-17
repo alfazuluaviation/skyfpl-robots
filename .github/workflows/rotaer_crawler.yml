@@ -14,7 +14,7 @@ on:
       max_aerodromes:
         description: '✂️ Limite de aeródromos (0 = processar TODOS, ex: 5 para teste)'
         required: false
-        default: '5'
+        default: '0'
         type: string
   schedule:
     - cron: '0 2 * * *'    # Executa todo dia às 02:00 UTC (verifica se é hora de rodar)
