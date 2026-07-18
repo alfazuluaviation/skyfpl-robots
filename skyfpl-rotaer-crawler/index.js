@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import * as dotenv from 'dotenv';
 import { createRequire } from 'module';
 import { readFile } from 'fs/promises';
@@ -34,9 +34,10 @@ const s3 = new S3Client({
 const BUCKET_NAME = 'skyfpl-charts';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const DELAY_MS = 2000;         // 2 segundos entre chamadas ao DECEA (3s bate no limite de 6h do GitHub Actions)
-const DAYS_BEFORE_CYCLE = 2;   // Quantos dias antes do novo ciclo o robô deve rodar
-const BATCH_SIZE = 50;         // Aeródromos por log de progresso
+const DELAY_MS = 2000;              // 2 segundos entre chamadas ao DECEA
+const DAYS_BEFORE_CYCLE = 2;        // Quantos dias antes do novo ciclo o robô deve rodar
+const BATCH_SIZE = 50;              // Aeródromos por log de progresso
+const CHECKPOINT_EVERY = 250;       // Salva checkpoint a cada N aeródromos processados
 
 // ── Modo de Teste ─────────────────────────────────────────────────────────────
 const FORCE_RUN = process.env.FORCE_RUN === 'true'; // Ignora a verificação de data AIRAC
@@ -94,6 +95,69 @@ function shouldRunToday(nextCycle) {
     console.log(`📅 Próximo ciclo AIRAC: ${nextCycle.cycle} em ${nextCycle.dateStr} (${diffDays} dia(s) restantes)`);
 
     return diffDays <= DAYS_BEFORE_CYCLE && diffDays >= 0;
+}
+
+// ── SISTEMA DE CHECKPOINT ─────────────────────────────────────────────────────
+// Guarda progresso no R2 para retomada automática em caso de interrupção
+
+function getCheckpointKey(cycle) {
+    return `rotaer/rotaer_${cycle}_checkpoint.json`;
+}
+
+async function loadCheckpointFromR2(cycle) {
+    const key = getCheckpointKey(cycle);
+    try {
+        const response = await s3.send(new GetObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+        const body = await response.Body.transformToString();
+        const checkpoint = JSON.parse(body);
+        console.log(`♻️  Checkpoint encontrado! Retomando a partir do aeródromo ${checkpoint.last_index + 1} (${checkpoint.last_icao})`);
+        console.log(`   Dados já coletados: ${Object.keys(checkpoint.data).length} aeródromos`);
+        return checkpoint;
+    } catch (e) {
+        // NoSuchKey = sem checkpoint anterior, começa do zero
+        if (e.name === 'NoSuchKey' || e.$metadata?.httpStatusCode === 404) {
+            console.log('🆕 Nenhum checkpoint encontrado. Iniciando do zero.');
+            return null;
+        }
+        // Outro erro — loga mas não bloqueia
+        console.warn(`⚠️  Erro ao carregar checkpoint: ${e.message}. Iniciando do zero.`);
+        return null;
+    }
+}
+
+async function saveCheckpointToR2(cycle, lastIndex, lastIcao, data) {
+    const key = getCheckpointKey(cycle);
+    const checkpoint = JSON.stringify({
+        airac_cycle: cycle,
+        last_index: lastIndex,
+        last_icao: lastIcao,
+        saved_at: new Date().toISOString(),
+        total_collected: Object.keys(data).length,
+        data
+    });
+    try {
+        await s3.send(new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: key,
+            Body: checkpoint,
+            ContentType: 'application/json',
+            CacheControl: 'no-cache, no-store'  // Nunca cachear checkpoint
+        }));
+        console.log(`💾 Checkpoint salvo: ${Object.keys(data).length} aeródromos coletados até ${lastIcao}`);
+    } catch (e) {
+        // Falha ao salvar checkpoint não deve derrubar o crawl — apenas avisa
+        console.warn(`⚠️  Falha ao salvar checkpoint (continuando): ${e.message}`);
+    }
+}
+
+async function deleteCheckpointFromR2(cycle) {
+    const key = getCheckpointKey(cycle);
+    try {
+        await s3.send(new DeleteObjectCommand({ Bucket: BUCKET_NAME, Key: key }));
+        console.log(`🗑️  Checkpoint deletado (processamento completo).`);
+    } catch (e) {
+        console.warn(`⚠️  Falha ao deletar checkpoint: ${e.message}`);
+    }
 }
 
 // ── MOTOR PRINCIPAL ───────────────────────────────────────────────────────────
@@ -155,24 +219,41 @@ async function startCrawler() {
         targets = targets.slice(0, MAX_AERODROMES);
     }
 
-    console.log(`✈️  Total de alvos a processar: ${targets.length}`);
-    console.log(`⏱️  Tempo estimado: ~${Math.round((targets.length * DELAY_MS) / 1000)} segundos\n`);
+    // 3. ♻️ Verificar e carregar checkpoint de execução anterior
+    console.log('\n🔍 Verificando checkpoint de execução anterior...');
+    const checkpoint = await loadCheckpointFromR2(next.cycle);
 
-    // 3. Loop de raspagem
-    const results = {};
-    let successCount = 0;
+    // Pré-carrega dados do checkpoint ou inicia vazio
+    const results = checkpoint ? { ...checkpoint.data } : {};
+    const startIndex = checkpoint ? checkpoint.last_index + 1 : 0;
+    let successCount = Object.keys(results).length; // já processados
     let failCount = 0;
+
+    const remainingTargets = targets.slice(startIndex);
+    const totalTargets = targets.length;
+
+    if (startIndex > 0) {
+        console.log(`\n▶️  Retomando do aeródromo ${startIndex + 1}/${totalTargets}`);
+        console.log(`   (${successCount} aeródromos já coletados na sessão anterior)\n`);
+    } else {
+        console.log(`✈️  Total de alvos a processar: ${totalTargets}`);
+        console.log(`⏱️  Tempo estimado: ~${Math.round((totalTargets * DELAY_MS) / 1000)} segundos\n`);
+    }
+
+    // 4. Loop de raspagem (retoma do ponto certo)
     const startTime = Date.now();
 
-    for (const [index, aero] of targets.entries()) {
+    for (const [relIndex, aero] of remainingTargets.entries()) {
+        const absIndex = startIndex + relIndex;  // índice absoluto na lista completa
         const icao = aero.icao;
-        const progress = `[${index + 1}/${targets.length}]`;
+        const progress = `[${absIndex + 1}/${totalTargets}]`;
 
         // Log de progresso a cada BATCH_SIZE aeródromos
-        if (index % BATCH_SIZE === 0 && index > 0) {
+        if (relIndex % BATCH_SIZE === 0 && relIndex > 0) {
             const elapsed = ((Date.now() - startTime) / 60000).toFixed(1);
-            const rate = (successCount / (index + 1) * 100).toFixed(0);
-            console.log(`\n📊 Progresso: ${progress} | ✅ ${successCount} | ❌ ${failCount} | ⏱️ ${elapsed} min | Taxa: ${rate}%\n`);
+            const sessionSuccess = Object.keys(results).length - (checkpoint ? Object.keys(checkpoint.data).length : 0);
+            const rate = (sessionSuccess / relIndex * 100).toFixed(0);
+            console.log(`\n📊 Progresso: ${progress} | ✅ ${successCount} total | ❌ ${failCount} | ⏱️ ${elapsed} min | Taxa sessão: ${rate}%\n`);
         }
 
         process.stdout.write(`  ${progress} ${icao.padEnd(6)} → `);
@@ -199,37 +280,43 @@ async function startCrawler() {
             failCount++;
         }
 
+        // 💾 Salva checkpoint a cada CHECKPOINT_EVERY aeródromos processados nesta sessão
+        if ((relIndex + 1) % CHECKPOINT_EVERY === 0) {
+            await saveCheckpointToR2(next.cycle, absIndex, icao, results);
+        }
+
         // Sleep entre requisições (proteção de rate limit do DECEA)
-        if (index < targets.length - 1) {
+        if (relIndex < remainingTargets.length - 1) {
             await sleep(DELAY_MS);
         }
     }
 
-    // 4. Relatório final de raspagem
+    // 5. Relatório final de raspagem
     const totalTime = ((Date.now() - startTime) / 60000).toFixed(1);
     console.log('\n═══════════════════════════════════════════════════════════');
     console.log('📊 RELATÓRIO FINAL DA RASPAGEM');
     console.log('═══════════════════════════════════════════════════════════');
-    console.log(`   ✅ Sucessos  : ${successCount}`);
-    console.log(`   ❌ Falhas    : ${failCount}`);
-    console.log(`   ⏱️  Tempo total: ${totalTime} minutos`);
-    console.log(`   📦 Ciclo     : ${next.cycle} (efetivo em ${next.dateStr})`);
+    console.log(`   ✅ Total coletados : ${Object.keys(results).length} aeródromos`);
+    console.log(`   ✅ Nesta sessão    : ${successCount - (checkpoint ? Object.keys(checkpoint.data).length : 0)}`);
+    console.log(`   ❌ Falhas          : ${failCount}`);
+    console.log(`   ⏱️  Tempo desta sessão: ${totalTime} minutos`);
+    console.log(`   📦 Ciclo           : ${next.cycle} (efetivo em ${next.dateStr})`);
 
-    if (successCount === 0) {
+    if (Object.keys(results).length === 0) {
         console.error('\n❌ Nenhum dado foi coletado. Abortando upload para evitar sobrescrever dados bons.');
         process.exit(1);
     }
 
-    // 5. Montar e publicar o Snapshot Offline no Cloudflare R2
+    // 6. Montar e publicar o Snapshot Offline no Cloudflare R2
     console.log('\n☁️  Publicando snapshot no Cloudflare R2...');
     const snapshot = JSON.stringify({
         _meta: {
             generated_at: new Date().toISOString(),
             airac_cycle: next.cycle,
             airac_effective_date: next.dateStr,
-            total_success: successCount,
+            total_success: Object.keys(results).length,
             total_fail: failCount,
-            version: '1.0.0'
+            version: '2.0.0'  // v2 = com sistema de checkpoint
         },
         data: results
     });
@@ -258,6 +345,9 @@ async function startCrawler() {
         }));
         console.log(`   ✅ Publicado: ${R2_KEY_LATEST}`);
 
+        // 🗑️ Deleta checkpoint — processamento 100% completo
+        await deleteCheckpointFromR2(next.cycle);
+
     } catch (e) {
         console.error(`   ❌ Erro no upload para R2: ${e.message}`);
         process.exit(1);
@@ -267,6 +357,9 @@ async function startCrawler() {
     console.log(`   URL disponível para o App Nativo:`);
     console.log(`   https://cartas.skyfpl.com/${R2_KEY_LATEST}`);
     console.log('═══════════════════════════════════════════════════════════\n');
+
+    // Sinaliza sucesso total para o workflow — sem checkpoint pendente
+    process.exit(0);
 }
 
 startCrawler().catch(err => {

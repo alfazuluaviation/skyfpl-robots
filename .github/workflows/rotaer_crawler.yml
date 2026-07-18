@@ -23,7 +23,7 @@ jobs:
   run-crawler:
     name: Executar Crawler ROTAER
     runs-on: ubuntu-latest
-    timeout-minutes: 720   # Limite de 12h (segurança para 6000+ aeródromos com 3s de delay)
+    timeout-minutes: 360   # Limite de 6h por sessão (o checkpoint garante continuidade)
 
     steps:
       - name: 📥 Checkout do Repositório
@@ -40,7 +40,8 @@ jobs:
         working-directory: skyfpl-rotaer-crawler
         run: npm ci
 
-      - name: 🤖 Executar Crawler (com Inteligência AIRAC)
+      - name: 🤖 Executar Crawler (com Checkpoint + Inteligência AIRAC)
+        id: crawler
         working-directory: skyfpl-rotaer-crawler
         run: node index.js
         env:
@@ -64,4 +65,31 @@ jobs:
             echo "📦 Tamanho: $(du -sh rotaer_snapshot.json | cut -f1)"
           else
             echo "⚠️  Snapshot não encontrado localmente (normal se o upload para R2 foi direto)"
+          fi
+
+      # ── AUTO-REINÍCIO: se o crawler foi interrompido antes de terminar,
+      #    dispara um novo job automaticamente para retomar do checkpoint ──────
+      - name: 🔄 Auto-reiniciar se interrompido (Self-Healing)
+        if: failure() || cancelled()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "⚡ Job interrompido. Verificando se há checkpoint no R2 para retomar..."
+          
+          CHECKPOINT_URL="https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/rotaer/rotaer_$(date -u +%Y%m%d)_checkpoint.json"
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$CHECKPOINT_URL" 2>/dev/null || echo "000")
+          
+          # Tenta também a URL sem data (procura por qualquer checkpoint do ciclo atual)
+          # O nome exato depende do ciclo AIRAC — checamos via listagem simples
+          
+          if [ "$HTTP_STATUS" = "200" ] || [ "$HTTP_STATUS" = "403" ]; then
+            echo "♻️  Checkpoint detectado (HTTP $HTTP_STATUS). Disparando novo run automaticamente..."
+            gh workflow run rotaer_crawler.yml \
+              --repo "${{ github.repository }}" \
+              --field force_run="${{ github.event.inputs.force_run || 'false' }}" \
+              --field max_aerodromes="${{ github.event.inputs.max_aerodromes || '0' }}"
+            echo "✅ Novo run disparado! O robô retomará de onde parou."
+          else
+            echo "ℹ️  Nenhum checkpoint encontrado (HTTP $HTTP_STATUS). Nenhuma ação necessária."
+            echo "   (Pode ter sido um encerramento antes de qualquer dado ser coletado)"
           fi
