@@ -34,7 +34,7 @@ const s3 = new S3Client({
 const BUCKET_NAME = 'skyfpl-charts';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const DELAY_MS = 3000;         // 3 segundos entre chamadas ao DECEA
+const DELAY_MS = 2000;         // 2 segundos entre chamadas ao DECEA (3s bate no limite de 6h do GitHub Actions)
 const DAYS_BEFORE_CYCLE = 2;   // Quantos dias antes do novo ciclo o robô deve rodar
 const BATCH_SIZE = 50;         // Aeródromos por log de progresso
 
