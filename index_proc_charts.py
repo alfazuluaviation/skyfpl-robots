@@ -350,7 +350,25 @@ def upload_to_r2(s3, key, body, content_type):
         log.error(f"Erro upload R2 ({key}): {e}")
         return None
 
-# ─── Lógica de Processamento ─────────────────────────────────────────────────
+# ─── Lógica de Processamento e Auditoria (Shadow Mode) ─────────────────────────
+
+def haversine_distance(lat1, lon1, lat2, lon2):
+    """Calcula a distância em metros entre duas coordenadas geográficas."""
+    R = 6371000  # Raio da Terra em metros
+    phi1, phi2 = math.radians(lat1), math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+def calculate_geo_diff(old_gpts, new_gpts):
+    """Retorna o maior desvio (em metros) entre os 4 cantos da carta."""
+    if not old_gpts or not new_gpts or len(old_gpts) < 8 or len(new_gpts) < 8: return None
+    distances = []
+    for i in range(0, 8, 2):
+        d = haversine_distance(old_gpts[i], old_gpts[i+1], new_gpts[i], new_gpts[i+1])
+        distances.append(d)
+    return max(distances)
 
 def process_single_chart(s3, icao, chart, airac, dry_run):
     name = chart.get('nome', 'CARTA')
@@ -414,6 +432,52 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
                     })
                  return 0
             
+            # 🛡️ SHADOW MODE: DIFFING HISTÓRICO (Padrão Ouro)
+            needs_review = False
+            geo_diff_meters = None
+            diagnostic_logs = None
+            
+            try:
+                # 1. Fetch Gold Standard do banco
+                q_url = f"{TABLE_URL}?icao=eq.{icao}&tipo=eq.{tipo}&nome_procedimento=eq.{name}&select=metadata_geo"
+                gold_resp = requests.get(q_url, headers=HEADERS_REST, timeout=10)
+                if gold_resp.ok:
+                    gold_data = gold_resp.json()
+                    if gold_data and len(gold_data) > 0 and gold_data[0].get('metadata_geo'):
+                        old_meta = gold_data[0]['metadata_geo']
+                        old_geo = old_meta.get('geo')
+                        new_geo = meta.get('geo') if meta else None
+                        
+                        if old_geo and new_geo:
+                            # Lógica para suportar formato aninhado
+                            old_gpts = None
+                            if 'calibration' in old_geo and 'measure' in old_geo['calibration']:
+                                old_gpts = old_geo['calibration']['measure'].get('gpts')
+                            elif 'calibration' in old_geo:
+                                old_gpts = old_geo['calibration'].get('gpts')
+                            
+                            new_gpts = None
+                            if 'calibration' in new_geo and 'measure' in new_geo['calibration']:
+                                new_gpts = new_geo['calibration']['measure'].get('gpts')
+                            
+                            if old_gpts and new_gpts:
+                                diff = calculate_geo_diff(old_gpts, new_gpts)
+                                if diff is not None:
+                                    geo_diff_meters = round(diff, 2)
+                                    if diff > 50.0:  # Threshold de 50 metros
+                                        needs_review = True
+                                        diagnostic_logs = {
+                                            "reason": "Desvio geográfico alto",
+                                            "diff_meters": geo_diff_meters,
+                                            "threshold": 50.0,
+                                            "old_gpts": old_gpts,
+                                            "new_gpts": new_gpts,
+                                            "ai_insight": "Robô detectou anomalia grande. Manter Padrão Ouro sugerido caso a DECEA não tenha movido a pista."
+                                        }
+                                        log.warning(f"⚠️ Anomalia Geo ({icao} {tipo} {name}): Diff {geo_diff_meters}m")
+            except Exception as ex_diff:
+                log.error(f"Erro na auditoria de diffing para {icao}: {ex_diff}")
+                
             record = {
                 'icao': icao, 
                 'tipo': tipo, 
@@ -424,7 +488,10 @@ def process_single_chart(s3, icao, chart, airac, dry_run):
                 'airac_cycle': airac,
                 'data_carta': chart.get('dt', ''), 
                 'metadata_geo': meta, 
-                'source': 'skyfpl-robo-v14.1'
+                'source': 'skyfpl-robo-v14.1-shadow',
+                'needs_review': needs_review,
+                'geo_diff_meters': geo_diff_meters,
+                'diagnostic_logs': diagnostic_logs
             }
             
             # Sincronização com o Banco de Dados Supabase
