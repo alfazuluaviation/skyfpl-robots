@@ -34,7 +34,7 @@ const s3 = new S3Client({
 const BUCKET_NAME = 'skyfpl-charts';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const DELAY_MS = 2000;              // 2 segundos entre chamadas ao DECEA
+const DELAY_MS = 800;               // 0.8 segundos entre chamadas ao DECEA
 const DAYS_BEFORE_CYCLE = 2;        // Quantos dias antes do novo ciclo o robô deve rodar
 const BATCH_SIZE = 50;              // Aeródromos por log de progresso
 const CHECKPOINT_EVERY = 250;       // Salva checkpoint a cada N aeródromos processados
@@ -173,15 +173,21 @@ async function startCrawler() {
 
     console.log(`\n🛫 Ciclo Atual : ${current?.cycle || 'N/A'} (${current?.dateStr || 'N/A'})`);
 
+    // 2. ♻️ Verificar e carregar checkpoint ANTES da trava de data
+    console.log('\n🔍 Verificando checkpoint de execução anterior (para garantir retomada)...');
+    const checkpoint = await loadCheckpointFromR2(next.cycle);
+
     if (FORCE_RUN) {
         console.log(`\n🧪 MODO DE TESTE ATIVADO (FORCE_RUN=true)`);
         console.log(`   Verificação de data AIRAC ignorada.`);
         if (MAX_AERODROMES > 0) {
             console.log(`   Limite de processamento: ${MAX_AERODROMES} aeródromo(s).`);
         }
+    } else if (checkpoint) {
+        console.log(`\n🚨 TRABALHO INCOMPLETO DETECTADO! Ignorando trava de data para concluir processamento pendente.`);
     } else if (!shouldRunToday(next)) {
         console.log(`\n✅ Nenhuma ação necessária hoje. O robô voltará a verificar amanhã.`);
-        console.log('   (O próximo ciclo ainda está longe. Encerrando com custo zero.)');
+        console.log('   (O próximo ciclo ainda está longe e não há checkpoints pendentes. Encerrando com custo zero.)');
         process.exit(0);
     } else {
         console.log(`\n🚨 JANELA DE ATUALIZAÇÃO DETECTADA!`);
@@ -189,7 +195,7 @@ async function startCrawler() {
         console.log(`   Iniciando raspagem completa do ROTAER...\n`);
     }
 
-    // 2. Buscar lista de todos os aeródromos e helipontos do Cloudflare R2
+    // 3. Buscar lista de todos os aeródromos e helipontos do Cloudflare R2
     console.log('📡 Buscando lista da malha aérea (latest_navdata.json) no Cloudflare R2...');
     let targets = [];
     try {
@@ -219,11 +225,7 @@ async function startCrawler() {
         targets = targets.slice(0, MAX_AERODROMES);
     }
 
-    // 3. ♻️ Verificar e carregar checkpoint de execução anterior
-    console.log('\n🔍 Verificando checkpoint de execução anterior...');
-    const checkpoint = await loadCheckpointFromR2(next.cycle);
-
-    // Pré-carrega dados do checkpoint ou inicia vazio
+    // 4. Pré-carrega dados do checkpoint ou inicia vazio
     const results = checkpoint ? { ...checkpoint.data } : {};
     const startIndex = checkpoint ? checkpoint.last_index + 1 : 0;
     let successCount = Object.keys(results).length; // já processados
