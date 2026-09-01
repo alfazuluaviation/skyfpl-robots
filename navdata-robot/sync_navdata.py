@@ -345,7 +345,8 @@ def main():
             'rejected': 0,
             'status': 'pending'
         }
-        telemetry['logs'].insert(0, f"[{l_name}] Servidor declarou {expected} itens.")
+        timestamp_str = datetime.datetime.now().strftime('%H:%M:%S')
+        telemetry['logs'].insert(0, f"[{timestamp_str}] [{l_name}] Servidor declarou {expected} itens.")
         update_telemetry(s3, telemetry)
 
     total_expected = sum(l['expected'] for l in telemetry['layers'].values())
