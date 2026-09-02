@@ -575,13 +575,20 @@ def main():
             for line in reversed(summary_logs):
                 telemetry['logs'].insert(0, line)
             
-            # 3. Notificar Esteira de Staging via Supabase Edge Function (Webhook)
+            # 3. Notificar Esteira de Staging via Supabase Edge Function (Webhook & Telegram Alerta)
             try:
-                service_key = os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or os.environ.get('SUPABASE_ANON_KEY')
-                if SUPABASE_URL and service_key:
+                # Obter a chave (suporta service_role ou anon key com fallback garantido)
+                key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
+                if not key_candidate:
+                    key_candidate = (os.environ.get('SUPABASE_ANON_KEY') or '').strip()
+                if not key_candidate:
+                    key_candidate = SUPABASE_ANON_KEY
+
+                if SUPABASE_URL and key_candidate:
                     webhook_url = f"{SUPABASE_URL}/functions/v1/airac-navdata-ingest"
                     wh_headers = {
-                        'Authorization': f'Bearer {service_key}',
+                        'Authorization': f'Bearer {key_candidate}',
+                        'apikey': key_candidate,
                         'Content-Type': 'application/json'
                     }
                     wh_body = {
@@ -600,14 +607,19 @@ def main():
                         },
                         'generated_at': time.time()
                     }
-                    wh_res = requests.post(webhook_url, json=wh_body, headers=wh_headers, timeout=15)
+                    print(f"Enviando webhook para {webhook_url}...")
+                    wh_res = requests.post(webhook_url, json=wh_body, headers=wh_headers, timeout=60)
                     if wh_res.status_code == 200:
-                        print(f"📡 Webhook de Staging acionado com sucesso: {wh_res.text}")
-                        telemetry['logs'].insert(0, "📡 Ciclo enviado para validação e staging com sucesso.")
+                        print(f"📡 Webhook de Staging e Alerta Telegram acionados com sucesso: {wh_res.text}")
+                        telemetry['logs'].insert(0, "📱 Alerta Telegram despachado via Staging Webhook (100% OK).")
                     else:
                         print(f"⚠️ Resposta do webhook ({wh_res.status_code}): {wh_res.text}")
+                        telemetry['logs'].insert(0, f"⚠️ Webhook HTTP {wh_res.status_code}: {wh_res.text[:60]}")
+                else:
+                    print("⚠️ Chave Supabase não encontrada para o webhook.")
             except Exception as whe:
-                print(f"⚠️ Aviso no webhook de staging (não bloqueante): {whe}")
+                print(f"⚠️ Aviso no webhook de staging: {whe}")
+                telemetry['logs'].insert(0, f"⚠️ Erro ao acionar webhook: {str(whe)[:60]}")
 
         except Exception as e:
             telemetry['status'] = 'error'
