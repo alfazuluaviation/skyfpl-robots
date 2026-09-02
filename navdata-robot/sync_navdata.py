@@ -52,7 +52,8 @@ def update_telemetry(s3, telemetry):
                 Bucket=R2_BUCKET,
                 Key='navdata/telemetry.json',
                 Body=payload,
-                ContentType='application/json'
+                ContentType='application/json',
+                CacheControl='no-cache, no-store, must-revalidate'
             )
         except Exception as e:
             print(f"Falha ao atualizar telemetria R2: {e}")
@@ -365,6 +366,7 @@ def main():
             continue
             
         telemetry['status'] = 'processing'
+        telemetry['status'] = 'processing'
         telemetry['layers'][l_id]['status'] = 'in_progress'
         telemetry['logs'].insert(0, f"[{l_name}] Iniciando download paginado ({expected} itens esperados)...")
         update_telemetry(s3, telemetry)
@@ -399,6 +401,7 @@ def main():
             if total_expected > 0:
                 telemetry['global_progress'] = int((total_downloaded_global / total_expected) * 100)
                 
+            telemetry['status'] = 'processing'
             telemetry['updated_at'] = time.time()
             update_telemetry(s3, telemetry)
             
