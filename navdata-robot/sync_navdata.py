@@ -304,6 +304,7 @@ def process_features(features, layer_name):
 def main():
     parser = argparse.ArgumentParser(description="NavData Sync Robot")
     parser.add_argument("--workers", type=int, default=10, help="Number of parallel workers")
+    parser.add_argument("--cycle", type=str, default=None, help="Force specific AIRAC cycle (e.g. 2609)")
     args = parser.parse_args()
 
     s3 = init_s3()
@@ -412,37 +413,53 @@ def main():
 import datetime
 
 def calculate_airac_cycle(target_date=None):
-    if target_date is None:
-        target_date = datetime.datetime.now(datetime.timezone.utc)
+    now = target_date if target_date is not None else datetime.datetime.now(datetime.timezone.utc)
     
-    # Referência: Ciclo 2401 iniciou em 2024-01-25
-    reference_date = datetime.datetime(2024, 1, 25, tzinfo=datetime.timezone.utc)
-    reference_cycle_num = 2401
+    calendar_path = os.path.join(os.path.dirname(__file__), 'calendar.json')
+    master_cal = {}
+    if os.path.exists(calendar_path):
+        with open(calendar_path, 'r', encoding='utf-8') as f:
+            master_cal = json.load(f)
+            
+    all_cycles = []
+    for year, cycles in master_cal.items():
+        for cycle_id, date_str in cycles.items():
+            parts = [int(p) for p in date_str.split('/')]
+            dt = datetime.datetime(parts[2], parts[1], parts[0], tzinfo=datetime.timezone.utc)
+            all_cycles.append({
+                'cycle': cycle_id,
+                'effective_dt': dt,
+                'effective_date': dt.strftime('%Y-%m-%d'),
+                'expiration_date': (dt + datetime.timedelta(days=28)).strftime('%Y-%m-%d'),
+                'publication_date': (dt - datetime.timedelta(days=14)).strftime('%Y-%m-%d')
+            })
+            
+    all_cycles.sort(key=lambda x: x['effective_dt'])
     
-    diff = target_date - reference_date
-    cycles_since_ref = diff.days // 28
-    
-    effective_date = reference_date + datetime.timedelta(days=cycles_since_ref * 28)
-    expiration_date = effective_date + datetime.timedelta(days=28)
-    publication_date = effective_date - datetime.timedelta(days=10) # Estimativa DECEA
-    
-    # Cálculo do número do ciclo (YYNN)
-    year_prefix = effective_date.strftime('%y')
-    # O numero do ciclo reinicia a cada ano. 
-    # Precisamos contar quantos intervalos de 28 dias ocorreram desde o primeiro ciclo do ano atual.
-    first_day_of_year = datetime.datetime(effective_date.year, 1, 1, tzinfo=datetime.timezone.utc)
-    # Encontrar o primeiro ciclo do ano (baseado na referência)
-    # diff_to_year_start = first_day_of_year - reference_date
-    # ... Simplificação padrão:
-    cycle_index = ((effective_date - first_day_of_year).days // 28) + 1
-    cycle_id = f"{year_prefix}{str(cycle_index).padStart(2, '0')}" if hasattr(str, 'padStart') else f"{year_prefix}{str(cycle_index).zfill(2)}"
-    
-    return {
-        'cycle': cycle_id,
-        'effective_date': effective_date.isoformat(),
-        'expiration_date': expiration_date.isoformat(),
-        'publication_date': publication_date.isoformat()
-    }
+    current_cycle = None
+    next_cycle = None
+    for i, c in enumerate(all_cycles):
+        if c['effective_dt'] <= now:
+            current_cycle = c
+            if i + 1 < len(all_cycles):
+                next_cycle = all_cycles[i + 1]
+                
+    if not current_cycle and all_cycles:
+        current_cycle = all_cycles[0]
+        
+    target = current_cycle
+    if next_cycle:
+        days_until_next = (next_cycle['effective_dt'] - now).days
+        # Janela D-14 Oficial ICAO: Nos 14 dias anteriores à vigência, processar o próximo ciclo
+        if 0 <= days_until_next <= 14:
+            target = next_cycle
+            print(f"🎯 Janela D-{days_until_next} Detectada! Alvo Selecionado: Ciclo Futuro {next_cycle['cycle']} (Vigência: {next_cycle['effective_date']})")
+        else:
+            print(f"📌 Operação Normal: Alvo Selecionado: Ciclo Atual {current_cycle['cycle']} (Vigência: {current_cycle['effective_date']})")
+    else:
+        print(f"📌 Alvo Selecionado: {target['cycle']} (Vigência: {target['effective_date']})")
+        
+    return target
 
 def main():
     parser = argparse.ArgumentParser(description="NavData Sync Robot")
@@ -550,6 +567,9 @@ def main():
 
     # NOVO: Cálculo de AIRAC
     airac = calculate_airac_cycle()
+    if args.cycle:
+        airac['cycle'] = args.cycle
+        print(f"⚙️ Ciclo forçado manualmente via CLI: {args.cycle}")
 
     # FINALIZANDO
     telemetry['status'] = 'uploading'
