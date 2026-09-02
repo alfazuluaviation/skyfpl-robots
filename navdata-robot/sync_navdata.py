@@ -364,6 +364,7 @@ def main():
             telemetry['layers'][l_id]['status'] = 'completed'
             continue
             
+        telemetry['status'] = 'processing'
         telemetry['layers'][l_id]['status'] = 'in_progress'
         telemetry['logs'].insert(0, f"[{l_name}] Iniciando download paginado ({expected} itens esperados)...")
         update_telemetry(s3, telemetry)
