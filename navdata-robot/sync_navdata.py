@@ -45,7 +45,7 @@ def init_s3():
     )
 
 def update_telemetry(s3, telemetry):
-    payload = json.dumps(telemetry, ensure_ascii=False).encode('utf-8')
+    payload = json.dumps(telemetry, default=str, ensure_ascii=False).encode('utf-8')
     if s3:
         try:
             s3.put_object(
@@ -351,7 +351,12 @@ def calculate_airac_cycle(target_date=None):
     else:
         print(f"📌 Alvo Selecionado: {target['cycle']} (Vigência: {target['effective_date']})")
         
-    return target
+    return {
+        'cycle': target['cycle'],
+        'effective_date': target['effective_date'],
+        'expiration_date': target['expiration_date'],
+        'publication_date': target['publication_date']
+    }
 
 def main():
     parser = argparse.ArgumentParser(description="NavData Sync Robot")
