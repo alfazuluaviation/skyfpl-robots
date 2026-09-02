@@ -75,7 +75,13 @@ def calculate_target_cycle():
             target = next_cycle
             print(f"🎯 Janela D-{days_until_next} Detectada! Auditando o Próximo Ciclo: {next_cycle['cycle']} (Efetividade: {next_cycle['effective_date']})")
             
-    return target
+    eff_dt = target['effective_dt']
+    return {
+        'cycle': target['cycle'],
+        'effective_date': target['effective_date'],
+        'publication_date': (eff_dt - datetime.timedelta(days=14)).strftime('%Y-%m-%d'),
+        'expiration_date': (eff_dt + datetime.timedelta(days=28)).strftime('%Y-%m-%d')
+    }
 
 def update_telemetry(s3, telemetry):
     if not s3: return
@@ -83,7 +89,7 @@ def update_telemetry(s3, telemetry):
         s3.put_object(
             Bucket=R2_BUCKET,
             Key="aip/telemetry.json",
-            Body=json.dumps(telemetry, ensure_ascii=False, indent=2),
+            Body=json.dumps(telemetry, default=str, ensure_ascii=False, indent=2),
             ContentType='application/json',
             CacheControl='no-cache'
         )
@@ -199,53 +205,59 @@ def main():
         'status': 'running',
         'cycle': cycle_id,
         'effective_date': target_cycle['effective_date'],
+        'publication_date': target_cycle.get('publication_date'),
         'started_at': time.time(),
         'logs': [
             f"[{timestamp_now}] Auditoria iniciada para o Ciclo AIRAC {cycle_id}."
         ]
     }
     update_telemetry(s3, telemetry)
-    
-    # 1. Extrair e Processar Emenda Oficial
-    amendments_data = fetch_decea_publications(target_cycle)
-    
-    # 2. Salvar no Cloudflare R2
-    output_json = json.dumps(amendments_data, ensure_ascii=False, indent=2)
-    versioned_key = f"aip/cycles/{cycle_id}/aip_amdt_{cycle_id}.json"
-    latest_key = "aip/latest_aip.json"
-    
-    if s3:
-        try:
-            s3.put_object(
-                Bucket=R2_BUCKET,
-                Key=versioned_key,
-                Body=output_json,
-                ContentType='application/json',
-                CacheControl='public, max-age=2419200'
-            )
-            print(f"✅ Base de Emendas salva no R2: {versioned_key}")
-            
-            s3.put_object(
-                Bucket=R2_BUCKET,
-                Key=latest_key,
-                Body=output_json,
-                ContentType='application/json',
-                CacheControl='public, max-age=3600'
-            )
-            print(f"✅ Base de Emendas atualizada: {latest_key}")
-        except Exception as s3_err:
-            print(f"Erro ao salvar no R2: {s3_err}")
-            
-    # 3. Notificar Webhook Supabase
+
     try:
-        if SUPABASE_URL and SUPABASE_KEY:
+        # 1. Extrair e Processar Emenda Oficial
+        amendments_data = fetch_decea_publications(target_cycle)
+        
+        # 2. Salvar no Cloudflare R2
+        output_json = json.dumps(amendments_data, default=str, ensure_ascii=False, indent=2)
+        versioned_key = f"aip/cycles/{cycle_id}/aip_amdt_{cycle_id}.json"
+        latest_key = "aip/latest_aip.json"
+        
+        if s3:
+            try:
+                s3.put_object(
+                    Bucket=R2_BUCKET,
+                    Key=versioned_key,
+                    Body=output_json,
+                    ContentType='application/json',
+                    CacheControl='public, max-age=2419200'
+                )
+                print(f"✅ Base de Emendas salva no R2: {versioned_key}")
+                
+                s3.put_object(
+                    Bucket=R2_BUCKET,
+                    Key=latest_key,
+                    Body=output_json,
+                    ContentType='application/json',
+                    CacheControl='public, max-age=3600'
+                )
+                print(f"✅ Base de Emendas atualizada: {latest_key}")
+            except Exception as s3_err:
+                print(f"Erro ao salvar no R2: {s3_err}")
+                raise s3_err
+                
+        # 3. Notificar Webhook Supabase (Sucesso)
+        key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip() or (os.environ.get('SUPABASE_ANON_KEY') or '').strip() or SUPABASE_KEY
+        if SUPABASE_URL and key_candidate:
             webhook_url = f"{SUPABASE_URL}/functions/v1/airac-aip-ingest"
             wh_headers = {
-                'Authorization': f'Bearer {SUPABASE_KEY}',
+                'Authorization': f'Bearer {key_candidate}',
+                'apikey': key_candidate,
                 'Content-Type': 'application/json'
             }
             wh_body = {
                 'cycle': cycle_id,
+                'effective_date': target_cycle['effective_date'],
+                'publication_date': target_cycle.get('publication_date'),
                 'r2_path': versioned_key,
                 'amendment_title': amendments_data['official_amendment'],
                 'document_url': amendments_data['document_url'],
@@ -254,18 +266,59 @@ def main():
                 'total_navaids': len(amendments_data['sections']['navaids']),
                 'generated_at': time.time()
             }
-            wh_res = requests.post(webhook_url, json=wh_body, headers=wh_headers, timeout=15)
+            wh_res = requests.post(webhook_url, json=wh_body, headers=wh_headers, timeout=30)
             print(f"📡 Webhook de Homologação acionado ({wh_res.status_code}): {wh_res.text}")
-    except Exception as wh_err:
-        print(f"Aviso no webhook Supabase (não bloqueante): {wh_err}")
+            
+        telemetry['status'] = 'completed'
+        telemetry['logs'].insert(0, f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ✅ Auditoria concluída com 100% de conformidade para o Ciclo {cycle_id}.")
+        update_telemetry(s3, telemetry)
         
-    telemetry['status'] = 'completed'
-    telemetry['logs'].insert(0, f"[{datetime.datetime.now().strftime('%H:%M:%S')}] ✅ Auditoria concluída com 100% de conformidade para o Ciclo {cycle_id}.")
-    update_telemetry(s3, telemetry)
-    
-    print("==================================================")
-    print(f"🎉 Processamento concluído com sucesso para o Ciclo {cycle_id}!")
-    print("==================================================")
+        print("==================================================")
+        print(f"🎉 Processamento concluído com sucesso para o Ciclo {cycle_id}!")
+        print("==================================================")
+
+    except Exception as err:
+        err_str = str(err)
+        err_type = type(err).__name__
+        
+        if 'Timeout' in err_type or 'timeout' in err_str.lower():
+            friendly_diag = "Timeout na comunicação com a API do AISWeb DECEA."
+        elif '502' in err_str or '503' in err_str or '504' in err_str:
+            friendly_diag = "Servidor AISWeb DECEA indisponível temporariamente (HTTP 5xx)."
+        elif 'ClientError' in err_type:
+            friendly_diag = "Falha ao persistir dados de emenda no Cloudflare R2."
+        else:
+            friendly_diag = f"Erro ({err_type}) na reconciliação documental: {err_str[:120]}"
+            
+        print(f"🚨 [FALHA CRÍTICA AIP] {friendly_diag}")
+        
+        telemetry['status'] = 'error'
+        telemetry['error_diagnosis'] = friendly_diag
+        telemetry['logs'].insert(0, f"🔴 FALHA CRÍTICA: {friendly_diag}")
+        update_telemetry(s3, telemetry)
+        
+        # Disparo do Alerta Vermelho de Emergência no Telegram
+        try:
+            key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip() or (os.environ.get('SUPABASE_ANON_KEY') or '').strip() or SUPABASE_KEY
+            if SUPABASE_URL and key_candidate:
+                webhook_url = f"{SUPABASE_URL}/functions/v1/airac-aip-ingest"
+                wh_headers = {
+                    'Authorization': f'Bearer {key_candidate}',
+                    'apikey': key_candidate,
+                    'Content-Type': 'application/json'
+                }
+                fail_body = {
+                    'status': 'FAILED',
+                    'cycle': cycle_id,
+                    'layer': 'Reconciliação Documental AISWeb DECEA',
+                    'error': friendly_diag
+                }
+                requests.post(webhook_url, json=fail_body, headers=wh_headers, timeout=15)
+                print("📱 Alerta Vermelho AIP enviado para o Telegram!")
+        except Exception as alert_e:
+            print(f"Aviso no alerta de falha: {alert_e}")
+            
+        raise err
 
 if __name__ == '__main__':
     main()

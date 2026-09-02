@@ -47,3 +47,21 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
           python aip-auditor-robot/aip_auditor.py ${{ github.event.inputs.cycle && format('--cycle {0}', github.event.inputs.cycle) || '' }}
+
+      # Notificação de Emergência no Telegram se o Runner Falhar
+      - name: 🚨 Notificar Falha Crítica no Telegram & Supabase
+        if: failure() || cancelled()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://gongoqjjpwphhttumdjm.supabase.co' }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+        run: |
+          curl -s -X POST "$SUPABASE_URL/functions/v1/airac-aip-ingest" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "FAILED",
+              "cycle": "2609",
+              "layer": "GitHub Actions Runner (AIP Auditor Nuvem)",
+              "error": "O executor da auditoria documental AIP foi interrompido inesperadamente na infraestrutura da nuvem."
+            }' || true
