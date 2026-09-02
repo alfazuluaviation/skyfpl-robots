@@ -67,11 +67,21 @@ jobs:
       run: |
         python sync_navdata.py --workers ${{ github.event.inputs.workers || '10' }}
 
-    # Mecanismo de Autorrecuperação (Self-Healing)
-    - name: 🔄 Auto-reiniciar se interrompido (Self-Healing)
+    # Notificação de Emergência no Telegram se o Runner Falhar
+    - name: 🚨 Notificar Falha Crítica no Telegram & Supabase
       if: failure() || cancelled()
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://gongoqjjpwphhttumdjm.supabase.co' }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvbmdvcWpqcHdwaGh0dHVtZGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTUyMDcsImV4cCI6MjA4Mjk5MTIwN30.XhdrWma90JeoQdGfeqCoXgGVnyiTZ5GXHszEHw3Ce2o' }}
       run: |
-        echo "⚡ Job interrompido ou falhou. Disparando novo run para autorrecuperação..."
-        gh workflow run navdata_sync.yml --repo "${{ github.repository }}"
+        curl -s -X POST "$SUPABASE_URL/functions/v1/airac-navdata-ingest" \
+          -H "Authorization: Bearer $SUPABASE_KEY" \
+          -H "apikey: $SUPABASE_KEY" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "status": "FAILED",
+            "cycle": "2609",
+            "layer": "GitHub Actions Runner (Infraestrutura Nuvem)",
+            "progress": 0,
+            "error": "O executor do GitHub Actions sofreu uma interrupção inesperada ou encerramento abrupto."
+          }' || true

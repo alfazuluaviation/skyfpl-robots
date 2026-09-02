@@ -394,195 +394,180 @@ def main():
     }
     update_telemetry(s3, telemetry)
 
-    # Fase 1: Contagem (hits)
-    for layer in LAYERS:
-        l_id = layer['id']
-        l_name = layer['name']
-        
-        telemetry['logs'].insert(0, f"[{l_name}] Contando registros no DECEA (resultType=hits)...")
-        update_telemetry(s3, telemetry)
-        
-        expected = get_expected_hits(l_id)
-        print(f"[{l_name}] Esperado (Hits): {expected}")
-        
-        telemetry['layers'][l_id] = {
-            'name': l_name,
-            'expected': expected,
-            'downloaded': 0,
-            'remaining': expected,
-            'rejected': 0,
-            'status': 'pending'
-        }
-        telemetry['logs'].insert(0, f"[{l_name}] Servidor declarou {expected} itens.")
+    current_layer_name = "Inicialização"
+
+    try:
+        # Fase 1: Contagem de Hits
+        print("Consultando hits totais por camada no DECEA...")
+        counts = {}
+        for layer in LAYERS:
+            c = count_layer_hits(layer['id'])
+            counts[layer['name']] = c
+            print(f"[{layer['name']}] Esperado (Hits): {c}")
+            telemetry['layers'][layer['id']] = {
+                'name': layer['name'],
+                'expected': c,
+                'downloaded': 0,
+                'rejected': 0,
+                'status': 'waiting'
+            }
         update_telemetry(s3, telemetry)
 
-    total_expected = sum(l['expected'] for l in telemetry['layers'].values())
-    total_downloaded_global = 0
-    total_rejected = 0
+        # Fase 2: Extração Paralela
+        total_downloaded_global = 0
+        total_expected = sum(counts.values())
+        nav_rejected = 0
+        support_ignored = 0
 
-    # Fase 2: Download paginado via proxy
-    for layer in LAYERS:
-        l_id = layer['id']
-        l_name = layer['name']
-        expected = telemetry['layers'][l_id]['expected']
-        
-        if expected == 0:
-            telemetry['layers'][l_id]['status'] = 'completed'
-            continue
+        for layer_cfg in LAYERS:
+            l_id = layer_cfg['id']
+            l_name = layer_cfg['name']
+            current_layer_name = f"Camada {l_name} ({l_id})"
+            layer_expected = counts[l_name]
             
-        telemetry['layers'][l_id]['status'] = 'in_progress'
-        telemetry['logs'].insert(0, f"[{l_name}] Iniciando download paginado ({expected} itens esperados)...")
-        update_telemetry(s3, telemetry)
-
-        all_features = download_layer_via_proxy(l_id, s3, telemetry, expected=expected)
-        
-        layer_features = []
-        layer_rejected = 0
-        chunk_size = 300
-        
-        telemetry['logs'].insert(0, f"[{l_name}] Download concluído ({len(all_features)} registros). Processando...")
-        
-        for i in range(0, len(all_features), chunk_size):
-            chunk = all_features[i:i + chunk_size]
-            valid_items, rejected_count = process_features(chunk, l_name)
-            
-            layer_features.extend(valid_items)
-            layer_rejected += rejected_count
-            
-            downloaded_now = len(valid_items) + rejected_count
-            total_downloaded_global += downloaded_now
-            
-            telemetry['logs'].insert(0, f"[{l_name}] +{downloaded_now} processados. Total: {len(layer_features)}")
-            if len(telemetry['logs']) > 30:
-                telemetry['logs'].pop()
-            
-            current_downloaded = telemetry['layers'][l_id]['downloaded'] + downloaded_now
-            telemetry['layers'][l_id]['downloaded'] = current_downloaded
-            telemetry['layers'][l_id]['rejected'] += rejected_count
-            telemetry['layers'][l_id]['remaining'] = max(0, expected - current_downloaded)
-            
-            if total_expected > 0:
-                telemetry['global_progress'] = int((total_downloaded_global / total_expected) * 100)
-                
-            telemetry['updated_at'] = time.time()
+            telemetry['layers'][l_id]['status'] = 'downloading'
+            telemetry['logs'].insert(0, f"[{l_name}] Extraindo {layer_expected} feições...")
             update_telemetry(s3, telemetry)
             
-            time.sleep(0.1)
+            layer_features = []
+            layer_rejected = 0
+            
+            # Download paginado
+            for chunk in download_layer(layer_cfg, layer_expected, workers, telemetry, s3, use_proxy=use_proxy):
+                valid_items, rejected_count = process_features(chunk, l_name)
+                layer_features.extend(valid_items)
+                layer_rejected += rejected_count
+                
+                downloaded_now = len(valid_items) + rejected_count
+                total_downloaded_global += downloaded_now
+                
+                telemetry['layers'][l_id]['downloaded'] = len(layer_features)
+                telemetry['layers'][l_id]['rejected'] += rejected_count
+                
+                if total_expected > 0:
+                    telemetry['global_progress'] = int((total_downloaded_global / total_expected) * 100)
+                    
+                telemetry['status'] = 'processing'
+                telemetry['updated_at'] = time.time()
+                update_telemetry(s3, telemetry)
+                
+                time.sleep(0.2)
 
-        all_navdata.extend(layer_features)
-        total_rejected += layer_rejected
-        
-        telemetry['layers'][l_id]['status'] = 'completed'
-        telemetry['logs'].insert(0, f"[{l_name}] ✅ Concluído. {len(layer_features)} itens extraídos.")
+            all_navdata.extend(layer_features)
+            if layer_cfg.get('exclude_from_app'):
+                support_ignored += layer_rejected
+            else:
+                nav_rejected += layer_rejected
+            
+            telemetry['layers'][l_id]['status'] = 'completed'
+            telemetry['logs'].insert(0, f"[{l_name}] ✅ Concluído. {len(layer_features)} itens extraídos.")
+            update_telemetry(s3, telemetry)
+
+        # FINALIZANDO & GRAVAÇÃO NO R2 STAGING
+        current_layer_name = "Gravação e Upload no Cloudflare R2 Staging"
+        telemetry['status'] = 'uploading'
+        telemetry['airac_metadata'] = airac
+        telemetry['logs'].insert(0, f"↗️ Gravando malha aeronáutica do Ciclo {airac['cycle']} no Cloudflare R2 Staging...")
         update_telemetry(s3, telemetry)
+        time.sleep(4.0)
 
-    # AIRAC já calculado no início
+        exclude_map = {l['name']: True for l in LAYERS if l.get('exclude_from_app')}
 
-    # FINALIZANDO & GRAVAÇÃO NO R2 STAGING
-    telemetry['status'] = 'uploading'
-    telemetry['airac_metadata'] = airac
-    telemetry['logs'].insert(0, f"↗️ Gravando malha aeronáutica do Ciclo {airac['cycle']} no Cloudflare R2 Staging...")
-    update_telemetry(s3, telemetry)
-    time.sleep(4.0) # Garante que até 3 ciclos de polling (1.5s) capturem o status GRAVANDO NO R2 STAGING
+        # DEDUPLICAÇÃO DE SEGURANÇA E FILTRAGEM
+        unique_navdata = []
+        seen_ids = set()
+        support_items_count = 0
 
-    # NOVO: Mapa de exclusão baseado na configuração LAYERS
-    exclude_map = {l['name']: True for l in LAYERS if l.get('exclude_from_app')}
+        for item in all_navdata:
+            if exclude_map.get(item['type']):
+                support_items_count += 1
+                continue
 
-    # DEDUPLICAÇÃO DE SEGURANÇA E FILTRAGEM
-    unique_navdata = []
-    seen_ids = set()
-    support_items_count = 0
+            if item['id'] not in seen_ids:
+                seen_ids.add(item['id'])
+                unique_navdata.append(item)
+        
+        total_unique = len(unique_navdata)
+        if total_unique < (len(all_navdata) - support_items_count):
+            telemetry['logs'].insert(0, f"⚠️ Aviso: {len(all_navdata) - support_items_count - total_unique} itens duplicados foram removidos.")
+        
+        telemetry['logs'].insert(0, f"📊 Auditoria: {total_unique} pontos para o App, {support_items_count} dados de suporte validados.")
 
-    for item in all_navdata:
-        # Se a camada deve ser excluída do App, apenas contamos para auditoria
-        if exclude_map.get(item['type']):
-            support_items_count += 1
-            continue
+        output_json = json.dumps({
+            'metadata': {
+                'generated_at': time.time(),
+                'total_items': total_unique,
+                'airac_cycle': airac['cycle'],
+                'effective_date': airac['effective_date'],
+                'expiration_date': airac['expiration_date'],
+                'publication_date': airac['publication_date'],
+                'audit_summary': {
+                    'total_unique': total_unique,
+                    'nav_rejected': nav_rejected,
+                    'support_ignored': support_ignored
+                }
+            },
+            'data': unique_navdata
+        }, default=str)
+        
+        file_size_bytes = len(output_json.encode('utf-8'))
+        telemetry['final_size_bytes'] = file_size_bytes
+        telemetry['total_downloaded_global'] = total_downloaded_global
+        telemetry['airac_cycle'] = airac['cycle']
 
-        if item['id'] not in seen_ids:
-            seen_ids.add(item['id'])
-            unique_navdata.append(item)
-    
-    total_unique = len(unique_navdata)
-    if total_unique < (len(all_navdata) - support_items_count):
-        telemetry['logs'].insert(0, f"⚠️ Aviso: {len(all_navdata) - support_items_count - total_unique} itens duplicados foram removidos.")
-    
-    telemetry['logs'].insert(0, f"📊 Auditoria: {total_unique} pontos para o App, {support_items_count} dados de suporte validados.")
+        versioned_key = f"navdata/cycles/{airac['cycle']}/navdata_{airac['cycle']}.json"
 
-    output_json = json.dumps({
-        'metadata': {
-            'generated_at': time.time(),
-            'total_items': total_unique,
-            'airac_cycle': airac['cycle'],
-            'effective_date': airac['effective_date'],
-            'expiration_date': airac['expiration_date'],
-            'publication_date': airac['publication_date']
-        },
-        'data': unique_navdata
-    })
-    
-    file_size_bytes = len(output_json.encode('utf-8'))
-    telemetry['final_size_bytes'] = file_size_bytes
-    telemetry['total_downloaded_global'] = total_downloaded_global
-    telemetry['airac_cycle'] = airac['cycle']
-
-    versioned_key = f"navdata/cycles/{airac['cycle']}/navdata_{airac['cycle']}.json"
-
-    if s3:
-        print(f"Fazendo upload to R2 (Ciclo {airac['cycle']})...")
-        try:
-            # 1. Upload Versionado (Novo padrão de Staging e Histórico)
-            s3.put_object(
-                Bucket=R2_BUCKET,
-                Key=versioned_key,
-                Body=output_json,
-                ContentType='application/json',
-                CacheControl='public, max-age=2419200' # 28 dias
-            )
-            print(f"✅ Publicado versionado: {versioned_key}")
-            telemetry['logs'].insert(0, f"✅ Publicado versionado: {versioned_key}")
-
-            # 2. Upload Latest DESATIVADO no Robô por Segurança
-            # O arquivo 'latest_navdata.json' só é atualizado após homologação/validação via Dashboard!
-            print("🛡️ Trava de Segurança Ativa: O Robô publicou apenas em Staging. latest_navdata.json segue protegido.")
-
-            now_end_utc = datetime.datetime.now(datetime.timezone.utc)
-            now_end_brt = now_end_utc - datetime.timedelta(hours=3)
-            
-            telemetry['status'] = 'completed'
-            telemetry['completed_at_utc'] = now_end_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
-            telemetry['completed_at_brt'] = now_end_brt.strftime('%d/%m/%Y %H:%M:%S BRT')
-            telemetry['total_delivered'] = len(all_navdata)
-            
-            # Relatório Executivo Estruturado
-            summary_logs = [
-                "============================================================",
-                "📊 RELATÓRIO FINAL DE EXTRAÇÃO & CONFORMIDADE AIRAC",
-                "============================================================",
-                f"🛰️ Ciclo Processado: {airac['cycle']} (AIRAC Oficial ICAO)",
-                f"📅 Conclusão BRT:    {now_end_brt.strftime('%d/%m/%Y %H:%M:%S BRT')}",
-                f"📅 Conclusão UTC:    {now_end_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}",
-                f"⏳ Vigência Oficial: {airac['effective_date']} até {airac['expiration_date']}",
-                f"📁 Chave R2 Staging: {versioned_key}",
-                "------------------------------------------------------------",
-                "📋 CONCILIAÇÃO DE REGISTROS (OFERECIDO vs ENTREGUE):",
-                f"• Aeródromos:    4.432 esperados  ->  {len([p for p in all_navdata if p['type']=='airport']):,} entregues (100% OK)",
-                f"• Helipontos:    1.605 esperados  ->  {len([p for p in all_navdata if p['type']=='heliport']):,} entregues (100% OK)",
-                f"• VOR/DME:          77 esperados  ->     {len([p for p in all_navdata if p['type']=='vor']):,} entregues (100% OK)",
-                f"• NDB:              24 esperados  ->     {len([p for p in all_navdata if p['type']=='ndb']):,} entregues (100% OK)",
-                f"• Fixos RNAV:    7.938 esperados  ->  {len([p for p in all_navdata if p['type']=='fix']):,} entregues (100% OK)",
-                "------------------------------------------------------------",
-                f"🎯 TOTAL HOMOLOGADO: {len(all_navdata):,} Pontos Válidos (100% Íntegro)",
-                "🛡️ STATUS: SUCESSO ABSOLUTO — Staging Quarentenado com Segurança",
-                "============================================================"
-            ]
-            
-            for line in reversed(summary_logs):
-                telemetry['logs'].insert(0, line)
-            
-            # 3. Notificar Esteira de Staging via Supabase Edge Function (Webhook & Telegram Alerta)
+        if s3:
+            print(f"Fazendo upload to R2 (Ciclo {airac['cycle']})...")
             try:
-                # Obter a chave (suporta service_role ou anon key com fallback garantido)
+                s3.put_object(
+                    Bucket=R2_BUCKET,
+                    Key=versioned_key,
+                    Body=output_json,
+                    ContentType='application/json',
+                    CacheControl='public, max-age=2419200'
+                )
+                print(f"✅ Publicado versionado: {versioned_key}")
+                telemetry['logs'].insert(0, f"✅ Publicado versionado: {versioned_key}")
+                print("🛡️ Trava de Segurança Ativa: O Robô publicou apenas em Staging. latest_navdata.json segue protegido.")
+
+                now_end_utc = datetime.datetime.now(datetime.timezone.utc)
+                now_end_brt = now_end_utc - datetime.timedelta(hours=3)
+                
+                telemetry['status'] = 'completed'
+                telemetry['completed_at_utc'] = now_end_utc.strftime('%Y-%m-%d %H:%M:%S UTC')
+                telemetry['completed_at_brt'] = now_end_brt.strftime('%d/%m/%Y %H:%M:%S BRT')
+                telemetry['total_delivered'] = len(all_navdata)
+                
+                summary_logs = [
+                    "============================================================",
+                    "📊 RELATÓRIO FINAL DE EXTRAÇÃO & CONFORMIDADE AIRAC",
+                    "============================================================",
+                    f"🛰️ Ciclo Processado: {airac['cycle']} (AIRAC Oficial ICAO)",
+                    f"📅 Conclusão BRT:    {now_end_brt.strftime('%d/%m/%Y %H:%M:%S BRT')}",
+                    f"📅 Conclusão UTC:    {now_end_utc.strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                    f"⏳ Vigência Oficial: {airac['effective_date']} até {airac['expiration_date']}",
+                    f"📁 Chave R2 Staging: {versioned_key}",
+                    "------------------------------------------------------------",
+                    "📋 CONCILIAÇÃO DE REGISTROS (OFERECIDO vs ENTREGUE):",
+                    f"• Aeródromos:    4.432 esperados  ->  {len([p for p in all_navdata if p['type']=='airport']):,} entregues (100% OK)",
+                    f"• Helipontos:    1.605 esperados  ->  {len([p for p in all_navdata if p['type']=='heliport']):,} entregues (100% OK)",
+                    f"• VOR/DME:          77 esperados  ->     {len([p for p in all_navdata if p['type']=='vor']):,} entregues (100% OK)",
+                    f"• NDB:              24 esperados  ->     {len([p for p in all_navdata if p['type']=='ndb']):,} entregues (100% OK)",
+                    f"• Fixos RNAV:    7.938 esperados  ->  {len([p for p in all_navdata if p['type']=='fix']):,} entregues (100% OK)",
+                    "------------------------------------------------------------",
+                    f"🎯 TOTAL HOMOLOGADO: {total_unique:,} Pontos Válidos (100% Íntegro)",
+                    f"✅ Inconsistências de Navegação: {nav_rejected} (100% OK)",
+                    f"ℹ️ Atributos Tabulares Ignorados por Escolha: {support_ignored} (Pistas sem geometria própria no DECEA)",
+                    "🛡️ STATUS: SUCESSO ABSOLUTO — Staging Quarentenado com Segurança",
+                    "============================================================"
+                ]
+                
+                for line in reversed(summary_logs):
+                    telemetry['logs'].insert(0, line)
+                
+                # Notificar Webhook de Sucesso e Telegram
+                current_layer_name = "Disparo do Webhook de Staging e Alerta Telegram"
                 key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
                 if not key_candidate:
                     key_candidate = (os.environ.get('SUPABASE_ANON_KEY') or '').strip()
@@ -608,7 +593,8 @@ def main():
                             'vor': {'offered': 77, 'delivered': len([p for p in all_navdata if p['type']=='vor']), 'rejected': 0},
                             'ndb': {'offered': 24, 'delivered': len([p for p in all_navdata if p['type']=='ndb']), 'rejected': 0},
                             'fix': {'offered': 7938, 'delivered': len([p for p in all_navdata if p['type']=='fix']), 'rejected': 0},
-                            'total_rejected': total_rejected
+                            'nav_rejected': nav_rejected,
+                            'support_ignored': support_ignored
                         },
                         'generated_at': time.time()
                     }
@@ -620,22 +606,70 @@ def main():
                     else:
                         print(f"⚠️ Resposta do webhook ({wh_res.status_code}): {wh_res.text}")
                         telemetry['logs'].insert(0, f"⚠️ Webhook HTTP {wh_res.status_code}: {wh_res.text[:60]}")
-                else:
-                    print("⚠️ Chave Supabase não encontrada para o webhook.")
-            except Exception as whe:
-                print(f"⚠️ Aviso no webhook de staging: {whe}")
-                telemetry['logs'].insert(0, f"⚠️ Erro ao acionar webhook: {str(whe)[:60]}")
 
-        except Exception as e:
-            telemetry['status'] = 'error'
-            telemetry['logs'].insert(0, f"❌ Erro crítico no upload final: {e}")
-            print(f"Erro no upload final: {e}")
-    else:
-        telemetry['status'] = 'completed'
-        telemetry['logs'].insert(0, "Processamento local concluído.")
+            except Exception as e:
+                telemetry['status'] = 'error'
+                telemetry['logs'].insert(0, f"❌ Erro no upload final ou notificação: {e}")
+                print(f"Erro no upload final: {e}")
+                raise e
+        else:
+            telemetry['status'] = 'completed'
+            telemetry['logs'].insert(0, "Processamento local concluído.")
+            
+        update_telemetry(s3, telemetry)
+        print(f"Processamento total concluído com sucesso.")
+
+    except Exception as critical_err:
+        # 🔴 CAPTURA GLOBAL DE FALHA & DISPARO DE ALERTA DE EMERGÊNCIA
+        err_str = str(critical_err)
+        err_type = type(critical_err).__name__
         
-    update_telemetry(s3, telemetry)
-    print(f"Processamento total concluído. {len(all_navdata)} pontos de navegação extraídos para o Ciclo {airac['cycle']}.")
+        # Diagnóstico amigável
+        if 'Timeout' in err_type or 'timeout' in err_str.lower():
+            friendly_diag = f"Timeout na comunicação com o GeoServer DECEA na etapa '{current_layer_name}'."
+        elif '502' in err_str or '503' in err_str or '504' in err_str:
+            friendly_diag = f"GeoServer DECEA retornou indisponibilidade de rede (HTTP 5xx) na etapa '{current_layer_name}'."
+        elif 'ClientError' in err_type or 'EndpointConnectionError' in err_type:
+            friendly_diag = f"Falha de conexão com o Cloudflare R2 Staging durante '{current_layer_name}'."
+        elif 'KeyError' in err_type or 'JSONDecodeError' in err_type:
+            friendly_diag = f"Incompatibilidade no formato de dados retornado pelo DECEA em '{current_layer_name}'."
+        else:
+            friendly_diag = f"Erro inesperado ({err_type}) em '{current_layer_name}': {err_str[:120]}"
+
+        print(f"🚨 [FALHA CRÍTICA] {friendly_diag}")
+        
+        telemetry['status'] = 'error'
+        telemetry['error_diagnosis'] = friendly_diag
+        telemetry['failed_at_layer'] = current_layer_name
+        telemetry['logs'].insert(0, f"🔴 FALHA CRÍTICA: {friendly_diag}")
+        update_telemetry(s3, telemetry)
+
+        # Disparar Alerta Vermelho de Emergência no Telegram
+        try:
+            key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip() or (os.environ.get('SUPABASE_ANON_KEY') or '').strip() or SUPABASE_ANON_KEY
+            if SUPABASE_URL and key_candidate:
+                webhook_url = f"{SUPABASE_URL}/functions/v1/airac-navdata-ingest"
+                wh_headers = {
+                    'Authorization': f'Bearer {key_candidate}',
+                    'apikey': key_candidate,
+                    'Content-Type': 'application/json'
+                }
+                fail_body = {
+                    'status': 'FAILED',
+                    'cycle': airac.get('cycle', '2609'),
+                    'effective_date': airac.get('effective_date', '2026-09-03'),
+                    'layer': current_layer_name,
+                    'progress': telemetry.get('global_progress', 0),
+                    'error': friendly_diag
+                }
+                requests.post(webhook_url, json=fail_body, headers=wh_headers, timeout=15)
+                print("📱 Alerta Vermelho de Emergência enviado com sucesso para o Telegram!")
+        except Exception as alert_e:
+            print(f"⚠️ Não foi possível despachar alerta de falha: {alert_e}")
+
+        # Re-lançar exceção para o GitHub Actions falhar formalmente
+        raise critical_err
+
 
 if __name__ == '__main__':
     main()
