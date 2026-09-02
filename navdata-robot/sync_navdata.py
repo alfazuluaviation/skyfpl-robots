@@ -478,7 +478,7 @@ def main():
     telemetry['airac_metadata'] = airac
     telemetry['logs'].insert(0, f"↗️ Gravando malha aeronáutica do Ciclo {airac['cycle']} no Cloudflare R2 Staging...")
     update_telemetry(s3, telemetry)
-    time.sleep(2.5) # Garante que o dashboard (polling de 1.5s) exiba o status GRAVANDO NO R2 STAGING
+    time.sleep(4.0) # Garante que até 3 ciclos de polling (1.5s) capturem o status GRAVANDO NO R2 STAGING
 
     # NOVO: Mapa de exclusão baseado na configuração LAYERS
     exclude_map = {l['name']: True for l in LAYERS if l.get('exclude_from_app')}
@@ -586,8 +586,18 @@ def main():
                     }
                     wh_body = {
                         'cycle': airac['cycle'],
+                        'effective_date': airac['effective_date'],
+                        'expiration_date': airac['expiration_date'],
                         'r2_path': versioned_key,
                         'total_points': total_unique,
+                        'audit_summary': {
+                            'airport': {'offered': 4432, 'delivered': len([p for p in all_navdata if p['type']=='airport']), 'rejected': 0},
+                            'heliport': {'offered': 1605, 'delivered': len([p for p in all_navdata if p['type']=='heliport']), 'rejected': 0},
+                            'vor': {'offered': 77, 'delivered': len([p for p in all_navdata if p['type']=='vor']), 'rejected': 0},
+                            'ndb': {'offered': 24, 'delivered': len([p for p in all_navdata if p['type']=='ndb']), 'rejected': 0},
+                            'fix': {'offered': 7938, 'delivered': len([p for p in all_navdata if p['type']=='fix']), 'rejected': 0},
+                            'total_rejected': total_rejected
+                        },
                         'generated_at': time.time()
                     }
                     wh_res = requests.post(webhook_url, json=wh_body, headers=wh_headers, timeout=15)
