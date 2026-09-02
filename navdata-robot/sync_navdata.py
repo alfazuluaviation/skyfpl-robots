@@ -302,118 +302,6 @@ def process_features(features, layer_name):
             
     return valid, rejected
 
-def main():
-    parser = argparse.ArgumentParser(description="NavData Sync Robot")
-    parser.add_argument("--workers", type=int, default=10, help="Number of parallel workers")
-    parser.add_argument("--cycle", type=str, default=None, help="Force specific AIRAC cycle (e.g. 2609)")
-    args = parser.parse_args()
-
-    s3 = init_s3()
-    workers = min(max(1, args.workers), 50)
-    
-    use_proxy = bool(SUPABASE_ANON_KEY)
-    print(f"Iniciando Robô NavData...")
-    print(f"  Estratégia: {'PROXY SUPABASE (como o App Web)' if use_proxy else 'DIRETO DECEA (fallback)'}")
-    if not use_proxy:
-        print("  ⚠️ SUPABASE_ANON_KEY não configurada! Usando conexão direta (pode falhar em layers grandes).")
-
-    all_navdata = []
-    telemetry = {
-        'status': 'initializing',
-        'updated_at': time.time(),
-        'layers': {},
-        'global_progress': 0,
-        'logs': [f"Iniciando NavData Robot. Estratégia: {('Proxy Supabase' if use_proxy else 'Direto DECEA')}."]
-    }
-
-    update_telemetry(s3, telemetry)
-
-    # Fase 1: Contagem (hits)
-    for layer in LAYERS:
-        l_id = layer['id']
-        l_name = layer['name']
-        
-        telemetry['logs'].insert(0, f"[{l_name}] Contando registros no DECEA (resultType=hits)...")
-        update_telemetry(s3, telemetry)
-        
-        expected = get_expected_hits(l_id)
-        print(f"[{l_name}] Esperado (Hits): {expected}")
-        
-        telemetry['layers'][l_id] = {
-            'name': l_name,
-            'expected': expected,
-            'downloaded': 0,
-            'remaining': expected,
-            'rejected': 0,
-            'status': 'pending'
-        }
-        timestamp_str = datetime.datetime.now().strftime('%H:%M:%S')
-        telemetry['logs'].insert(0, f"[{timestamp_str}] [{l_name}] Servidor declarou {expected} itens.")
-        update_telemetry(s3, telemetry)
-
-    total_expected = sum(l['expected'] for l in telemetry['layers'].values())
-    total_downloaded_global = 0
-    total_rejected = 0
-
-    # Fase 2: Download paginado via proxy
-    for layer in LAYERS:
-        l_id = layer['id']
-        l_name = layer['name']
-        expected = telemetry['layers'][l_id]['expected']
-        
-        if expected == 0:
-            telemetry['layers'][l_id]['status'] = 'completed'
-            continue
-            
-        telemetry['status'] = 'processing'
-        telemetry['status'] = 'processing'
-        telemetry['layers'][l_id]['status'] = 'in_progress'
-        telemetry['logs'].insert(0, f"[{l_name}] Iniciando download paginado ({expected} itens esperados)...")
-        update_telemetry(s3, telemetry)
-
-        all_features = download_layer_via_proxy(l_id, s3, telemetry, expected=expected)
-        
-        layer_features = []
-        layer_rejected = 0
-        chunk_size = 300
-        
-        telemetry['logs'].insert(0, f"[{l_name}] Download concluído ({len(all_features)} registros). Processando...")
-        
-        for i in range(0, len(all_features), chunk_size):
-            chunk = all_features[i:i + chunk_size]
-            valid_items, rejected_count = process_features(chunk, l_name)
-            
-            layer_features.extend(valid_items)
-            layer_rejected += rejected_count
-            
-            downloaded_now = len(valid_items) + rejected_count
-            total_downloaded_global += downloaded_now
-            
-            telemetry['logs'].insert(0, f"[{l_name}] +{downloaded_now} processados. Total: {len(layer_features)}")
-            if len(telemetry['logs']) > 30:
-                telemetry['logs'].pop()
-            
-            current_downloaded = telemetry['layers'][l_id]['downloaded'] + downloaded_now
-            telemetry['layers'][l_id]['downloaded'] = current_downloaded
-            telemetry['layers'][l_id]['rejected'] += rejected_count
-            telemetry['layers'][l_id]['remaining'] = max(0, expected - current_downloaded)
-            
-            if total_expected > 0:
-                telemetry['global_progress'] = int((total_downloaded_global / total_expected) * 100)
-                
-            telemetry['status'] = 'processing'
-            telemetry['updated_at'] = time.time()
-            update_telemetry(s3, telemetry)
-            
-            time.sleep(0.2)
-
-        all_navdata.extend(layer_features)
-        total_rejected += layer_rejected
-        
-        telemetry['layers'][l_id]['status'] = 'completed'
-        telemetry['logs'].insert(0, f"[{l_name}] ✅ Concluído. {len(layer_features)} itens extraídos. {layer_rejected} rejeitados.")
-        update_telemetry(s3, telemetry)
-
 import datetime
 
 def calculate_airac_cycle(target_date=None):
@@ -468,23 +356,37 @@ def calculate_airac_cycle(target_date=None):
 def main():
     parser = argparse.ArgumentParser(description="NavData Sync Robot")
     parser.add_argument("--workers", type=int, default=10, help="Number of parallel workers")
+    parser.add_argument("--cycle", type=str, default=None, help="Force specific AIRAC cycle (e.g. 2609)")
     args = parser.parse_args()
 
     s3 = init_s3()
+    workers = min(max(1, args.workers), 50)
     
+    # 🛰️ Cálculo do Ciclo AIRAC Oficial ICAO logo na inicialização
+    airac = calculate_airac_cycle()
+    if args.cycle:
+        airac['cycle'] = args.cycle
+        print(f"⚙️ Ciclo forçado manualmente via CLI: {args.cycle}")
+
     use_proxy = bool(SUPABASE_ANON_KEY)
-    print(f"Iniciando Robô NavData...")
+    print(f"Iniciando Robô NavData para o Ciclo {airac['cycle']}...")
     print(f"  Estratégia: {'PROXY SUPABASE (como o App Web)' if use_proxy else 'DIRETO DECEA (fallback)'}")
 
     all_navdata = []
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    now_brt = now_utc - datetime.timedelta(hours=3)
+
     telemetry = {
         'status': 'initializing',
+        'cycle': airac['cycle'],
+        'effective_date': airac['effective_date'],
+        'started_at_utc': now_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'started_at_brt': now_brt.strftime('%d/%m/%Y %H:%M:%S BRT'),
         'updated_at': time.time(),
         'layers': {},
         'global_progress': 0,
-        'logs': [f"Iniciando NavData Robot. Estratégia: {('Proxy Supabase' if use_proxy else 'Direto DECEA')}."]
+        'logs': [f"[{now_brt.strftime('%H:%M:%S')}] 🚀 Robô NavData iniciado para o Ciclo AIRAC {airac['cycle']} (Vigência: {airac['effective_date']})."]
     }
-
     update_telemetry(s3, telemetry)
 
     # Fase 1: Contagem (hits)
@@ -569,17 +471,14 @@ def main():
         telemetry['logs'].insert(0, f"[{l_name}] ✅ Concluído. {len(layer_features)} itens extraídos.")
         update_telemetry(s3, telemetry)
 
-    # NOVO: Cálculo de AIRAC
-    airac = calculate_airac_cycle()
-    if args.cycle:
-        airac['cycle'] = args.cycle
-        print(f"⚙️ Ciclo forçado manualmente via CLI: {args.cycle}")
+    # AIRAC já calculado no início
 
-    # FINALIZANDO
+    # FINALIZANDO & GRAVAÇÃO NO R2 STAGING
     telemetry['status'] = 'uploading'
-    telemetry['airac_metadata'] = airac # Injeta metadados ricos (datas) na telemetria
-    telemetry['logs'].insert(0, "Concatenando registros e efetuando upload final para R2...")
+    telemetry['airac_metadata'] = airac
+    telemetry['logs'].insert(0, f"↗️ Gravando malha aeronáutica do Ciclo {airac['cycle']} no Cloudflare R2 Staging...")
     update_telemetry(s3, telemetry)
+    time.sleep(2.5) # Garante que o dashboard (polling de 1.5s) exiba o status GRAVANDO NO R2 STAGING
 
     # NOVO: Mapa de exclusão baseado na configuração LAYERS
     exclude_map = {l['name']: True for l in LAYERS if l.get('exclude_from_app')}
