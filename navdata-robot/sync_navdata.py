@@ -100,6 +100,17 @@ def get_expected_hits(layer_id):
             time.sleep(2)
     return 0
 
+def is_cycle_already_published(s3, cycle_id):
+    """Verifica no Cloudflare R2 se a malha já foi consolidada e publicada."""
+    if not s3:
+        return False
+    key = f"navdata/cycles/{cycle_id}/navdata_{cycle_id}.json"
+    try:
+        s3.head_object(Bucket=R2_BUCKET, Key=key)
+        return True
+    except Exception:
+        return False
+
 def download_layer_via_proxy(layer_id, s3=None, telemetry=None, expected=0):
     """
     Baixa features via Proxy Supabase Edge Function.
@@ -362,6 +373,7 @@ def main():
     parser = argparse.ArgumentParser(description="NavData Sync Robot")
     parser.add_argument("--workers", type=int, default=10, help="Number of parallel workers")
     parser.add_argument("--cycle", type=str, default=None, help="Force specific AIRAC cycle (e.g. 2609)")
+    parser.add_argument("--force", action="store_true", help="Force execution even if cycle is already published")
     args = parser.parse_args()
 
     s3 = init_s3()
@@ -372,6 +384,36 @@ def main():
     if args.cycle:
         airac['cycle'] = args.cycle
         print(f"⚙️ Ciclo forçado manualmente via CLI: {args.cycle}")
+
+    is_forced = args.force or os.environ.get('FORCE_RUN', '').lower() == 'true'
+    versioned_key = f"navdata/cycles/{airac['cycle']}/navdata_{airac['cycle']}.json"
+
+    # 🛡️ Trava de Idempotência: Se o ciclo já existe no R2 e não for execução forçada, pular com segurança
+    if not is_forced and is_cycle_already_published(s3, airac['cycle']):
+        print(f"🛡️ TRAVA DE IDEMPOTÊNCIA ATIVA:")
+        print(f"   O Ciclo AIRAC {airac['cycle']} já está consolidado e disponível em {versioned_key}.")
+        print(f"   Nenhuma extração necessária. (Para forçar um reprocessamento, utilize a flag --force).")
+        
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        now_brt = now_utc - datetime.timedelta(hours=3)
+        telemetry = {
+            'status': 'completed',
+            'cycle': airac['cycle'],
+            'effective_date': airac['effective_date'],
+            'started_at_utc': now_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'started_at_brt': now_brt.strftime('%d/%m/%Y %H:%M:%S BRT'),
+            'completed_at_utc': now_utc.strftime('%Y-%m-%d %H:%M:%S UTC'),
+            'completed_at_brt': now_brt.strftime('%d/%m/%Y %H:%M:%S BRT'),
+            'updated_at': time.time(),
+            'global_progress': 100,
+            'idempotent_skipped': True,
+            'logs': [
+                f"[{now_brt.strftime('%H:%M:%S')}] 🛡️ Ciclo AIRAC {airac['cycle']} já consolidado em produção/staging ({versioned_key}). Execução dispensada por idempotência."
+            ]
+        }
+        update_telemetry(s3, telemetry)
+        print("Finalizado com sucesso.")
+        return
 
     use_proxy = bool(SUPABASE_ANON_KEY)
     print(f"Iniciando Robô NavData para o Ciclo {airac['cycle']}...")
@@ -401,40 +443,61 @@ def main():
         print("Consultando hits totais por camada no DECEA...")
         counts = {}
         for layer in LAYERS:
-            c = count_layer_hits(layer['id'])
-            counts[layer['name']] = c
-            print(f"[{layer['name']}] Esperado (Hits): {c}")
-            telemetry['layers'][layer['id']] = {
-                'name': layer['name'],
-                'expected': c,
+            l_id = layer['id']
+            l_name = layer['name']
+            
+            telemetry['logs'].insert(0, f"[{l_name}] Contando registros no DECEA (resultType=hits)...")
+            update_telemetry(s3, telemetry)
+            
+            expected = get_expected_hits(l_id)
+            counts[l_name] = expected
+            print(f"[{l_name}] Esperado (Hits): {expected}")
+            telemetry['layers'][l_id] = {
+                'name': l_name,
+                'expected': expected,
                 'downloaded': 0,
+                'remaining': expected,
                 'rejected': 0,
-                'status': 'waiting'
+                'status': 'pending'
             }
-        update_telemetry(s3, telemetry)
+            timestamp_str = datetime.datetime.now().strftime('%H:%M:%S')
+            telemetry['logs'].insert(0, f"[{timestamp_str}] [{l_name}] Servidor declarou {expected} itens.")
+            update_telemetry(s3, telemetry)
 
-        # Fase 2: Extração Paralela
+        total_expected = sum(l['expected'] for l in telemetry['layers'].values())
         total_downloaded_global = 0
-        total_expected = sum(counts.values())
+        total_rejected = 0
         nav_rejected = 0
         support_ignored = 0
 
+        # Fase 2: Download paginado via proxy
         for layer_cfg in LAYERS:
             l_id = layer_cfg['id']
             l_name = layer_cfg['name']
             current_layer_name = f"Camada {l_name} ({l_id})"
-            layer_expected = counts[l_name]
+            layer_expected = telemetry['layers'][l_id]['expected']
             
-            telemetry['layers'][l_id]['status'] = 'downloading'
-            telemetry['logs'].insert(0, f"[{l_name}] Extraindo {layer_expected} feições...")
+            if layer_expected == 0:
+                telemetry['layers'][l_id]['status'] = 'completed'
+                continue
+                
+            telemetry['status'] = 'processing'
+            telemetry['layers'][l_id]['status'] = 'in_progress'
+            telemetry['logs'].insert(0, f"[{l_name}] Iniciando download paginado ({layer_expected} itens esperados)...")
             update_telemetry(s3, telemetry)
+
+            all_features = download_layer_via_proxy(l_id, s3, telemetry, expected=layer_expected)
             
             layer_features = []
             layer_rejected = 0
+            chunk_size = 300
             
-            # Download paginado
-            for chunk in download_layer(layer_cfg, layer_expected, workers, telemetry, s3, use_proxy=use_proxy):
+            telemetry['logs'].insert(0, f"[{l_name}] Download concluído ({len(all_features)} registros). Processando...")
+            
+            for i in range(0, len(all_features), chunk_size):
+                chunk = all_features[i:i + chunk_size]
                 valid_items, rejected_count = process_features(chunk, l_name)
+                
                 layer_features.extend(valid_items)
                 layer_rejected += rejected_count
                 
@@ -442,23 +505,23 @@ def main():
                 total_downloaded_global += downloaded_now
                 
                 telemetry['layers'][l_id]['downloaded'] = len(layer_features)
-                telemetry['layers'][l_id]['rejected'] += rejected_count
+                telemetry['layers'][l_id]['rejected'] += layer_rejected
+                telemetry['layers'][l_id]['remaining'] = max(0, layer_expected - len(layer_features))
                 
                 if total_expected > 0:
                     telemetry['global_progress'] = int((total_downloaded_global / total_expected) * 100)
                     
-                telemetry['status'] = 'processing'
                 telemetry['updated_at'] = time.time()
                 update_telemetry(s3, telemetry)
                 
-                time.sleep(0.2)
+                time.sleep(0.1)
 
             all_navdata.extend(layer_features)
             if layer_cfg.get('exclude_from_app'):
                 support_ignored += layer_rejected
             else:
                 nav_rejected += layer_rejected
-            
+
             telemetry['layers'][l_id]['status'] = 'completed'
             telemetry['logs'].insert(0, f"[{l_name}] ✅ Concluído. {len(layer_features)} itens extraídos.")
             update_telemetry(s3, telemetry)
@@ -664,6 +727,11 @@ def main():
                 }
                 requests.post(webhook_url, json=fail_body, headers=wh_headers, timeout=15)
                 print("📱 Alerta Vermelho de Emergência enviado com sucesso para o Telegram!")
+                try:
+                    with open('.python_alert_sent', 'w') as f_alert:
+                        f_alert.write('alert_sent')
+                except:
+                    pass
         except Exception as alert_e:
             print(f"⚠️ Não foi possível despachar alerta de falha: {alert_e}")
 

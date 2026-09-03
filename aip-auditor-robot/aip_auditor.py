@@ -83,6 +83,17 @@ def calculate_target_cycle():
         'expiration_date': (eff_dt + datetime.timedelta(days=28)).strftime('%Y-%m-%d')
     }
 
+def is_audit_already_published(s3, cycle_id):
+    """Verifica no Cloudflare R2 se a auditoria documental do ciclo já foi concluída e publicada."""
+    if not s3:
+        return False
+    key = f"aip/cycles/{cycle_id}/aip_amdt_{cycle_id}.json"
+    try:
+        s3.head_object(Bucket=R2_BUCKET, Key=key)
+        return True
+    except Exception:
+        return False
+
 def update_telemetry(s3, telemetry):
     if not s3: return
     try:
@@ -186,6 +197,7 @@ def parse_amendments_from_decea(items, cycle_target):
 def main():
     parser = argparse.ArgumentParser(description='SkyFPL AIP Master Auditor Robot')
     parser.add_argument('--cycle', type=str, help='Ciclo AIRAC específico (ex: 2609)')
+    parser.add_argument('--force', action='store_true', help='Forçar re-auditoria mesmo que já exista para este ciclo')
     args = parser.parse_args()
     
     print("==================================================")
@@ -200,6 +212,32 @@ def main():
     cycle_id = target_cycle['cycle']
     timestamp_now = datetime.datetime.now().strftime('%H:%M:%S')
     
+    is_forced = args.force or os.environ.get('FORCE_RUN', '').lower() == 'true'
+    versioned_key = f"aip/cycles/{cycle_id}/aip_amdt_{cycle_id}.json"
+
+    # 🛡️ Trava de Idempotência: Se o relatório de auditoria já existe no R2 e não for forçado, dispensar re-execução
+    if not is_forced and is_audit_already_published(s3, cycle_id):
+        print(f"🛡️ TRAVA DE IDEMPOTÊNCIA ATIVA:")
+        print(f"   A Auditoria AIP AMDT para o Ciclo {cycle_id} já foi concluída e consolidada em {versioned_key}.")
+        print("   Re-execução dispensada com segurança. (Para re-auditar forçadamente, use o parâmetro --force).")
+        
+        telemetry = {
+            'robot_name': 'aip-auditor-robot',
+            'status': 'completed',
+            'cycle': cycle_id,
+            'effective_date': target_cycle['effective_date'],
+            'publication_date': target_cycle.get('publication_date'),
+            'started_at': time.time(),
+            'completed_at': time.time(),
+            'idempotent_skipped': True,
+            'logs': [
+                f"[{timestamp_now}] 🛡️ Ciclo AIRAC {cycle_id} já auditado e consolidado ({versioned_key}). Re-execução dispensada por idempotência."
+            ]
+        }
+        update_telemetry(s3, telemetry)
+        print("Finalizado com sucesso.")
+        return
+
     telemetry = {
         'robot_name': 'aip-auditor-robot',
         'status': 'running',
@@ -315,6 +353,11 @@ def main():
                 }
                 requests.post(webhook_url, json=fail_body, headers=wh_headers, timeout=15)
                 print("📱 Alerta Vermelho AIP enviado para o Telegram!")
+                try:
+                    with open('.python_alert_sent', 'w') as f_alert:
+                        f_alert.write('alert_sent')
+                except:
+                    pass
         except Exception as alert_e:
             print(f"Aviso no alerta de falha: {alert_e}")
             
