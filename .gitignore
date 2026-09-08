@@ -45,3 +45,6 @@ Thumbs.db
 
 # Scratch Workspace (Local Testing Only)
 scratch/
+
+# Backups
+Backups/
