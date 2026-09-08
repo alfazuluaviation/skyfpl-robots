@@ -35,7 +35,7 @@ const BUCKET_NAME = 'skyfpl-charts';
 
 // ── Constantes ────────────────────────────────────────────────────────────────
 const DELAY_MS = 800;               // 0.8 segundos entre chamadas ao DECEA
-const DAYS_BEFORE_CYCLE = 2;        // Quantos dias antes do novo ciclo o robô deve rodar
+const DAYS_BEFORE_CYCLE = 14;       // Janela D-14 Oficial ICAO (Idêntico ao NavData)
 const BATCH_SIZE = 50;              // Aeródromos por log de progresso
 const CHECKPOINT_EVERY = 250;       // Salva checkpoint a cada N aeródromos processados
 
@@ -337,15 +337,63 @@ async function startCrawler() {
         }));
         console.log(`   ✅ Publicado: ${R2_KEY}`);
 
-        // Upload da versão LATEST (sempre aponta para o ciclo mais recente)
+        // 1.1 Upload da versão de Staging/Quarentena (ex: rotaer/cycles/2610/rotaer_2610_snapshot.json)
+        const R2_KEY_VERSIONED = `rotaer/cycles/${next.cycle}/rotaer_${next.cycle}_snapshot.json`;
         await s3.send(new PutObjectCommand({
             Bucket: BUCKET_NAME,
-            Key: R2_KEY_LATEST,
+            Key: R2_KEY_VERSIONED,
             Body: snapshot,
             ContentType: 'application/json',
-            CacheControl: 'public, max-age=86400' // 1 dia (pode ser atualizado)
+            CacheControl: 'public, max-age=2419200'
         }));
-        console.log(`   ✅ Publicado: ${R2_KEY_LATEST}`);
+        console.log(`   ✅ Publicado (Staging / Quarentena): ${R2_KEY_VERSIONED}`);
+
+        // 🛡️ BLINDAGEM DE PRODUÇÃO (DOUTRINA NAVDATA):
+        // Se a data do ciclo for futura em relação a hoje, mantém em quarentena sem sobrescrever latest!
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const cycleDate = new Date(next.date);
+        cycleDate.setHours(0, 0, 0, 0);
+        const isFutureCycle = cycleDate.getTime() > today.getTime();
+
+        if (isFutureCycle) {
+            console.log(`\n🛡️  TRAVA DE SEGURANÇA ATIVA (PADRÃO NAVDATA):`);
+            console.log(`   O Ciclo ${next.cycle} é FUTURO (Vigência em ${next.dateStr}).`);
+            console.log(`   O snapshot foi gravado com sucesso na QUARENTENA DE STAGING.`);
+            console.log(`   🛑 O arquivo 'rotaer_snapshot_latest.json' segue 100% PROTEGIDO em produção.`);
+            console.log(`   A promoção ocorrerá na data oficial de vigência via Dashboard / Edge Function.`);
+        } else {
+            // Se for ciclo já vigente hoje (ex: reprocessamento corretivo), atualiza produção
+            await s3.send(new PutObjectCommand({
+                Bucket: BUCKET_NAME,
+                Key: R2_KEY_LATEST,
+                Body: snapshot,
+                ContentType: 'application/json',
+                CacheControl: 'public, max-age=86400'
+            }));
+            console.log(`   ✅ Publicado em Produção Oficial: ${R2_KEY_LATEST}`);
+        }
+
+        // Salva telemetria operacional em rotaer/telemetry.json
+        const telemetry = JSON.stringify({
+            status: 'completed',
+            airac_cycle: next.cycle,
+            airac_effective_date: next.dateStr,
+            total_collected: Object.keys(results).length,
+            failures: failCount,
+            is_staging: isFutureCycle,
+            versioned_path: R2_KEY_VERSIONED,
+            updated_at: new Date().toISOString()
+        }, null, 2);
+
+        await s3.send(new PutObjectCommand({
+            Bucket: BUCKET_NAME,
+            Key: 'rotaer/telemetry.json',
+            Body: telemetry,
+            ContentType: 'application/json',
+            CacheControl: 'no-cache, no-store, must-revalidate'
+        }));
+        console.log(`   📡 Telemetria ROTAER gravada no R2: rotaer/telemetry.json`);
 
         // 🗑️ Deleta checkpoint — processamento 100% completo
         await deleteCheckpointFromR2(next.cycle);
