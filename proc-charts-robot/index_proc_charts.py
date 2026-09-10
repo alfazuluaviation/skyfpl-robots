@@ -35,13 +35,14 @@ logging.basicConfig(
 log = logging.getLogger('SuperRobo')
 
 # ─── Configurações ────────────────────────────────────────────────────────────
-SUPABASE_URL              = os.environ.get('SUPABASE_URL', '').rstrip('/')
-SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+SUPABASE_URL              = (os.environ.get('SUPABASE_URL') or 'https://gongoqjjpwphhttumdjm.supabase.co').rstrip('/')
+SUPABASE_ANON_KEY         = os.environ.get('SUPABASE_ANON_KEY') or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvbmdvcWpqcHdwaGh0dHVtZGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTUyMDcsImV4cCI6MjA4Mjk5MTIwN30.XhdrWma90JeoQdGfeqCoXgGVnyiTZ5GXHszEHw3Ce2o'
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or SUPABASE_ANON_KEY
 TABLE_URL                 = f"{SUPABASE_URL}/rest/v1/charts_procedural"
 R2_BUCKET                 = "skyfpl-charts"
-R2_ACCESS_KEY_ID          = os.environ.get('R2_ACCESS_KEY_ID')
-R2_SECRET_ACCESS_KEY      = os.environ.get('R2_SECRET_ACCESS_KEY')
-R2_ENDPOINT               = os.environ.get('R2_ENDPOINT')
+R2_ACCESS_KEY_ID          = os.environ.get('R2_ACCESS_KEY_ID') or os.environ.get('CLOUDFLARE_R2_ACCESS_KEY_ID')
+R2_SECRET_ACCESS_KEY      = os.environ.get('R2_SECRET_ACCESS_KEY') or os.environ.get('CLOUDFLARE_R2_SECRET_ACCESS_KEY')
+R2_ENDPOINT               = os.environ.get('R2_ENDPOINT') or os.environ.get('CLOUDFLARE_R2_ENDPOINT')
 
 HEADERS_REST = {
     'Content-Type': 'application/json',

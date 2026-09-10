@@ -65,11 +65,16 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          python index_proc_charts.py \
-            ${{ github.event.inputs.icao_code != '' && format('--icao {0}', github.event.inputs.icao_code) || '' }} \
-            ${{ github.event.inputs.airac_cycle != '' && format('--airac {0}', github.event.inputs.airac_cycle) || '' }} \
-            --dry-run ${{ github.event.inputs.dry_run || 'false' }} \
-            --workers ${{ github.event.inputs.workers || '10' }}
+          ARGS=""
+          if [ -n "${{ github.event.inputs.icao_code }}" ]; then
+            ARGS="$ARGS --icao ${{ github.event.inputs.icao_code }}"
+          fi
+          if [ -n "${{ github.event.inputs.airac_cycle }}" ]; then
+            ARGS="$ARGS --airac ${{ github.event.inputs.airac_cycle }}"
+          fi
+          ARGS="$ARGS --dry-run ${{ github.event.inputs.dry_run || 'false' }} --workers ${{ github.event.inputs.workers || '10' }}"
+          echo "Executando: python index_proc_charts.py $ARGS"
+          python index_proc_charts.py $ARGS
 
       # 🚨 Notificação de Falha Crítica no Telegram & Supabase (Fallback de Infraestrutura)
       - name: 🚨 Notificar Falha Crítica no Telegram & Supabase
