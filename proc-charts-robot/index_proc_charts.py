@@ -606,6 +606,73 @@ def fetch_charts_for_icao(icao):
         log.debug(f"Fetch Fail {icao}: {e}")
         return []
 
+
+# ─── Notificações Multicanal & Webhook de Staging (Fase 2) ───────────────────
+def dispatch_staging_webhook_and_telegram(airac, total_charts, by_type, r2_path, multi_block_count, status="VALIDATED", error_diag=None, step=None):
+    """
+    Dispara Webhook de Staging para a Edge Function airac-charts-ingest e notifica o Telegram.
+    Garante redundância multicanal e alertas de emergência imediatos.
+    """
+    key_candidate = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip()
+    if not key_candidate:
+        key_candidate = (os.environ.get('SUPABASE_ANON_KEY') or '').strip()
+    if not key_candidate:
+        key_candidate = SUPABASE_ANON_KEY
+
+    if not SUPABASE_URL:
+        return
+
+    webhook_url = f"{SUPABASE_URL}/functions/v1/airac-charts-ingest"
+    wh_headers = {
+        'Authorization': f'Bearer {key_candidate}',
+        'apikey': key_candidate,
+        'Content-Type': 'application/json'
+    }
+
+    if status == "FAILED":
+        body = {
+            'status': 'FAILED',
+            'cycle': str(airac),
+            'step': step or 'Processamento de Cartas',
+            'error': error_diag or 'Erro desconhecido'
+        }
+    else:
+        body = {
+            'status': 'VALIDATED',
+            'cycle': str(airac),
+            'r2_path': r2_path,
+            'total_charts': total_charts,
+            'by_type': by_type,
+            'multi_block_count': multi_block_count
+        }
+
+    try:
+        log.info(f"📡 Enviando webhook de Staging/Telegram para {webhook_url}...")
+        res = requests.post(webhook_url, json=body, headers=wh_headers, timeout=45)
+        if res.ok:
+            log.info(f"✅ Webhook de Staging e Alerta Telegram acionados com sucesso: {res.text}")
+        else:
+            log.warning(f"⚠️ Resposta do webhook ({res.status_code}): {res.text}")
+    except Exception as e:
+        log.warning(f"⚠️ Erro ao enviar webhook para Edge Function: {e}")
+
+    # Fallback direto via Telegram Bot API caso as variáveis estejam setadas no ambiente
+    bot_token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    if bot_token and chat_id:
+        try:
+            if status == "FAILED":
+                msg = f"🔴 *ALERTA VERMELHO — Robô de Cartas*\n━━━━━━━━━━━━━━━━━━\n🛰️ *Ciclo AIRAC:* `{airac}`\n📍 *Etapa:* {step}\n⚠️ *Erro:* {error_diag}"
+            else:
+                msg = f"🗺️ *SkyFPL — Ingestão de Cartas AIRAC*\n━━━━━━━━━━━━━━━━━━\n🛰️ *Ciclo AIRAC:* `{airac}`\n📊 *Total de Cartas:* {total_charts}\n🎯 *Motor:* Multi-Block & Afim 4-Pontos\n🛡️ *Status:* VALIDATED ✅"
+            requests.post(f"https://api.telegram.org/bot{bot_token}/sendMessage", json={
+                'chat_id': chat_id,
+                'text': msg,
+                'parse_mode': 'Markdown'
+            }, timeout=10)
+        except Exception as tg_err:
+            log.debug(f"Direct Telegram skip: {tg_err}")
+
 def export_master_json(s3, airac):
     """Gera o índice mestre de todas as cartas processadas para o App."""
     all_records = []
@@ -627,12 +694,21 @@ def export_master_json(s3, airac):
         'data': all_records
     }
     content = json.dumps(payload, ensure_ascii=False, indent=2)
+    # 1. Publicação do Índice Mestre de Produção
     s3.put_object(Bucket=R2_BUCKET, Key='latest_proc_charts.json', Body=content, ContentType='application/json')
+    # 2. Publicação do Snapshot Histórico Versionado do Ciclo AIRAC
+    versioned_key = f"charts/cycles/{airac}/proc_charts_{airac}.json"
+    try:
+        s3.put_object(Bucket=R2_BUCKET, Key=versioned_key, Body=content, ContentType='application/json')
+        log.info(f"📦 Snapshot versionado publicado: {versioned_key}")
+    except Exception as ex:
+        log.warning(f"Aviso ao publicar snapshot versionado: {ex}")
     return len(content)
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main():
+    current_step = "Inicialização de Parâmetros e Credenciais"
     parser = argparse.ArgumentParser()
     parser.add_argument('--icao', help='ICAO ou lista CSV')
     parser.add_argument('--dry-run', default='False')
@@ -641,122 +717,183 @@ def main():
     args = parser.parse_args()
     
     dry_run = str(args.dry_run).lower() == 'true'
-    s3 = init_s3()
     airac = args.airac or datetime.now(timezone.utc).strftime('%y%m')
-    load_airport_arps_cache()
-    
-    # Reinicializa a telemetria global para esta execução
-    with telemetry_lock:
-        telemetry.update({
-            'status': 'Iniciando SkyFPL Robô v14.0...',
-            'current_icao': '',
-            'progress': 0,
-            'total_airports': 0,
-            'total_offered': 0,
-            'total_charts': 0,
-            'mirrored_charts': 0,
-            'failed_charts': 0,
-            'mirrored_bytes': 0,
-            'logs': [],
-            'failed_airports': [],
-            'last_processed_charts': []
-        })
-    
-    # Upload imediato da telemetria para feedback no Dashboard
-    upload_telemetry(s3, telemetry)
-    
-    def handle_stop(s, f):
-        telemetry['status'] = 'stopped'
-        upload_telemetry(s3, telemetry)
-        sys.exit(0)
-    signal.signal(signal.SIGTERM, handle_stop)
-    
-    add_telemetry_log(f"🚀 SkyFPL Robô v14.0 Iniciado | 250 DPI | AIRAC {airac}")
-    
-    icao_list = [c.strip().upper() for c in args.icao.split(',')] if args.icao else []
-    if not icao_list:
-        add_telemetry_log("🌍 Baixando malha aérea brasileira para filtragem...")
-        try:
-            r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json', timeout=30)
-            nav_data = r.json().get('data', [])
-            # Filtro: Apenas aeródromos e helipontos
-            icao_list = sorted({p['icao'] for p in nav_data if p.get('icao') and p.get('type') in ['airport', 'heliport']})
-            add_telemetry_log(f"✅ Malha filtrada: {len(icao_list)} aeródromos identificados.")
-        except Exception as e:
-            add_telemetry_log(f"❌ Erro ao baixar malha: {e}")
-            sys.exit(1)
-    
-    telemetry['total_airports'] = len(icao_list)
-    telemetry['status'] = 'in_progress'
-    
-    stop_heartbeat = threading.Event()
-    def hb():
-        while not stop_heartbeat.is_set():
-            upload_telemetry(s3, telemetry)
-            time.sleep(10)
-    threading.Thread(target=hb, daemon=True).start()
-    
-    add_telemetry_log(f"🌍 Iniciando Descoberta Paralela para {len(icao_list)} aeródromos...")
-    all_tasks = []
-    
-    # 🚀 DISCOBERTA PARALELA
-    with ThreadPoolExecutor(max_workers=args.workers * 2) as discovery_exe:
-        discovery_futures = {discovery_exe.submit(fetch_charts_for_icao, icao): icao for icao in icao_list}
-        processed_discovery = 0
-        total_to_discover = len(icao_list)
-        
-        for future in as_completed(discovery_futures):
-            icao = discovery_futures[future]
-            processed_discovery += 1
-            charts = future.result()
-            
-            if charts:
-                with telemetry_lock:
-                    telemetry['total_offered'] += len(charts)
-                for c in charts:
-                    all_tasks.append((icao, c))
-            
-            if processed_discovery % 50 == 0 or processed_discovery == total_to_discover:
-                with telemetry_lock:
-                    telemetry['status'] = f"Descobrindo: {processed_discovery}/{total_to_discover}..."
-                    telemetry['progress'] = int((processed_discovery / total_to_discover) * 20)
-                upload_telemetry(s3, telemetry)
-    
-    add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas encontradas.")
-    
-    # 🚀 PROCESSAMENTO PARALELO (Otimizado)
-    processed_count = 0
-    total_tasks = len(all_tasks)
-    
-    with ThreadPoolExecutor(max_workers=args.workers) as exe:
-        futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
-        for future in as_completed(futures):
-            icao_task = futures[future]
-            processed_count += 1
-            with telemetry_lock:
-                telemetry['current_icao'] = icao_task
-                telemetry['total_charts'] = processed_count
-                # O progresso vai de 20% a 100%
-                telemetry['progress'] = 20 + int((processed_count / total_tasks) * 80)
-        
-    stop_heartbeat.set()
-    
-    # ─── RECONCILIAÇÃO FINAL ───────────────────────────────
-    total_offered = telemetry['total_offered']
-    total_success = telemetry['mirrored_charts']
-    total_failed  = telemetry['failed_charts']
-    
-    add_telemetry_log(f"📊 Resumo: {total_success} sucessos, {total_failed} falhas.")
-    
-    add_telemetry_log("📦 Gerando Índice Mestre...")
-    if not dry_run:
-        size = export_master_json(s3, airac)
-        add_telemetry_log(f"✅ Master JSON gerado ({size} bytes).")
-    
-    telemetry['status'] = 'completed'
-    telemetry['progress'] = 100
-    add_telemetry_log(f"✅ Robô v14.0 finalizado com sucesso!")
-    upload_telemetry(s3, telemetry)
 
-if __name__ == "__main__":
-    main()
+    try:
+        current_step = "Conexão com Cloudflare R2 e Cache de ARPs"
+        s3 = init_s3()
+        load_airport_arps_cache()
+        
+        # Reinicializa a telemetria global para esta execução
+        with telemetry_lock:
+            telemetry.update({
+                'status': 'Iniciando SkyFPL Robô v14.3...',
+                'current_icao': '',
+                'progress': 0,
+                'total_airports': 0,
+                'total_offered': 0,
+                'total_charts': 0,
+                'mirrored_charts': 0,
+                'failed_charts': 0,
+                'mirrored_bytes': 0,
+                'logs': [],
+                'failed_airports': [],
+                'last_processed_charts': []
+            })
+        
+        upload_telemetry(s3, telemetry)
+        
+        def handle_stop(s, f):
+            telemetry['status'] = 'stopped'
+            upload_telemetry(s3, telemetry)
+            sys.exit(0)
+        signal.signal(signal.SIGTERM, handle_stop)
+        
+        add_telemetry_log(f"🚀 SkyFPL Robô v14.3 Iniciado | 250 DPI | AIRAC {airac}")
+        
+        current_step = "Filtragem da Malha Aérea Brasileira"
+        icao_list = [c.strip().upper() for c in args.icao.split(',')] if args.icao else []
+        if not icao_list:
+            add_telemetry_log("🌍 Baixando malha aérea brasileira para filtragem...")
+            try:
+                r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json', timeout=30)
+                nav_data = r.json().get('data', [])
+                icao_list = sorted({p['icao'] for p in nav_data if p.get('icao') and p.get('type') in ['airport', 'heliport']})
+                add_telemetry_log(f"✅ Malha filtrada: {len(icao_list)} aeródromos identificados.")
+            except Exception as e:
+                add_telemetry_log(f"❌ Erro ao baixar malha: {e}")
+                sys.exit(1)
+        
+        telemetry['total_airports'] = len(icao_list)
+        telemetry['status'] = 'in_progress'
+        
+        stop_heartbeat = threading.Event()
+        def hb():
+            while not stop_heartbeat.is_set():
+                upload_telemetry(s3, telemetry)
+                time.sleep(10)
+        threading.Thread(target=hb, daemon=True).start()
+        
+        current_step = "Descoberta de Cartas no DECEA / AISWEB"
+        add_telemetry_log(f"🌍 Iniciando Descoberta Paralela para {len(icao_list)} aeródromos...")
+        all_tasks = []
+        by_type = {'IAC': 0, 'SID': 0, 'STAR': 0, 'ADC': 0, 'PDC': 0, 'VAC': 0}
+        
+        # 🚀 DISCOBERTA PARALELA
+        with ThreadPoolExecutor(max_workers=args.workers * 2) as discovery_exe:
+            discovery_futures = {discovery_exe.submit(fetch_charts_for_icao, icao): icao for icao in icao_list}
+            processed_discovery = 0
+            total_to_discover = len(icao_list)
+            
+            for future in as_completed(discovery_futures):
+                icao = discovery_futures[future]
+                processed_discovery += 1
+                charts = future.result()
+                
+                if charts:
+                    with telemetry_lock:
+                        telemetry['total_offered'] += len(charts)
+                    for c in charts:
+                        all_tasks.append((icao, c))
+                        tipo = (c.get('tipo') or '').upper()
+                        if tipo in by_type:
+                            by_type[tipo] += 1
+                
+                if processed_discovery % 50 == 0 or processed_discovery == total_to_discover:
+                    with telemetry_lock:
+                        telemetry['status'] = f"Descobrindo: {processed_discovery}/{total_to_discover}..."
+                        telemetry['progress'] = int((processed_discovery / total_to_discover) * 20)
+                    upload_telemetry(s3, telemetry)
+        
+        add_telemetry_log(f"✅ Descoberta concluída: {len(all_tasks)} cartas encontradas.")
+        
+        # 🚀 PROCESSAMENTO PARALELO (Rasterização 250 DPI + Georreferenciamento Multi-Block)
+        current_step = "Rasterização & Georreferenciamento Multi-Bloco"
+        processed_count = 0
+        total_tasks = len(all_tasks)
+        
+        if total_tasks > 0:
+            with ThreadPoolExecutor(max_workers=args.workers) as exe:
+                futures = {exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run): t[0] for t in all_tasks}
+                for future in as_completed(futures):
+                    icao_task = futures[future]
+                    processed_count += 1
+                    with telemetry_lock:
+                        telemetry['current_icao'] = icao_task
+                        telemetry['total_charts'] = processed_count
+                        telemetry['progress'] = 20 + int((processed_count / total_tasks) * 80)
+            
+        stop_heartbeat.set()
+        
+        # ─── RECONCILIAÇÃO FINAL ───────────────────────────────
+        current_step = "Geração de Índice Mestre & Publicação R2"
+        total_offered = telemetry['total_offered']
+        total_success = telemetry['mirrored_charts']
+        total_failed  = telemetry['failed_charts']
+        
+        add_telemetry_log(f"📊 Resumo: {total_success} sucessos, {total_failed} falhas.")
+        
+        master_key = 'latest_proc_charts.json'
+        if not dry_run and total_success > 0:
+            add_telemetry_log("📦 Gerando Índice Mestre...")
+            size = export_master_json(s3, airac)
+            add_telemetry_log(f"✅ Master JSON gerado ({size} bytes).")
+        
+        telemetry['status'] = 'completed'
+        telemetry['progress'] = 100
+        add_telemetry_log(f"✅ Robô v14.3 finalizado com sucesso!")
+        upload_telemetry(s3, telemetry)
+
+        # 📡 DISPARO DO WEBHOOK DE STAGING E ALERTA TELEGRAM
+        current_step = "Disparo do Webhook de Staging e Alerta Telegram"
+        if not dry_run:
+            dispatch_staging_webhook_and_telegram(
+                airac=airac,
+                total_charts=total_success,
+                by_type=by_type,
+                r2_path=master_key,
+                multi_block_count=by_type.get('ADC', 0) + by_type.get('PDC', 0),
+                status="VALIDATED"
+            )
+
+    except Exception as critical_err:
+        # 🔴 CAPTURA GLOBAL DE FALHA & DISPARO DE ALERTA DE EMERGÊNCIA
+        err_str = str(critical_err)
+        err_type = type(critical_err).__name__
+        
+        if 'Timeout' in err_type or 'timeout' in err_str.lower():
+            friendly_diag = f"Timeout de rede na etapa '{current_step}'."
+        elif 'ClientError' in err_type or 'EndpointConnectionError' in err_type:
+            friendly_diag = f"Falha de conexão com o Cloudflare R2 durante '{current_step}'."
+        elif 'KeyError' in err_type or 'JSONDecodeError' in err_type:
+            friendly_diag = f"Incompatibilidade no formato de dados retornado na etapa '{current_step}'."
+        else:
+            friendly_diag = f"Erro inesperado ({err_type}) em '{current_step}': {err_str[:120]}"
+
+        log.error(f"🚨 [FALHA CRÍTICA] {friendly_diag}")
+        
+        with telemetry_lock:
+            telemetry['status'] = 'error'
+            telemetry['error_diagnosis'] = friendly_diag
+            telemetry['logs'].insert(0, f"🔴 FALHA CRÍTICA: {friendly_diag}")
+        
+        if s3:
+            try:
+                upload_telemetry(s3, telemetry)
+            except:
+                pass
+
+        # Disparar Alerta Vermelho no Telegram
+        dispatch_staging_webhook_and_telegram(
+            airac=airac,
+            total_charts=0,
+            by_type={},
+            r2_path='',
+            multi_block_count=0,
+            status="FAILED",
+            error_diag=friendly_diag,
+            step=current_step
+        )
+
+        raise critical_err
+

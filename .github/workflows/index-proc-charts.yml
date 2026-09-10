@@ -1,52 +1,92 @@
-name: 🤖 SkyFPL - Robô Indexador de Cartas IFR/VFR
+name: 🤖 Procedural Charts Crawler — Sincronização por Ciclo AIRAC
 
 on:
   workflow_dispatch:
     inputs:
       icao_code:
-        description: 'ICAO específico (vazio = todos)'
+        description: 'ICAO específico (ex: SBRF,SBCF ou vazio para malha total)'
         required: false
         default: ''
       airac_cycle:
-        description: 'Ciclo AIRAC (vazio = automático)'
+        description: 'Ciclo AIRAC (ex: 2609 ou vazio para automático)'
         required: false
         default: ''
       dry_run:
-        description: 'Simulação (True/False)'
+        description: 'Simulação / Auditoria sem gravar no R2/Banco?'
         required: false
-        default: 'False'
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
       workers:
-        description: 'Número de Workers (1-50)'
+        description: 'Número de Workers paralelos (1 a 30)'
         required: false
-        default: '5'
+        default: '10'
+  schedule:
+    - cron: '0 4 * * *'    # Executa diariamente às 04:00 UTC para auditoria e sync contínuo
 
 jobs:
-  index_charts:
+  index_proc_charts:
+    name: Processar Cartas de Procedimento
     runs-on: ubuntu-latest
+    timeout-minutes: 240
+    
+    concurrency:
+      group: proc-charts-sync
+      cancel-in-progress: true
+
     steps:
-      - name: Checkout do Código
+      - name: 📥 Checkout do Código
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: 🐍 Configurar Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: proc-charts-robot/requirements.txt
 
-      - name: Instalar Dependências
+      - name: 📦 Instalar Dependências
+        working-directory: proc-charts-robot
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Executar Robô Indexador
+      - name: 🗺️ Executar Robô de Cartas (V14.3 Multi-Block & Afim)
+        working-directory: proc-charts-robot
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python index_proc_charts.py \
-            --icao "${{ github.event.inputs.icao_code }}" \
-            --airac "${{ github.event.inputs.airac_cycle }}" \
-            --dry-run "${{ github.event.inputs.dry_run }}" \
-            --workers "${{ github.event.inputs.workers }}"
+            ${{ github.event.inputs.icao_code != '' && format('--icao {0}', github.event.inputs.icao_code) || '' }} \
+            ${{ github.event.inputs.airac_cycle != '' && format('--airac {0}', github.event.inputs.airac_cycle) || '' }} \
+            --dry-run ${{ github.event.inputs.dry_run || 'false' }} \
+            --workers ${{ github.event.inputs.workers || '10' }}
+
+      # 🚨 Notificação de Falha Crítica no Telegram & Supabase (Fallback de Infraestrutura)
+      - name: 🚨 Notificar Falha Crítica no Telegram & Supabase
+        if: failure() || cancelled()
+        working-directory: proc-charts-robot
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://gongoqjjpwphhttumdjm.supabase.co' }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvbmdvcWpqcHdwaGh0dHVtZGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTUyMDcsImV4cCI6MjA4Mjk5MTIwN30.XhdrWma90JeoQdGfeqCoXgGVnyiTZ5GXHszEHw3Ce2o' }}
+        run: |
+          curl -s -X POST "$SUPABASE_URL/functions/v1/airac-charts-ingest" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "FAILED",
+              "cycle": "2609",
+              "layer": "GitHub Actions Runner (Robô de Cartas)",
+              "progress": 0,
+              "error": "O executor do GitHub Actions sofreu uma interrupção inesperada ou encerramento abrupto durante o processamento de cartas."
+            }' || true
