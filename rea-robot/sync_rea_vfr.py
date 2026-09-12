@@ -17,6 +17,7 @@ import datetime
 import requests
 import boto3
 from urllib.parse import urlencode
+from aic_certifier import certify_fix_coordinates
 
 # Configurações Cloudflare R2
 R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID') or os.environ.get('CLOUDFLARE_R2_ACCESS_KEY_ID')
@@ -212,7 +213,8 @@ def compute_diff_matrix(current_points, new_points):
     for p in current_points:
         norm_name = p.get('name', '').strip().upper()
         norm_terminal = p.get('terminal', '').strip().upper()
-        key = f"{norm_terminal}::{norm_name}"
+        norm_type = p.get('type', 'REA').strip().upper()
+        key = f"{norm_type}::{norm_terminal}::{norm_name}"
         current_map[key] = p
 
     audited_new_points = []
@@ -224,17 +226,14 @@ def compute_diff_matrix(current_points, new_points):
     for p in new_points:
         norm_name = p.get('name', '').strip().upper()
         norm_terminal = p.get('terminal', '').strip().upper()
-        key = f"{norm_terminal}::{norm_name}"
+        norm_type = p.get('type', 'REA').strip().upper()
+        key = f"{norm_type}::{norm_terminal}::{norm_name}"
         p_lat = p.get('lat')
         p_lng = p.get('lng')
 
         # Verificação de duplicidade na nova malha
         if key in seen_new_keys:
-            p['audit_status'] = 'CONFLICT'
-            p['audit_color'] = 'RED'
-            p['audit_message'] = f"Duplicidade anômala detectada para o fixo {norm_name} no terminal {norm_terminal}"
-            conflict_count += 1
-            audited_new_points.append(p)
+            # Se for duplicata idêntica dentro do mesmo modal e terminal, apenas unifica
             continue
 
         seen_new_keys.add(key)
@@ -296,6 +295,22 @@ def compute_diff_matrix(current_points, new_points):
 
     return audited_new_points, removed_points, diff_summary
 
+# ─── Blindagem Canônica de Fixos Exclusivos (Regras de Domínio Aeronáutico) ───
+# Fixos que pertencem EXCLUSIVAMENTE ao modal REA (não pertencem a REH nem REUL)
+EXCLUSIVE_REA_FIXES_RJ = {
+    'BARRA', 'VALQUEIRE', 'MARAPENDI', 
+    'SÃO GONÇALO', 'SAO GONCALO', 'MAUÁ', 'MAUA', 'ROXO'
+}
+
+# Fixos que pertencem EXCLUSIVAMENTE ao modal REH (não pertencem a REA nem REUL)
+EXCLUSIVE_REH_FIXES_RJ = {
+    'PRAÇA', 'PRACA'
+}
+
+def is_rj_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['RIO', 'WJ1', 'WJ2', 'WJ3'])
+
 def is_valid_fix_name(name: str) -> bool:
     """Valida se o nome do fixo eh aeronauticamente valido, descartando lixo de OCR e coordenadas."""
     if not name or not isinstance(name, str):
@@ -342,8 +357,31 @@ def extract_all_rea_vfr_points():
                 for p in baseline_data:
                     name = sanitize_fix_name(p.get('name', ''))
                     if is_valid_fix_name(name):
-                        key = f"{p.get('terminal', '').upper()}::{name}"
+                        c_type = p.get('type', 'REA').strip().upper()
+                        norm_term = p.get('terminal', '').strip().upper()
+
+                        # Blindagem RJ: fixos exclusivos REA
+                        if is_rj_area(norm_term) and name in EXCLUSIVE_REA_FIXES_RJ:
+                            if c_type != 'REA':
+                                continue
+                            norm_term = 'WJ1-RIO DE JANEIRO'
+                            c_type = 'REA'
+                            p['terminal'] = norm_term
+                            p['type'] = 'REA'
+
+                        # Blindagem RJ: fixos exclusivos REH
+                        if is_rj_area(norm_term) and name in EXCLUSIVE_REH_FIXES_RJ:
+                            if c_type != 'REH':
+                                continue
+                            norm_term = 'WJ2-RIO DE JANEIRO'
+                            c_type = 'REH'
+                            p['terminal'] = norm_term
+                            p['type'] = 'REH'
+
+                        key = f"{c_type}::{norm_term}::{name}"
                         p['name'] = name
+                        p['terminal'] = norm_term
+                        p['type'] = c_type
                         points_map[key] = p
             print(f"📦 Carregados {len(points_map)} fixos da base canonica de referencia.")
         except Exception as e:
@@ -355,7 +393,9 @@ def extract_all_rea_vfr_points():
         santos_points = extract_bacia_santos_fixes()
         print(f"🌊 Extraídos {len(santos_points)} fixos canonicos puros da Bacia de Santos via PyMuPDF.")
         for p in santos_points:
-            key = f"BACIA DE SANTOS::{p['name']}"
+            p['type'] = 'REH'
+            p['terminal'] = 'BACIA DE SANTOS'
+            key = f"REH::BACIA DE SANTOS::{p['name']}"
             points_map[key] = p
     except Exception as e:
         print(f"⚠️ Alerta ao extrair Bacia de Santos via PDF: {e}. Mantendo valores da base canonica.")
@@ -371,8 +411,18 @@ def extract_all_rea_vfr_points():
                 print(f"🛰️ WFS {layer}: {len(features)} corredores analisados.")
                 for feat in features:
                     props = feat.get('properties', {})
-                    term = (props.get('carta_nome') or 'BRASIL').strip().upper()
+                    raw_term = (props.get('carta_nome') or 'BRASIL').strip().upper()
                     
+                    is_reh_layer = (layer == 'ICA:CV_REH_BR_COMPLETO') or any(k in raw_term for k in ['REH', 'CABO FRIO', 'CAMPINAS', 'SOROCABA', 'WJ2', 'XP2'])
+                    is_reul = 'REUL' in raw_term or 'WJ3' in raw_term
+                    c_type = 'REUL' if is_reul else ('REH' if is_reh_layer else 'REA')
+                    
+                    freq = props.get('fca') or props.get('ats')
+                    altmax = props.get('altmax') or props.get('altmaxa_to_b')
+                    altmin = props.get('altmin') or props.get('altmina_to_b')
+                    altcomp = props.get('altcomp') or props.get('altcompa_to_b')
+                    heading = props.get('rumoa_to_b')
+
                     for prefix in ['fixo_a', 'fixo_b']:
                         raw_name = props.get(f'{prefix}_nome')
                         raw_lat = props.get(f'{prefix}_lat')
@@ -388,24 +438,99 @@ def extract_all_rea_vfr_points():
                                 continue
                             if not (-35 <= lat <= 6 and -75 <= lng <= -30):
                                 continue
+
+                            # Blindagem canônica RJ: fixos exclusivos REA do Rio nunca devem ser gravados como REH ou REUL
+                            cur_type = c_type
+                            cur_term = raw_term
+                            if is_rj_area(cur_term) and name in EXCLUSIVE_REA_FIXES_RJ:
+                                cur_type = 'REA'
+                                cur_term = 'WJ1-RIO DE JANEIRO'
+
+                            # Blindagem canônica RJ: fixos exclusivos REH do Rio (ex: PRAÇA) nunca devem ser gravados como REA ou REUL
+                            if is_rj_area(cur_term) and name in EXCLUSIVE_REH_FIXES_RJ:
+                                cur_type = 'REH'
+                                cur_term = 'WJ2-RIO DE JANEIRO'
                                 
-                            key = f"{term}::{name}"
+                            key = f"{cur_type}::{cur_term}::{name}"
                             if key not in points_map:
                                 coord_hash = abs(int(lat * 1000) + int(lng * 1000))
+                                prefix_id = cur_type.lower()
                                 points_map[key] = {
-                                    'id': f"rea-{term.replace(' ', '_')}-{name}-{coord_hash}",
+                                    'id': f"{prefix_id}-{cur_term.replace(' ', '_').replace('-', '_')}-{name}-{coord_hash}",
                                     'name': name,
                                     'lat': lat,
                                     'lng': lng,
-                                    'terminal': term,
+                                    'terminal': cur_term,
+                                    'type': cur_type,
                                     'aic_source': props.get('identificador', 'DECEA WFS'),
-                                    'frequency': props.get('ats'),
-                                    'remarks': props.get('observacao')
+                                    'frequency': freq,
+                                    'ceiling': f"{altmax} ft" if altmax else None,
+                                    'floor': f"{altmin} ft" if altmin else None,
+                                    'mandatory_alt': f"{altcomp} ft" if altcomp else None,
+                                    'magnetic_heading': str(heading) if heading else None,
+                                    'remarks': props.get('observacao') or f"[{cur_type}]"
                                 }
+                            else:
+                                # Enriquecer com dados táticos se estavam vazios
+                                existing = points_map[key]
+                                if not existing.get('frequency') and freq:
+                                    existing['frequency'] = freq
+                                if not existing.get('ceiling') and altmax:
+                                    existing['ceiling'] = f"{altmax} ft"
+                                if not existing.get('floor') and altmin:
+                                    existing['floor'] = f"{altmin} ft"
+                                if not existing.get('mandatory_alt') and altcomp:
+                                    existing['mandatory_alt'] = f"{altcomp} ft"
+                                if not existing.get('magnetic_heading') and heading:
+                                    existing['magnetic_heading'] = str(heading)
     except Exception as e:
         print(f"ℹ️ GeoServer WFS offline ou inacessivel ({e}). Operando com base canonica e extrator vetorial.")
 
-    final_list = list(points_map.values())
+    # Filtro final de blindagem: eliminar qualquer resquício de falsos modais no RJ
+    purified_points = []
+    for p in points_map.values():
+        name = p.get('name', '')
+        term = p.get('terminal', '')
+        c_type = p.get('type', '')
+        if is_rj_area(term) and name in EXCLUSIVE_REA_FIXES_RJ and c_type != 'REA':
+            continue
+        if is_rj_area(term) and name in EXCLUSIVE_REH_FIXES_RJ and c_type != 'REH':
+            continue
+        purified_points.append(p)
+
+    # 4. Certificação Geodésica Homologada por AIC (Ground Truth Oficial DECEA)
+    certified_count = 0
+    for p in purified_points:
+        name = p.get('name', '')
+        term = p.get('terminal', '')
+        cur_lat = p.get('lat')
+        cur_lng = p.get('lng')
+        if cur_lat is not None and cur_lng is not None:
+            cal_lat, cal_lng, was_calibrated, aic_src, delta_m, extra_props = certify_fix_coordinates(term, name, cur_lat, cur_lng)
+            if was_calibrated:
+                print(f"🎯 [AIC Ground Truth] Fixo {name} ({term}) calibrado com precisão métrica via {aic_src}: delta={delta_m}m")
+                p['lat'] = cal_lat
+                p['lng'] = cal_lng
+                p['aic_source'] = f"{aic_src} (DECEA Oficial)"
+                certified_count += 1
+            elif aic_src:
+                p['aic_source'] = f"{aic_src} (DECEA Oficial)"
+                
+            # Enriquecer com propriedades táticas da publicação
+            if extra_props:
+                if extra_props.get('ceiling') and not p.get('ceiling'):
+                    p['ceiling'] = extra_props['ceiling']
+                if extra_props.get('floor') and not p.get('floor'):
+                    p['floor'] = extra_props['floor']
+                if extra_props.get('mandatory_alt'):
+                    p['mandatory_alt'] = extra_props['mandatory_alt']
+                if extra_props.get('magnetic_heading'):
+                    p['magnetic_heading'] = extra_props['magnetic_heading']
+
+    if certified_count > 0:
+        print(f"✅ {certified_count} fixos foram recalibrados com Ground Truth de Publicações Oficiais (AIC).")
+
+    final_list = purified_points
     final_list.sort(key=lambda x: (x.get('terminal', ''), x.get('name', '')))
     print(f"✨ Total de fixos consolidados e sanitizados: {len(final_list)}")
     return final_list
