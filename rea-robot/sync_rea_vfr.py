@@ -170,10 +170,18 @@ def calculate_airac_cycle(target_date=None):
         'is_staging': is_staging
     }
 
-def is_cycle_already_published(s3, cycle_id):
+def is_cycle_already_published(s3, cycle_id, is_staging=False):
     """Verifica no Cloudflare R2 se a malha já foi consolidada e publicada."""
     if not s3:
         return False
+    # Em produção operacional (não staging), verifica se o arquivo latest_rea_vfr.json existe
+    if not is_staging:
+        try:
+            s3.head_object(Bucket=R2_BUCKET, Key='rea_vfr/latest_rea_vfr.json')
+        except Exception:
+            return False
+
+    # Verifica também a chave versionada
     key = f"rea_vfr/cycles/{cycle_id}/rea_vfr_{cycle_id}.json"
     try:
         s3.head_object(Bucket=R2_BUCKET, Key=key)
@@ -467,7 +475,7 @@ def main():
     update_telemetry(s3, telemetry)
 
     # 🛡️ Trava de Idempotência
-    if not is_forced and not args.dry_run and not args.publish_prod and is_cycle_already_published(s3, airac['cycle']):
+    if not is_forced and not args.dry_run and not args.publish_prod and is_cycle_already_published(s3, airac['cycle'], is_staging=airac['is_staging']):
         print(f"🛡️ TRAVA DE IDEMPOTÊNCIA ATIVA: Ciclo {airac['cycle']} já consolidado em {versioned_key}.")
         telemetry['status'] = 'completed'
         telemetry['global_progress'] = 100

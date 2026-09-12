@@ -1,6 +1,9 @@
 name: 🤖 REA/REH/REUL Crawler — Sincronização por Ciclo AIRAC
 
 on:
+  push:
+    paths:
+      - 'rea-robot/**'
   workflow_dispatch:
     inputs:
       force_run:
