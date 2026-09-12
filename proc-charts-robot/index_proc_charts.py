@@ -674,6 +674,68 @@ def dispatch_staging_webhook_and_telegram(airac, total_charts, by_type, r2_path,
         except Exception as tg_err:
             log.debug(f"Direct Telegram skip: {tg_err}")
 
+
+def purge_legacy_cycles(s3, current_cycle: str, keep_previous: int = 1):
+    """
+    🧹 Purge Automático de Ciclos Legados no Cloudflare R2
+    Mantém apenas:
+      1. O Ciclo Atual/Novo (ex: 2609 ou 2610)
+      2. O Ciclo Anterior de Segurança (ex: 2608 ou 2609)
+    Todos os ciclos mais antigos (< ciclo_atual - keep_previous) são deletados do R2 em lotes de 1.000.
+    """
+    if not s3: return
+    try:
+        log.info(f"🧹 Varredura de ciclos legados no R2 (Mantendo atual {current_cycle} + {keep_previous} anterior)...")
+        paginator = s3.get_paginator('list_objects_v2')
+        
+        # 1. Lista as pastas existentes em 'procedural/charts/'
+        result = s3.list_objects_v2(Bucket=R2_BUCKET, Prefix='procedural/charts/', Delimiter='/')
+        common_prefixes = result.get('CommonPrefixes', [])
+        
+        found_cycles = []
+        for p_obj in common_prefixes:
+            parts = p_obj.get('Prefix', '').strip('/').split('/')
+            if len(parts) >= 3 and parts[2].isdigit():
+                found_cycles.append(parts[2])
+                
+        found_cycles = sorted(list(set(found_cycles)))
+        log.info(f"📁 Ciclos detectados no R2: {found_cycles}")
+        if not found_cycles: return
+            
+        # 2. Define os ciclos a preservar (Atual + N anteriores)
+        cycles_to_keep = {str(current_cycle)}
+        smaller_cycles = [c for c in found_cycles if int(c) < int(current_cycle)]
+        if smaller_cycles:
+            for prev in smaller_cycles[-keep_previous:]:
+                cycles_to_keep.add(prev)
+                
+        cycles_to_delete = [c for c in found_cycles if c not in cycles_to_keep]
+        
+        if not cycles_to_delete:
+            log.info(f"✅ Nenhum ciclo legado pendente de limpeza. Mantidos: {sorted(list(cycles_to_keep))}")
+            return
+            
+        log.info(f"🗑️ Ciclos legados a expurgar do R2: {cycles_to_delete}")
+        
+        # 3. Expurgo em massa via delete_objects
+        total_deleted = 0
+        for legacy_cycle in cycles_to_delete:
+            cycle_prefix = f"procedural/charts/{legacy_cycle}/"
+            for page in paginator.paginate(Bucket=R2_BUCKET, Prefix=cycle_prefix):
+                objects = page.get('Contents', [])
+                if not objects: continue
+                delete_keys = [{'Key': obj['Key']} for obj in objects]
+                s3.delete_objects(Bucket=R2_BUCKET, Delete={'Objects': delete_keys})
+                total_deleted += len(delete_keys)
+                log.info(f"   -> Removidos {len(delete_keys)} arquivos de {cycle_prefix}")
+                
+        msg = f"🧹 Purge automático: {total_deleted} arquivos dos ciclos {cycles_to_delete} deletados com sucesso! Espaço liberado no R2."
+        log.info(f"✅ {msg}")
+        add_telemetry_log(f"✅ {msg}")
+        
+    except Exception as e:
+        log.warning(f"⚠️ Aviso no expurgo de ciclos legados: {e}")
+
 def export_master_json(s3, airac):
     """Gera o índice mestre de todas as cartas processadas para o App."""
     all_records = []
@@ -839,6 +901,10 @@ def main():
             add_telemetry_log("📦 Gerando Índice Mestre...")
             size = export_master_json(s3, airac)
             add_telemetry_log(f"✅ Master JSON gerado ({size} bytes).")
+            
+            # 🧹 PURGE AUTOMÁTICO DE CICLOS LEGADOS (< ciclo_atual - 1)
+            add_telemetry_log("🧹 Executando Purge Automático de ciclos legados no R2...")
+            purge_legacy_cycles(s3, current_cycle=airac, keep_previous=1)
         
         telemetry['status'] = 'completed'
         telemetry['progress'] = 100
