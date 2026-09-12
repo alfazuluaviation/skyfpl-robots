@@ -23,6 +23,14 @@ on:
         description: 'Ciclo AIRAC específico (opcional, ex: 2609)'
         required: false
         default: ''
+      publish_prod:
+        description: '🚀 Publicar malha diretamente em Produção (latest_rea_vfr.json)?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
   schedule:
     - cron: '0 4 * * *'    # Executa diariamente às 04:00 UTC
 
@@ -73,5 +81,8 @@ jobs:
         fi
         if [ -n "${{ github.event.inputs.cycle }}" ]; then
           ARGS="$ARGS --cycle ${{ github.event.inputs.cycle }}"
+        fi
+        if [ "${{ github.event.inputs.publish_prod }}" == "true" ]; then
+          ARGS="$ARGS --publish-prod"
         fi
         python sync_rea_vfr.py $ARGS

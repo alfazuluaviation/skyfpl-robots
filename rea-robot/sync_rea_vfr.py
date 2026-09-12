@@ -439,6 +439,7 @@ def main():
     parser.add_argument("--force", action="store_true", help="Force run ignoring idempotency")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without uploading")
     parser.add_argument("--sync-db", action="store_true", help="Directly sync to Supabase rea_vfr_points")
+    parser.add_argument("--publish-prod", action="store_true", help="Publish official production mesh to rea_vfr/latest_rea_vfr.json")
     args = parser.parse_args()
 
     s3 = init_s3()
@@ -466,7 +467,7 @@ def main():
     update_telemetry(s3, telemetry)
 
     # 🛡️ Trava de Idempotência
-    if not is_forced and not args.dry_run and is_cycle_already_published(s3, airac['cycle']):
+    if not is_forced and not args.dry_run and not args.publish_prod and is_cycle_already_published(s3, airac['cycle']):
         print(f"🛡️ TRAVA DE IDEMPOTÊNCIA ATIVA: Ciclo {airac['cycle']} já consolidado em {versioned_key}.")
         telemetry['status'] = 'completed'
         telemetry['global_progress'] = 100
@@ -531,8 +532,20 @@ def main():
             ContentType='application/json',
             CacheControl='no-cache'
         )
-        print(f"📦 Payload de Staging gravado com sucesso em: {versioned_key}")
-        telemetry['logs'].insert(0, f"[{now_brt.strftime('%H:%M:%S')}] 📦 Staging salvo no R2: {versioned_key} (Produção intocada).")
+        print(f"📦 Payload versionado gravado com sucesso em: {versioned_key}")
+        telemetry['logs'].insert(0, f"[{now_brt.strftime('%H:%M:%S')}] 📦 Snapshot versionado salvo no R2: {versioned_key}.")
+
+        # 🚀 Publicação Oficial da Malha de Produção (Ciclo ativo vigente ou forçado via --publish-prod)
+        if not airac['is_staging'] or args.publish_prod:
+            s3.put_object(
+                Bucket=R2_BUCKET,
+                Key='rea_vfr/latest_rea_vfr.json',
+                Body=payload_bytes,
+                ContentType='application/json',
+                CacheControl='public, max-age=300'
+            )
+            print(f"🚀 Malha Oficial de Produção publicada em: rea_vfr/latest_rea_vfr.json")
+            telemetry['logs'].insert(0, f"[{now_brt.strftime('%H:%M:%S')}] 🚀 Produção oficial atualizada no R2: rea_vfr/latest_rea_vfr.json.")
 
         # Disparo do Webhook de Homologação e Alerta Telegram
         try:
