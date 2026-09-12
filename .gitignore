@@ -29,6 +29,7 @@ ENV/
 *.sqlite
 *.geojson
 *.log
+*.pdf
 temp/
 aixm_temp.zip
 latest_navdata.json

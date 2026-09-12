@@ -288,11 +288,157 @@ def compute_diff_matrix(current_points, new_points):
 
     return audited_new_points, removed_points, diff_summary
 
+def is_valid_fix_name(name: str) -> bool:
+    """Valida se o nome do fixo eh aeronauticamente valido, descartando lixo de OCR e coordenadas."""
+    if not name or not isinstance(name, str):
+        return False
+    clean = name.strip()
+    if len(clean) < 2:
+        return False
+    # Numeros puros (ex: 98, 71151, 69551)
+    if clean.isdigit():
+        return False
+    # Coordenadas geograficas no nome (ex: S25 33,80, W49 14,73)
+    if re.search(r'[SW]\s*\d{2}\s*[\d.,]+', clean, re.IGNORECASE):
+        return False
+    # Termos e rotulos espurios
+    upper = clean.upper()
+    if upper in {'COORD', 'POSIÇÃO', 'POSICAO', 'PORTÃO', 'PORTAO', 'PONTO', 'FIXO', 'LIMITE', 'SETOR'}:
+        return False
+    # Instrucoes de altitude e restricoes de voo capturadas indevidamente
+    if any(k in upper for k in ['ALTITUDE', 'MÁXIMA', 'MAXIMA', 'MINIMA', 'MÍNIMA', 'FL0', 'FL1', 'VFR']):
+        return False
+    return True
+
+def sanitize_fix_name(name: str) -> str:
+    """Padroniza e limpa prefixos espurios do nome do fixo."""
+    clean = name.strip().strip('"\'')
+    clean = re.sub(r'^(FIXO|POSIÇÃO|POSICAO|PORTÃO|PORTAO)\s+', '', clean, flags=re.IGNORECASE)
+    return clean.strip().upper()
+
+def extract_all_rea_vfr_points():
+    """
+    Executa a extracao canonica completa da malha REA/REH/REUL do Brasil:
+    1. Base canonica consolidada (1.089 fixos oficiais limpos)
+    2. Extracao vetorial direta da REH Bacia de Santos via PyMuPDF (105 fixos puros)
+    3. Consulta ao GeoServer DECEA WFS (ICA:CV_REA_BR_COMPLETO e ICA:CV_REH_BR_COMPLETO) com blindagem de nomes
+    """
+    points_map = {}
+    
+    # 1. Carregar a base canonica consolidada de referencia
+    baseline_path = os.path.join(os.path.dirname(__file__), 'canonical_fixes_baseline.json')
+    if os.path.exists(baseline_path):
+        try:
+            with open(baseline_path, 'r', encoding='utf-8') as f:
+                baseline_data = json.load(f)
+                for p in baseline_data:
+                    name = sanitize_fix_name(p.get('name', ''))
+                    if is_valid_fix_name(name):
+                        key = f"{p.get('terminal', '').upper()}::{name}"
+                        p['name'] = name
+                        points_map[key] = p
+            print(f"📦 Carregados {len(points_map)} fixos da base canonica de referencia.")
+        except Exception as e:
+            print(f"⚠️ Falha ao ler canonical_fixes_baseline.json: {e}")
+
+    # 2. Extrair fixos oficiais da REH Bacia de Santos via PDF vetorial
+    try:
+        from santos_extractor import extract_bacia_santos_fixes
+        santos_points = extract_bacia_santos_fixes()
+        print(f"🌊 Extraídos {len(santos_points)} fixos canonicos puros da Bacia de Santos via PyMuPDF.")
+        for p in santos_points:
+            key = f"BACIA DE SANTOS::{p['name']}"
+            points_map[key] = p
+    except Exception as e:
+        print(f"⚠️ Alerta ao extrair Bacia de Santos via PDF: {e}. Mantendo valores da base canonica.")
+
+    # 3. Consultar DECEA GeoServer WFS para capturar novidades das cartas publicadas
+    try:
+        wfs_headers = {'User-Agent': 'SkyFPL-Bot/1.0'}
+        for layer in ['ICA:CV_REA_BR_COMPLETO', 'ICA:CV_REH_BR_COMPLETO']:
+            url = f"{WFS_URL}?service=WFS&version=1.0.0&request=GetFeature&typeName={layer}&outputFormat=application/json"
+            resp = requests.get(url, headers=wfs_headers, timeout=25)
+            if resp.status_code == 200:
+                features = resp.json().get('features', [])
+                print(f"🛰️ WFS {layer}: {len(features)} corredores analisados.")
+                for feat in features:
+                    props = feat.get('properties', {})
+                    term = (props.get('carta_nome') or 'BRASIL').strip().upper()
+                    
+                    for prefix in ['fixo_a', 'fixo_b']:
+                        raw_name = props.get(f'{prefix}_nome')
+                        raw_lat = props.get(f'{prefix}_lat')
+                        raw_lon = props.get(f'{prefix}_lon')
+                        if raw_name and raw_lat is not None and raw_lon is not None:
+                            name = sanitize_fix_name(str(raw_name))
+                            if not is_valid_fix_name(name):
+                                continue
+                            try:
+                                lat = float(raw_lat)
+                                lng = float(raw_lon)
+                            except (ValueError, TypeError):
+                                continue
+                            if not (-35 <= lat <= 6 and -75 <= lng <= -30):
+                                continue
+                                
+                            key = f"{term}::{name}"
+                            if key not in points_map:
+                                coord_hash = abs(int(lat * 1000) + int(lng * 1000))
+                                points_map[key] = {
+                                    'id': f"rea-{term.replace(' ', '_')}-{name}-{coord_hash}",
+                                    'name': name,
+                                    'lat': lat,
+                                    'lng': lng,
+                                    'terminal': term,
+                                    'aic_source': props.get('identificador', 'DECEA WFS'),
+                                    'frequency': props.get('ats'),
+                                    'remarks': props.get('observacao')
+                                }
+    except Exception as e:
+        print(f"ℹ️ GeoServer WFS offline ou inacessivel ({e}). Operando com base canonica e extrator vetorial.")
+
+    final_list = list(points_map.values())
+    final_list.sort(key=lambda x: (x.get('terminal', ''), x.get('name', '')))
+    print(f"✨ Total de fixos consolidados e sanitizados: {len(final_list)}")
+    return final_list
+
+def sync_points_to_supabase(points: list):
+    """Sincroniza os pontos canonicos diretamente para a tabela rea_vfr_points via Edge Function sync-rea-vfr."""
+    key = (os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or '').strip() or (os.environ.get('SUPABASE_ANON_KEY') or '').strip() or SUPABASE_ANON_KEY
+    if not SUPABASE_URL or not key:
+        print("⚠️ SUPABASE_URL ou Chave ausente. Sincronizacao com BD ignorada.")
+        return False
+        
+    url = f"{SUPABASE_URL}/functions/v1/sync-rea-vfr"
+    headers = {
+        'Authorization': f'Bearer {key}',
+        'apikey': key,
+        'Content-Type': 'application/json'
+    }
+    
+    print(f"🚀 Sincronizando {len(points)} fixos com Supabase rea_vfr_points...")
+    total_upserted = 0
+    batch_size = 50
+    for i in range(0, len(points), batch_size):
+        batch = points[i:i + batch_size]
+        try:
+            res = requests.post(url, json={'points': batch}, headers=headers, timeout=30)
+            if res.status_code in (200, 201):
+                total_upserted += len(batch)
+            else:
+                print(f"⚠️ Batch {i//batch_size + 1} falhou: {res.status_code} {res.text}")
+        except Exception as e:
+            print(f"⚠️ Erro ao enviar batch {i//batch_size + 1}: {e}")
+            
+    print(f"✅ Concluida sincronizacao com Supabase: {total_upserted}/{len(points)} fixos atualizados.")
+    return True
+
 def main():
     parser = argparse.ArgumentParser(description="Autonomous REA / REH / REUL Hybrid Robot")
     parser.add_argument("--cycle", type=str, default=None, help="Force specific AIRAC cycle")
     parser.add_argument("--force", action="store_true", help="Force run ignoring idempotency")
     parser.add_argument("--dry-run", action="store_true", help="Simulate without uploading")
+    parser.add_argument("--sync-db", action="store_true", help="Directly sync to Supabase rea_vfr_points")
     args = parser.parse_args()
 
     s3 = init_s3()
@@ -344,12 +490,8 @@ def main():
     except Exception as e:
         print(f"Malha anterior não encontrada no R2 ({e}). Utilizando baseline vazio.")
 
-    # Simulação da extração canônica (360 fixos canônicos)
-    canonical_json_path = os.path.join(os.path.dirname(__file__), 'canonical_fixes_baseline.json')
-    extracted_points = []
-    if os.path.exists(canonical_json_path):
-        with open(canonical_json_path, 'r', encoding='utf-8') as f:
-            extracted_points = json.load(f)
+    # Extração canônica consolidada (WFS + PDF Vetorial Bacia de Santos + Baseline)
+    extracted_points = extract_all_rea_vfr_points()
 
     telemetry['global_progress'] = 60
     telemetry['logs'].insert(0, f"[{now_brt.strftime('%H:%M:%S')}] 🔬 Executando conciliação diferencial contra produção ativa...")
@@ -415,6 +557,10 @@ def main():
                 telemetry['logs'].insert(0, f"[{now_brt.strftime('%H:%M:%S')}] 📱 Alerta Telegram com detalhamento de cores despachado.")
         except Exception as wh_err:
             print(f"⚠️ Falha ao despachar webhook: {wh_err}")
+
+    if args.sync_db:
+        print("📥 Flag --sync-db detectada. Sincronizando fixos diretamente com a base de dados...")
+        sync_points_to_supabase(audited_points)
 
     telemetry['status'] = 'completed'
     telemetry['global_progress'] = 100
