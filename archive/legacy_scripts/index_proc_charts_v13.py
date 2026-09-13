@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""
+SkyFPL - Super Robô de Cartas (Versão 13.0 - Unified Pipeline)
+============================================================
+Indexação, Conversão (250 DPI), Extração GeoPDF (ICA 96-1) e Upload R2.
+"""
+
+import os
+import sys
+import json
+import time
+import argparse
+import logging
+import requests
+import boto3
+import signal
+import threading
+import re
+import socket
+import fitz  # PyMuPDF
+from io import BytesIO
+from PIL import Image
+from botocore.config import Config
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
+
+# Nuclear Timeout
+socket.setdefaulttimeout(30)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S'
+)
+log = logging.getLogger('SuperRobo')
+
+# ─── Configurações ────────────────────────────────────────────────────────────
+SUPABASE_URL              = os.environ.get('SUPABASE_URL', '').rstrip('/')
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY', '')
+TABLE_URL                 = f"{SUPABASE_URL}/rest/v1/charts_procedural"
+R2_BUCKET                 = "skyfpl-charts"
+R2_ACCESS_KEY_ID          = os.environ.get('R2_ACCESS_KEY_ID')
+R2_SECRET_ACCESS_KEY      = os.environ.get('R2_SECRET_ACCESS_KEY')
+R2_ENDPOINT               = os.environ.get('R2_ENDPOINT')
+
+HEADERS_REST = {
+    'Content-Type': 'application/json',
+    'Authorization': f'Bearer {SUPABASE_SERVICE_ROLE_KEY}',
+    'apikey': SUPABASE_SERVICE_ROLE_KEY,
+    'Prefer': 'resolution=merge-duplicates',
+}
+
+# ─── Gerenciamento de Telemetria ──────────────────────────────────────────────
+telemetry_lock = threading.Lock()
+telemetry = {
+    'status': 'initializing',
+    'current_icao': '',
+    'progress': 0,
+    'total_airports': 0,
+    'total_offered': 0,
+    'total_charts': 0,
+    'mirrored_charts': 0,
+    'mirrored_bytes': 0,
+    'logs': [],
+    'failed_airports': [],
+    'last_processed_charts': []
+}
+
+def upload_telemetry(s3, snapshot):
+    if not s3: return
+    try:
+        snapshot['updated_at'] = time.time()
+        r2_key = "procedural/telemetry.json"
+        s3.put_object(
+            Bucket=R2_BUCKET,
+            Key=r2_key,
+            Body=json.dumps(snapshot, ensure_ascii=False).encode('utf-8'),
+            ContentType='application/json'
+        )
+    except Exception as e:
+        log.error(f"❌ Erro telemetria: {e}")
+
+def add_telemetry_log(message):
+    log.info(message)
+    with telemetry_lock:
+        telemetry['logs'].insert(0, f"[{datetime.now().strftime('%H:%M:%S')}] {message}")
+        if len(telemetry['logs']) > 20: telemetry['logs'] = telemetry['logs'][:20]
+
+# ─── Motor de Geografia e Imagem (ICA 96-1) ──────────────────────────────────
+
+def extract_georef(doc, page):
+    """Extrai detecção de Viewport para calibração futura."""
+    try:
+        keys = doc.xref_get_keys(page.xref)
+        if "VP" in keys: return {"type": "GeoPDF_VP", "status": "detected"}
+        if "WGS 84" in page.get_text().upper(): return {"type": "TEXT_HINT", "status": "detected"}
+    except: pass
+    return None
+
+def process_pdf_to_jpg(pdf_content):
+    """Converte PDF para JPEG 250 DPI de alta fidelidade."""
+    try:
+        doc = fitz.open(stream=pdf_content, filetype="pdf")
+        page = doc[0]
+        geo_data = extract_georef(doc, page)
+        
+        zoom = 250 / 72
+        mat = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        
+        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+        buffer = BytesIO()
+        # subsampling=0 (4:4:4) garante nitidez em textos finos (ICA 96-1)
+        img.save(buffer, format="JPEG", quality=90, optimize=True, progressive=True, subsampling=0)
+        
+        meta = {"w": pix.width, "h": pix.height, "dpi": 250, "geo": geo_data}
+        doc.close()
+        return buffer.getvalue(), meta
+    except Exception as e:
+        log.error(f"Erro processamento: {e}")
+        return None, None
+
+# ─── Infraestrutura R2 ───────────────────────────────────────────────────────
+
+def init_s3():
+    if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]): return None
+    config = Config(connect_timeout=10, read_timeout=20, retries={'max_attempts': 2})
+    return boto3.client('s3', endpoint_url=R2_ENDPOINT, aws_access_key_id=R2_ACCESS_KEY_ID,
+                        aws_secret_access_key=R2_SECRET_ACCESS_KEY, region_name='auto', config=config)
+
+def upload_to_r2(s3, key, body, content_type):
+    try:
+        s3.put_object(Bucket=R2_BUCKET, Key=key, Body=body, ContentType=content_type)
+        return f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{key}"
+    except: return None
+
+# ─── Lógica de Processamento ─────────────────────────────────────────────────
+
+def process_single_chart(s3, icao, chart, airac, dry_run):
+    name = chart.get('nome', 'CARTA')
+    tipo = chart.get('tipo', 'UNKN')
+    url_decea = chart.get('link', '')
+    if not url_decea or dry_run: return 0
+    
+    clean_name = re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_').upper()
+    base_path = f"procedural/charts/{airac}/{icao}"
+    
+    try:
+        resp = requests.get(url_decea, timeout=30)
+        if not resp.ok: return 0
+        pdf_bytes = resp.content
+        
+        jpg_bytes, meta = process_pdf_to_jpg(pdf_bytes)
+        
+        url_pdf = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.pdf", pdf_bytes, 'application/pdf')
+        url_jpg = upload_to_r2(s3, f"{base_path}/{tipo}_{clean_name}.jpg", jpg_bytes, 'image/jpeg') if jpg_bytes else None
+        
+        record = {
+            'icao': icao, 'tipo': tipo, 'nome_procedimento': name, 'url_decea': url_decea,
+            'url_r2': url_pdf, 'url_r2_jpg': url_jpg, 'airac_cycle': airac,
+            'data_carta': chart.get('dt', ''), 'metadata_geo': meta, 'source': 'super-robo-v13'
+        }
+        
+        requests.post(f"{TABLE_URL}?on_conflict=icao,tipo,nome_procedimento", json=[record], headers=HEADERS_REST, timeout=20)
+        
+        with telemetry_lock:
+            telemetry['mirrored_charts'] += 1
+            telemetry['mirrored_bytes'] += len(pdf_bytes) + (len(jpg_bytes) if jpg_bytes else 0)
+            telemetry['last_processed_charts'].insert(0, {'icao': icao, 'name': name, 'url': url_jpg or url_pdf, 'at': datetime.now().strftime('%H:%M:%S')})
+            if len(telemetry['last_processed_charts']) > 5: telemetry['last_processed_charts'].pop()
+            
+        return 1
+    except Exception as e:
+        log.error(f"Erro {icao} - {name}: {e}")
+        return 0
+
+def fetch_charts_for_icao(icao):
+    url = f"{SUPABASE_URL}/functions/v1/fetch-charts"
+    try:
+        r = requests.post(url, json={'icaoCode': icao}, headers=HEADERS_REST, timeout=30)
+        return r.json().get('charts', []) if r.ok else []
+    except: return []
+
+def export_master_json(s3, airac):
+    all_records = []
+    offset = 0
+    while True:
+        r = requests.get(f"{TABLE_URL}?select=*&limit=1000&offset={offset}", headers=HEADERS_REST, timeout=60)
+        data = r.json()
+        if not data: break
+        all_records.extend(data)
+        offset += 1000
+        if len(data) < 1000: break
+    
+    payload = {'metadata': {'generated_at': datetime.now(timezone.utc).isoformat(), 'airac_cycle': airac, 'total': len(all_records)}, 'data': all_records}
+    content = json.dumps(payload, ensure_ascii=False, indent=2)
+    s3.put_object(Bucket=R2_BUCKET, Key='latest_proc_charts.json', Body=content, ContentType='application/json')
+    return len(content)
+
+# ─── Main ────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--icao', help='ICAO ou lista CSV')
+    parser.add_argument('--dry-run', default='False')
+    parser.add_argument('--airac', help='Ciclo AIRAC')
+    parser.add_argument('--workers', type=int, default=10)
+    args = parser.parse_args()
+    
+    dry_run = str(args.dry_run).lower() == 'true'
+    s3 = init_s3()
+    airac = args.airac or datetime.now(timezone.utc).strftime('%y%m')
+    
+    def handle_stop(s, f):
+        telemetry['status'] = 'stopped'
+        upload_telemetry(s3, telemetry)
+        sys.exit(0)
+    signal.signal(signal.SIGTERM, handle_stop)
+    
+    add_telemetry_log(f"🚀 Super Robô v13.0 Iniciado | 250 DPI | AIRAC {airac}")
+    
+    icao_list = [c.strip().upper() for c in args.icao.split(',')] if args.icao else []
+    if not icao_list:
+        r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json')
+        icao_list = sorted({p['icao'] for p in r.json().get('data', []) if p.get('icao')})
+    
+    telemetry['total_airports'] = len(icao_list)
+    telemetry['status'] = 'in_progress'
+    
+    stop_heartbeat = threading.Event()
+    def hb():
+        while not stop_heartbeat.is_set():
+            upload_telemetry(s3, telemetry)
+            time.sleep(10)
+    threading.Thread(target=hb, daemon=True).start()
+    
+    all_tasks = []
+    for icao in icao_list:
+        charts = fetch_charts_for_icao(icao)
+        telemetry['total_offered'] += len(charts)
+        for c in charts: all_tasks.append((icao, c))
+    
+    add_telemetry_log(f"📦 Processando {len(all_tasks)} cartas com {args.workers} workers...")
+    
+    with ThreadPoolExecutor(max_workers=args.workers) as exe:
+        futures = [exe.submit(process_single_chart, s3, t[0], t[1], airac, dry_run) for t in all_tasks]
+        for f in as_completed(futures): pass
+        
+    stop_heartbeat.set()
+    add_telemetry_log("📦 Finalizando Master JSON...")
+    if not dry_run: export_master_json(s3, airac)
+    
+    telemetry['status'] = 'completed'
+    add_telemetry_log(f"✅ Concluído! {telemetry['mirrored_charts']} cartas processadas.")
+    upload_telemetry(s3, telemetry)
+
+if __name__ == "__main__":
+    main()

@@ -40,6 +40,20 @@ AIC_OFFICIAL_REGISTRY = {
         'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-1320',
         'slug': 'aic-n-1320',
         'effective_date': '2020-04-23'
+    },
+    'BELO HORIZONTE': {
+        'aic_id': 'AIC N 20/24',
+        'title': 'Rotas Especiais de Aeronaves e Helicópteros em Voo Visual nas Zonas de Controle de Belo Horizonte',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2024',
+        'slug': 'aic-n-2024',
+        'effective_date': '2024-05-16'
+    },
+    'WH-BELO HORIZONTE': {
+        'aic_id': 'AIC N 20/24',
+        'title': 'Rotas Especiais de Aeronaves e Helicópteros em Voo Visual nas Zonas de Controle de Belo Horizonte',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2024',
+        'slug': 'aic-n-2024',
+        'effective_date': '2024-05-16'
     }
 }
 
@@ -112,6 +126,89 @@ CERTIFIED_AIC_FIXES = {
             'mandatory_alt': None,
             'magnetic_heading': '149',
             'remarks': 'Portão de entrada compulsório para aeronaves procedentes dos setores N, NW e W. Rumo 149° para USP.'
+        }
+    },
+    'BELO HORIZONTE': {
+        'OLHOS': {
+            'lat': -19.648667,
+            'lng': -43.910000,
+            'dms': '19º38\'55" S / 043º54\'36" W',
+            'source': 'CCV REH WH BELO HORIZONTE',
+            'frequency': '122.550 MHz',
+            'remarks': '[REH] Portao Oficial DECEA',
+            'type': 'REH'
+        },
+        'MANNESMANN': {
+            'REA': {
+                'lat': -19.978000,
+                'lng': -44.008000,
+                'dms': '19º58\'41" S / 044º00\'29" W',
+                'source': 'AIC N 20/24 (AISWEB CCV WH)',
+                'frequency': '120.200 MHz',
+                'ceiling': '5000 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Aviões)'
+            },
+            'REH': {
+                'lat': -19.964500,
+                'lng': -44.002000,
+                'dms': '19º57\'52" S / 044º00\'07" W',
+                'source': 'CCV REH WH BELO HORIZONTE',
+                'frequency': '122.550 MHz',
+                'remarks': '[REH] Portao Oficial DECEA (Helicópteros)'
+            }
+        },
+        'BRANCA': {
+            'lat': -20.094500,
+            'lng': -44.081667,
+            'dms': '20º05\'40" S / 044º04\'54" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'ceiling': '5500 ft',
+            'floor': '3800 ft',
+            'remarks': '[REA] Posição Visual Exclusiva REA'
+        },
+        'CHAPÉU': {
+            'lat': -20.119500,
+            'lng': -43.922500,
+            'dms': '20º07\'10" S / 043º55\'21" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'ceiling': '6500 ft',
+            'floor': '4500 ft',
+            'remarks': '[REA] Posição Visual Exclusiva REA'
+        },
+        'CHAPEU': {
+            'lat': -20.119500,
+            'lng': -43.922500,
+            'dms': '20º07\'10" S / 043º55\'21" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'ceiling': '6500 ft',
+            'floor': '4500 ft',
+            'remarks': '[REA] Posição Visual Exclusiva REA'
+        },
+        'ANDIROBA': {
+            'lat': -19.650000,
+            'lng': -44.230333,
+            'dms': '19º39\'00" S / 044º13\'49" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'ceiling': '5500 ft',
+            'floor': '4000 ft',
+            'remarks': '[REA] Portão Oficial Exclusivo REA'
+        },
+        'CIRRUS': {
+            'lat': -19.428667,
+            'lng': -43.899167,
+            'dms': '19°25\'43" S / 043°53\'57" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'ceiling': '5500 ft',
+            'floor': '3800 ft',
+            'remarks': '[REA] Portão Oficial Exclusivo REA'
+        },
+        'LAGOA': {
+            'lat': -19.639167,
+            'lng': -43.893500,
+            'dms': '19º38\'21" S / 043º53\'37" W',
+            'source': 'CCV REH WH BELO HORIZONTE',
+            'remarks': '[REA] [REH] Ponto VFR DECEA'
         }
     }
 }
@@ -190,19 +287,26 @@ def download_and_extract_aic(url_or_slug: str) -> dict:
         print(f"⚠️ Falha ao baixar/extrair AIC ({url_or_slug}): {e}")
         return {}
 
-def certify_fix_coordinates(terminal: str, fix_name: str, cur_lat: float, cur_lng: float) -> tuple:
+def certify_fix_coordinates(terminal: str, fix_name: str, cur_lat: float, cur_lng: float, fix_type: str = 'REA') -> tuple:
     """
     Certifica e calibra as coordenadas de um fixo contra o repositório de documentos AIC.
     Retorna: (calibrated_lat, calibrated_lng, was_calibrated, source_doc, delta_meters, extra_props)
     """
     norm_term = (terminal or '').upper()
     norm_name = (fix_name or '').strip().upper()
+    norm_type = (fix_type or 'REA').strip().upper()
     
     # 1. Procurar no catálogo de certificados
     for term_key, fixes_map in CERTIFIED_AIC_FIXES.items():
         if term_key in norm_term or norm_term in term_key:
             if norm_name in fixes_map:
                 cert = fixes_map[norm_name]
+                # Se houver distinção modal (ex: MANNESMANN com subchaves REA e REH)
+                if isinstance(cert, dict) and ('REA' in cert or 'REH' in cert):
+                    cert = cert.get(norm_type) or cert.get('REA') or cert
+                if not isinstance(cert, dict) or 'lat' not in cert:
+                    continue
+
                 cert_lat = cert['lat']
                 cert_lng = cert['lng']
                 
@@ -216,6 +320,7 @@ def certify_fix_coordinates(terminal: str, fix_name: str, cur_lat: float, cur_ln
                     'floor': cert.get('floor'),
                     'mandatory_alt': cert.get('mandatory_alt'),
                     'magnetic_heading': cert.get('magnetic_heading'),
+                    'frequency': cert.get('frequency'),
                     'remarks': cert.get('remarks')
                 }
                 

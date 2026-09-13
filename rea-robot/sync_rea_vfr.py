@@ -307,9 +307,23 @@ EXCLUSIVE_REH_FIXES_RJ = {
     'PRAÇA', 'PRACA'
 }
 
+# Fixos que pertencem EXCLUSIVAMENTE ao modal REA em BH (não pertencem a REH)
+EXCLUSIVE_REA_FIXES_BH = {
+    'BRANCA', 'CHAPÉU', 'CHAPEU', 'ANDIROBA', 'CIRRUS'
+}
+
+# Fixos que pertencem EXCLUSIVAMENTE ao modal REH em BH (não pertencem a REA)
+EXCLUSIVE_REH_FIXES_BH = {
+    'OLHOS'
+}
+
 def is_rj_area(terminal: str) -> bool:
     t = (terminal or '').upper()
     return any(k in t for k in ['RIO', 'WJ1', 'WJ2', 'WJ3'])
+
+def is_bh_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['BELO', 'WH'])
 
 def is_valid_fix_name(name: str) -> bool:
     """Valida se o nome do fixo eh aeronauticamente valido, descartando lixo de OCR e coordenadas."""
@@ -374,6 +388,24 @@ def extract_all_rea_vfr_points():
                             if c_type != 'REH':
                                 continue
                             norm_term = 'WJ2-RIO DE JANEIRO'
+                            c_type = 'REH'
+                            p['terminal'] = norm_term
+                            p['type'] = 'REH'
+
+                        # Blindagem BH: fixos exclusivos REA
+                        if is_bh_area(norm_term) and name in EXCLUSIVE_REA_FIXES_BH:
+                            if c_type != 'REA':
+                                continue
+                            norm_term = 'WH-BELO HORIZONTE'
+                            c_type = 'REA'
+                            p['terminal'] = norm_term
+                            p['type'] = 'REA'
+
+                        # Blindagem BH: fixos exclusivos REH (ex: OLHOS)
+                        if is_bh_area(norm_term) and name in EXCLUSIVE_REH_FIXES_BH:
+                            if c_type != 'REH':
+                                continue
+                            norm_term = 'WH-BELO HORIZONTE'
                             c_type = 'REH'
                             p['terminal'] = norm_term
                             p['type'] = 'REH'
@@ -450,13 +482,30 @@ def extract_all_rea_vfr_points():
                             if is_rj_area(cur_term) and name in EXCLUSIVE_REH_FIXES_RJ:
                                 cur_type = 'REH'
                                 cur_term = 'WJ2-RIO DE JANEIRO'
+
+                            # Blindagem canônica BH: fixos exclusivos REA nunca devem ser gravados como REH
+                            if is_bh_area(cur_term) and name in EXCLUSIVE_REA_FIXES_BH:
+                                cur_type = 'REA'
+                                cur_term = 'WH-BELO HORIZONTE'
+
+                            # Blindagem canônica BH: fixos exclusivos REH (ex: OLHOS) nunca devem ser gravados como REA
+                            if is_bh_area(cur_term) and name in EXCLUSIVE_REH_FIXES_BH:
+                                cur_type = 'REH'
+                                cur_term = 'WH-BELO HORIZONTE'
                                 
                             key = f"{cur_type}::{cur_term}::{name}"
                             if key not in points_map:
                                 coord_hash = abs(int(lat * 1000) + int(lng * 1000))
                                 prefix_id = cur_type.lower()
+                                if name == 'MANNESMANN' and is_bh_area(cur_term):
+                                    fix_id = f"{prefix_id}-WH_BELO_HORIZONTE-MANNESMANN"
+                                elif name == 'OLHOS' and is_bh_area(cur_term):
+                                    fix_id = "reh-WH_BELO_HORIZONTE-OLHOS"
+                                else:
+                                    fix_id = f"{prefix_id}-{cur_term.replace(' ', '_').replace('-', '_')}-{name}-{coord_hash}"
+
                                 points_map[key] = {
-                                    'id': f"{prefix_id}-{cur_term.replace(' ', '_').replace('-', '_')}-{name}-{coord_hash}",
+                                    'id': fix_id,
                                     'name': name,
                                     'lat': lat,
                                     'lng': lng,
@@ -486,7 +535,49 @@ def extract_all_rea_vfr_points():
     except Exception as e:
         print(f"ℹ️ GeoServer WFS offline ou inacessivel ({e}). Operando com base canonica e extrator vetorial.")
 
-    # Filtro final de blindagem: eliminar qualquer resquício de falsos modais no RJ
+    # Garantir presença de fixos canônicos fundamentais que o WFS do DECEA omite
+    if 'REH::WH-BELO HORIZONTE::OLHOS' not in points_map:
+        points_map['REH::WH-BELO HORIZONTE::OLHOS'] = {
+            'id': 'reh-WH_BELO_HORIZONTE-OLHOS',
+            'name': 'OLHOS',
+            'lat': -19.648667,
+            'lng': -43.910000,
+            'terminal': 'WH-BELO HORIZONTE',
+            'type': 'REH',
+            'aic_source': 'CCV REH WH BELO HORIZONTE (DECEA Oficial)',
+            'frequency': '122.550 MHz',
+            'remarks': '[REH] Portao Oficial DECEA'
+        }
+
+    if 'REH::WH-BELO HORIZONTE::MANNESMANN' not in points_map:
+        points_map['REH::WH-BELO HORIZONTE::MANNESMANN'] = {
+            'id': 'reh-WH_BELO_HORIZONTE-MANNESMANN',
+            'name': 'MANNESMANN',
+            'lat': -19.964500,
+            'lng': -44.002000,
+            'terminal': 'WH-BELO HORIZONTE',
+            'type': 'REH',
+            'aic_source': 'CCV REH WH BELO HORIZONTE (DECEA Oficial)',
+            'frequency': '122.550 MHz',
+            'remarks': '[REH] Portao Oficial DECEA (Helicópteros)'
+        }
+
+    if 'REA::WH-BELO HORIZONTE::MANNESMANN' not in points_map:
+        points_map['REA::WH-BELO HORIZONTE::MANNESMANN'] = {
+            'id': 'rea-WH_BELO_HORIZONTE-MANNESMANN',
+            'name': 'MANNESMANN',
+            'lat': -19.978000,
+            'lng': -44.008000,
+            'terminal': 'WH-BELO HORIZONTE',
+            'type': 'REA',
+            'aic_source': 'AIC N 20/24 (AISWEB CCV WH) (DECEA Oficial)',
+            'frequency': '120.200 MHz',
+            'ceiling': '5000 ft',
+            'floor': '3500 ft',
+            'remarks': '[REA] Portão Oficial DECEA (Aviões)'
+        }
+
+    # Filtro final de blindagem: eliminar qualquer resquício de falsos modais no RJ e BH
     purified_points = []
     for p in points_map.values():
         name = p.get('name', '')
@@ -496,6 +587,10 @@ def extract_all_rea_vfr_points():
             continue
         if is_rj_area(term) and name in EXCLUSIVE_REH_FIXES_RJ and c_type != 'REH':
             continue
+        if is_bh_area(term) and name in EXCLUSIVE_REA_FIXES_BH and c_type != 'REA':
+            continue
+        if is_bh_area(term) and name in EXCLUSIVE_REH_FIXES_BH and c_type != 'REH':
+            continue
         purified_points.append(p)
 
     # 4. Certificação Geodésica Homologada por AIC (Ground Truth Oficial DECEA)
@@ -503,12 +598,13 @@ def extract_all_rea_vfr_points():
     for p in purified_points:
         name = p.get('name', '')
         term = p.get('terminal', '')
+        c_type = p.get('type', 'REA')
         cur_lat = p.get('lat')
         cur_lng = p.get('lng')
         if cur_lat is not None and cur_lng is not None:
-            cal_lat, cal_lng, was_calibrated, aic_src, delta_m, extra_props = certify_fix_coordinates(term, name, cur_lat, cur_lng)
+            cal_lat, cal_lng, was_calibrated, aic_src, delta_m, extra_props = certify_fix_coordinates(term, name, cur_lat, cur_lng, fix_type=c_type)
             if was_calibrated:
-                print(f"🎯 [AIC Ground Truth] Fixo {name} ({term}) calibrado com precisão métrica via {aic_src}: delta={delta_m}m")
+                print(f"🎯 [AIC Ground Truth] Fixo {name} ({term} [{c_type}]) calibrado com precisão métrica via {aic_src}: delta={delta_m}m")
                 p['lat'] = cal_lat
                 p['lng'] = cal_lng
                 p['aic_source'] = f"{aic_src} (DECEA Oficial)"
@@ -518,6 +614,10 @@ def extract_all_rea_vfr_points():
                 
             # Enriquecer com propriedades táticas da publicação
             if extra_props:
+                if extra_props.get('frequency') and not p.get('frequency'):
+                    p['frequency'] = extra_props['frequency']
+                if extra_props.get('remarks') and (not p.get('remarks') or p.get('remarks') == f"[{c_type}]"):
+                    p['remarks'] = extra_props['remarks']
                 if extra_props.get('ceiling') and not p.get('ceiling'):
                     p['ceiling'] = extra_props['ceiling']
                 if extra_props.get('floor') and not p.get('floor'):
