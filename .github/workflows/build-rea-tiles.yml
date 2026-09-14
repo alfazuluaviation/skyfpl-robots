@@ -20,25 +20,21 @@ on:
         required: false
         default: '11'
       single_file:
-        description: '📦 Gerar arquivo único consolidado Brasil (REA_BRASIL_FULL.mbtiles)?'
+        description: '📦 Gerar arquivo único consolidado Brasil (true/false)'
         required: false
         default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
       staging:
-        description: '🛡️ Publicar em Quarentena / Staging (recomendado para auditoria)?'
+        description: '🛡️ Publicar em Quarentena / Staging (true/false)'
         required: false
         default: 'true'
-        type: choice
-        options:
-          - 'true'
-          - 'false'
       workers:
         description: '⚡ Quantidade de workers paralelos para download WMS'
         required: false
         default: '8'
+      run_id:
+        description: 'ID da execução'
+        required: false
+        default: 'manual_run'
 
 concurrency:
   group: rea-tiles-builder
