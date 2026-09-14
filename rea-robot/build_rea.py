@@ -474,7 +474,17 @@ def process_chart(
         
     print(f"  [{chart_code}] Concluído com sucesso: {done}/{total_tiles} processados.")
 
-# ─── Telemetria Real-Time via Cloudflare R2 ───────────────────────────────────
+# Buffer de logs em memória para telemetria ao vivo
+TELEMETRY_LOGS_BUFFER = []
+
+def log_telemetry(msg: str):
+    """Registra uma mensagem com timestamp no buffer de telemetria e no stdout."""
+    timestamp = datetime.utcnow().strftime("%H:%M:%S")
+    formatted = f"[{timestamp} UTC] {msg}"
+    print(formatted)
+    TELEMETRY_LOGS_BUFFER.insert(0, formatted)
+    if len(TELEMETRY_LOGS_BUFFER) > 60:
+        TELEMETRY_LOGS_BUFFER.pop()
 
 def upload_progress(
     r2_client,
@@ -500,7 +510,8 @@ def upload_progress(
         "charts_total": charts_total,
         "run_id": run_id,
         "updated_at": datetime.utcnow().isoformat() + "Z",
-        "metadata": metadata
+        "metadata": metadata,
+        "logs": TELEMETRY_LOGS_BUFFER[:30]
     }
     
     try:
@@ -643,8 +654,10 @@ def main():
             global_bbox = available_charts.get("REA_BR_COMPLETO", {}).get("bbox", (-70.28, -30.75, -34.50, 0.30))
             init_mbtiles(conn, "REA_BRASIL_FULL", global_bbox, min_zoom, max_zoom)
             
+            log_telemetry(f"Inicializando compilação unificada de {charts_total} cartas REA.")
             for idx, code in enumerate(codes_to_process):
                 chart_info = available_charts[code]
+                log_telemetry(f"Processando setor [{idx+1}/{charts_total}]: {code} ({chart_info.get('title', code)})")
                 
                 def on_progress(done_tiles, total_tiles):
                     single_percent = (done_tiles / total_tiles) * 100
@@ -655,20 +668,22 @@ def main():
                     )
                     
                 process_chart(code, chart_info, min_zoom, max_zoom, workers, consolidated_path, existing_conn=conn, progress_callback=on_progress)
+                log_telemetry(f"Setor {code} compilado com sucesso.")
                 
-            print("  [Brasil Consolidated] Otimizando base unificada (VACUUM)...")
+            log_telemetry("Otimizando base consolidada unificada (VACUUM)...")
             conn.execute("VACUUM")
             conn.close()
             
             # Auditoria de Integridade MBTiles
-            print("  [Auditoria] Executando verificação de integridade SQLite no arquivo consolidado...")
+            log_telemetry("Executando verificação de integridade SQLite no arquivo consolidado...")
             audit_stats = verify_mbtiles_integrity(consolidated_path)
-            print(f"  [Auditoria] OK: {audit_stats['total_tiles']} tiles válidos, {audit_stats['size_bytes'] / (1024*1024):.2f} MB")
+            log_telemetry(f"Integridade 100% OK: {audit_stats['total_tiles']} tiles válidos, {audit_stats['size_bytes'] / (1024*1024):.2f} MB")
             
             # Upload do MBTiles para o R2 (no caminho de staging ou produção)
             r2_key = f"{r2_prefix}/{consolidated_filename}"
-            print(f"  [Cloud R2] Enviando {consolidated_filename} para {r2_key}...")
+            log_telemetry(f"Enviando MBTiles consolidado para Cloudflare R2 ({r2_key})...")
             r2_client.upload_file(consolidated_path, r2_bucket, r2_key)
+            log_telemetry("Upload do MBTiles consolidado concluído com sucesso.")
             
             manifest_data["consolidated"] = {
                 "filename": consolidated_filename,
@@ -726,7 +741,7 @@ def main():
                     os.remove(local_path)
                     
         # Publica o Manifesto do Ciclo no R2
-        print(f"📄 [Manifesto] Publicando manifesto do ciclo em {manifest_key}...")
+        log_telemetry(f"Publicando manifesto do ciclo em {manifest_key}...")
         r2_client.put_object(
             Bucket=r2_bucket,
             Key=manifest_key,
@@ -735,15 +750,15 @@ def main():
         )
         
         # Finalização de sucesso
-        print("\n🏆 Compilação REA concluída com absoluto sucesso!")
-        upload_progress(r2_client, r2_bucket, progress_key, "completed", 100.0, "Sucesso", charts_total, charts_total, run_id, cycle, is_staging, chart_metadata)
+        log_telemetry(f"Compilação do Ciclo {cycle} finalizada com absoluto sucesso (100%).")
+        upload_progress(r2_client, r2_bucket, progress_key, "completed", 100.0, "Compilação Concluída", charts_total, charts_total, run_id, cycle, is_staging, chart_metadata)
         
         # Notificação automática ao Supabase Edge Function (airac-rea-vfr-ingest)
         supabase_url = os.environ.get("SUPABASE_URL")
         supabase_key = os.environ.get("SUPABASE_KEY")
         if supabase_url and supabase_key:
             try:
-                print("📡 [Webhook] Notificando Supabase airac-rea-vfr-ingest...")
+                log_telemetry("Notificando ingestão no Supabase via Edge Function airac-rea-vfr-ingest...")
                 ingest_url = f"{supabase_url.rstrip('/')}/functions/v1/airac-rea-vfr-ingest"
                 headers = {
                     "Authorization": f"Bearer {supabase_key}",
