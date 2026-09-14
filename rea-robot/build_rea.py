@@ -33,158 +33,153 @@ from PIL import Image
 # ─── Configurações Globais ─────────────────────────────────────────────────────
 WMS_BASE_URL = "https://geoaisweb.decea.mil.br/geoserver/ICA/wms"
 CAPABILITIES_URL = "https://geoaisweb.decea.mil.br/geoserver/ICA/wms?service=WMS&request=GetCapabilities"
-TILE_SIZE = 512
+TILE_SIZE = 256
 DEFAULT_MIN_ZOOM = 8
 DEFAULT_MAX_ZOOM = 11
 
 # Lock global para operações simultâneas na base de dados SQLite
 mbtiles_lock = threading.Lock()
 
-# ─── Dicionário Canônico de Fallback (26 Cartas REA Oficiais Homologadas) ──────
-# Caso a chamada de GetCapabilities sofra timeout ou instabilidade no DECEA,
-# o robô utiliza esta malha canônica completa de 100% do território nacional:
+# ─── Dicionário Canônico Oficial (26 Cartas Raster GeoTIFF Homologadas pelo DECEA) ──
+# Bounding Boxes oficiais extraídos do WMS GetCapabilities do DECEA (EPSG:4326 / CRS:84)
+# Formato: (minLon, minLat, maxLon, maxLat)
 CANONICAL_REA_CHARTS = {
-    "REA_CURITIBA": {
-        "layer": "ICA:REA_CURITIBA",
-        "title": "Carta REA Curitiba",
-        "bbox": (-50.0836, -27.0008, -48.1664, -24.6838)
-    },
     "REA_CY_CUIABA": {
         "layer": "ICA:CCV_REA_CY_CUIABA",
         "title": "Carta REA Cuiabá",
-        "bbox": (-56.5715, -16.1595, -55.6738, -15.0916)
-    },
-    "REA_LONDRINA": {
-        "layer": "ICA:REA_LONDRINA",
-        "title": "Carta REA Londrina",
-        "bbox": (-52.8337, -24.1669, -50.1668, -22.5004)
+        "bbox": (-56.57155, -16.15953, -55.67383, -15.09157)
     },
     "REA_PI-PARINTINS": {
         "layer": "ICA:CCV_REA_PI-PARINTINS",
         "title": "Carta REA Parintins",
-        "bbox": (-57.3833, -3.2333, -56.0999, -2.1666)
-    },
-    "REA_RIBEIRAO_PRETO": {
-        "layer": "ICA:REA_RIBEIRAO_PRETO",
-        "title": "Carta REA Ribeirão Preto",
-        "bbox": (-48.0972, -21.5094, -47.4894, -20.8242)
+        "bbox": (-57.38333, -3.23333, -56.09989, -2.16658)
     },
     "REA_WA_TABATINGA": {
         "layer": "ICA:CCV_REA_WA_TABATINGA",
         "title": "Carta REA Tabatinga",
-        "bbox": (-70.2833, -4.5000, -69.4666, -3.9164)
+        "bbox": (-70.28333, -4.50000, -69.46664, -3.91645)
     },
     "REA_WB_BELEM": {
         "layer": "ICA:CCV_REA_WB_BELEM",
         "title": "Carta REA Belém",
-        "bbox": (-48.9452, -1.8264, -47.8611, -0.9243)
+        "bbox": (-48.94516, -1.82644, -47.86112, -0.92431)
     },
     "REA_WF_RECIFE": {
         "layer": "ICA:CCV_REA_WF_RECIFE",
         "title": "Carta REA Recife",
-        "bbox": (-35.5336, -8.6672, -34.4999, -7.4169)
+        "bbox": (-35.53357, -8.66723, -34.49995, -7.41693)
     },
     "REA_WG_CAMPO_GRANDE": {
         "layer": "ICA:CCV_REA_WG_CAMPO_GRANDE",
         "title": "Carta REA Campo Grande",
-        "bbox": (-55.7371, -21.2493, -53.5944, -19.6820)
+        "bbox": (-55.73715, -21.24926, -53.59440, -19.68197)
     },
     "REA_WH_BELO_HORIZONTE": {
         "layer": "ICA:CCV_REA_WH_BELO_HORIZONTE",
         "title": "Carta REA Belo Horizonte",
-        "bbox": (-44.8667, -20.9167, -42.8665, -18.6499)
+        "bbox": (-44.86667, -20.91667, -42.86646, -18.64994)
     },
     "REA_WJ1_RIO_DE_JANEIRO": {
         "layer": "ICA:CCV_REA_WJ1_RIO_DE_JANEIRO",
         "title": "Carta REA Rio de Janeiro",
-        "bbox": (-44.8133, -24.0017, -41.7602, -21.8176)
+        "bbox": (-44.81333, -24.00167, -41.76018, -21.81760)
     },
     "REA_WK_PORTO_SEGURO": {
         "layer": "ICA:CCV_REA_WK_PORTO_SEGURO",
         "title": "Carta REA Porto Seguro",
-        "bbox": (-39.5000, -16.8333, -38.7832, -16.3000)
+        "bbox": (-39.50000, -16.83333, -38.78321, -16.30000)
     },
     "REA_WN2_MANAUS": {
         "layer": "ICA:CCV_REA_WN2_MANAUS",
         "title": "Carta REA Manaus",
-        "bbox": (-60.5728, -3.5150, -59.6019, -2.7195)
+        "bbox": (-60.57283, -3.51500, -59.60187, -2.71951)
     },
     "REA_WP_PORTO_ALEGRE": {
         "layer": "ICA:CCV_REA_WP_PORTO_ALEGRE",
         "title": "Carta REA Porto Alegre",
-        "bbox": (-51.9668, -30.7503, -50.2502, -28.7502)
+        "bbox": (-51.96681, -30.75025, -50.25021, -28.75022)
     },
     "REA_WR_BRASILIA": {
         "layer": "ICA:CCV_REA_WR_BRASILIA",
         "title": "Carta REA Brasília",
-        "bbox": (-48.4667, -16.2500, -47.3666, -15.3833)
+        "bbox": (-48.46667, -16.25000, -47.36663, -15.38330)
     },
     "REA_WS_SAO_LUIS": {
         "layer": "ICA:CCV_REA_WS_SAO_LUIS",
         "title": "Carta REA São Luís",
-        "bbox": (-44.6658, -2.9000, -43.8333, -2.2499)
+        "bbox": (-44.66580, -2.90000, -43.83333, -2.24989)
     },
     "REA_WX_SANTAREM": {
         "layer": "ICA:CCV_REA_WX_SANTAREM",
         "title": "Carta REA Santarém",
-        "bbox": (-55.1667, -2.7500, -54.5000, -2.2500)
+        "bbox": (-55.16667, -2.75000, -54.49998, -2.25000)
     },
     "REA_WZ_FORTALEZA": {
         "layer": "ICA:CCV_REA_WZ_FORTALEZA",
         "title": "Carta REA Fortaleza",
-        "bbox": (-39.0000, -4.2500, -37.9331, -3.3665)
+        "bbox": (-39.00000, -4.24997, -37.93310, -3.36651)
     },
     "REA_XF_FLORIANOPOLIS": {
         "layer": "ICA:CCV_REA_XF_FLORIANOPOLIS",
         "title": "Carta REA Florianópolis",
-        "bbox": (-49.7333, -28.3167, -48.0165, -26.4999)
+        "bbox": (-49.73333, -28.31667, -48.01645, -26.49990)
     },
     "REA_XK_MACAPA": {
         "layer": "ICA:CCV_REA_XK_MACAPA",
         "title": "Carta REA Macapá",
-        "bbox": (-51.3833, -0.2333, -50.6999, 0.3000)
+        "bbox": (-51.38333, -0.23333, -50.69988, 0.30002)
     },
     "REA_XN-ANAPOLIS": {
         "layer": "ICA:CCV_REA_XN-ANAPOLIS",
         "title": "Carta REA Anápolis",
-        "bbox": (-49.8167, -17.0333, -48.1499, -15.7666)
+        "bbox": (-49.81667, -17.03330, -48.14994, -15.76659)
     },
     "REA_XP1_SAO_PAULO": {
         "layer": "ICA:CCV_REA_XP1_SAO_PAULO",
-        "title": "Carta REA São Paulo 1",
-        "bbox": (-47.8966, -24.5033, -44.3957, -22.2852)
+        "title": "Carta REA São Paulo 1 (RMSP)",
+        "bbox": (-47.89662, -24.50335, -44.39567, -22.28520)
     },
     "REA_XP2_SAO_PAULO": {
         "layer": "ICA:CCV_REA_XP2_SAO_PAULO",
         "title": "Carta REA São Paulo 2",
-        "bbox": (-47.2285, -23.9329, -46.0317, -23.0928)
+        "bbox": (-47.22845, -23.93291, -46.03175, -23.09281)
     },
     "REA_XR_VITORIA": {
         "layer": "ICA:CCV_REA_XR_VITORIA",
         "title": "Carta REA Vitória",
-        "bbox": (-40.6667, -20.5833, -39.9165, -19.7998)
+        "bbox": (-40.66667, -20.58333, -39.91648, -19.79978)
     },
     "REA_XS_SALVADOR": {
         "layer": "ICA:CCV_REA_XS_SALVADOR",
         "title": "Carta REA Salvador",
-        "bbox": (-39.0668, -13.4668, -37.8665, -12.4998)
+        "bbox": (-39.06676, -13.46682, -37.86655, -12.49983)
     },
     "REA_XT_NATAL": {
         "layer": "ICA:CCV_REA_XT_NATAL",
         "title": "Carta REA Natal",
-        "bbox": (-35.8333, -6.4167, -35.0000, -5.3833)
+        "bbox": (-35.83333, -6.41667, -34.99997, -5.38330)
     },
-    "REA_BR_COMPLETO": {
-        "layer": "ICA:CV_REA_BR_COMPLETO",
-        "title": "Corredores Visuais Brasil Completo",
-        "bbox": (-70.2833, -30.7503, -34.4999, 0.3000)
+    "REA_CURITIBA": {
+        "layer": "ICA:REA_CURITIBA",
+        "title": "Carta REA Curitiba",
+        "bbox": (-50.08362, -27.00078, -48.16639, -24.68376)
+    },
+    "REA_LONDRINA": {
+        "layer": "ICA:REA_LONDRINA",
+        "title": "Carta REA Londrina",
+        "bbox": (-52.83371, -24.16693, -50.16685, -22.50042)
+    },
+    "REA_RIBEIRAO_PRETO": {
+        "layer": "ICA:REA_RIBEIRAO_PRETO",
+        "title": "Carta REA Ribeirão Preto",
+        "bbox": (-48.09718, -21.50944, -47.48935, -20.82422)
     }
 }
 
 # ─── Autodiscoberta Dinâmica via GeoServer DECEA ──────────────────────────────
 
 def discover_rea_layers(session: requests.Session) -> dict:
-    """Consulta GetCapabilities do WMS DECEA e retorna todas as cartas REA homologadas."""
+    """Consulta GetCapabilities do WMS DECEA e retorna todas as cartas REA raster homologadas."""
     print("📡 [Autodiscoberta] Consultando WMS GetCapabilities do DECEA GeoServer...")
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -203,20 +198,43 @@ def discover_rea_layers(session: requests.Session) -> dict:
                 if name_elem is not None and name_elem.text:
                     raw_name = name_elem.text.strip()
                     clean_name = raw_name.replace("ICA:", "")
+                    # Filtra APENAS cartas raster GeoTIFF (CCV_REA_* e REA_*), ignorando polígonos vetoriais CV_*
                     if (clean_name.startswith("CCV_REA_") or clean_name.startswith("REA_")) and not clean_name.startswith("CV_"):
                         code = clean_name.replace("CCV_", "")
                         bbox = None
-                        for child in layer_elem:
-                            tag = child.tag.split('}')[-1]
-                            if tag == 'LatLonBoundingBox':
-                                bbox = (
-                                    float(child.attrib.get('minx')),
-                                    float(child.attrib.get('miny')),
-                                    float(child.attrib.get('maxx')),
-                                    float(child.attrib.get('maxy'))
-                                )
-                                break
                         
+                        # 1. Tenta EX_GeographicBoundingBox (padrão WMS 1.3.0)
+                        ex_bbox = layer_elem.find('{http://www.opengis.net/wms}EX_GeographicBoundingBox') if '{http://www.opengis.net/wms}EX_GeographicBoundingBox' in r.text[:1000] else layer_elem.find('EX_GeographicBoundingBox')
+                        if ex_bbox is not None:
+                            try:
+                                west = float(ex_bbox.findtext('{http://www.opengis.net/wms}westBoundLongitude') or ex_bbox.findtext('westBoundLongitude'))
+                                south = float(ex_bbox.findtext('{http://www.opengis.net/wms}southBoundLatitude') or ex_bbox.findtext('southBoundLatitude'))
+                                east = float(ex_bbox.findtext('{http://www.opengis.net/wms}eastBoundLongitude') or ex_bbox.findtext('eastBoundLongitude'))
+                                north = float(ex_bbox.findtext('{http://www.opengis.net/wms}northBoundLatitude') or ex_bbox.findtext('northBoundLatitude'))
+                                bbox = (west, south, east, north)
+                            except Exception:
+                                pass
+                                
+                        # 2. Fallback para LatLonBoundingBox (padrão WMS 1.1.1)
+                        if not bbox:
+                            for child in layer_elem:
+                                tag = child.tag.split('}')[-1]
+                                if tag == 'LatLonBoundingBox':
+                                    try:
+                                        bbox = (
+                                            float(child.attrib.get('minx')),
+                                            float(child.attrib.get('miny')),
+                                            float(child.attrib.get('maxx')),
+                                            float(child.attrib.get('maxy'))
+                                        )
+                                        break
+                                    except Exception:
+                                        pass
+                        
+                        # Se não identificou coordenadas no XML, utiliza fallback canônico
+                        if not bbox and code in CANONICAL_REA_CHARTS:
+                            bbox = CANONICAL_REA_CHARTS[code]["bbox"]
+                            
                         if bbox:
                             title = title_elem.text.strip() if title_elem is not None and title_elem.text else code
                             discovered[code] = {
@@ -226,14 +244,12 @@ def discover_rea_layers(session: requests.Session) -> dict:
                             }
                             
             if len(discovered) >= 20:
-                print(f"✅ [Autodiscoberta] Sucesso: {len(discovered)} cartas REA identificadas dinamicamente via WMS.")
-                # Assegura a presença do consolidador Brasil
-                discovered["REA_BR_COMPLETO"] = CANONICAL_REA_CHARTS["REA_BR_COMPLETO"]
+                print(f"✅ [Autodiscoberta] Sucesso: {len(discovered)} cartas REA raster identificadas dinamicamente via WMS.")
                 return discovered
     except Exception as e:
         print(f"⚠️ [Autodiscoberta] Aviso: Não foi possível obter catálogo dinâmico ({e}). Usando malha canônica oficial.")
         
-    print(f"🛡️ [Fallback] Carregando {len(CANONICAL_REA_CHARTS) - 1} cartas REA do catálogo canônico integrado.")
+    print(f"🛡️ [Fallback] Carregando {len(CANONICAL_REA_CHARTS)} cartas REA raster do catálogo canônico integrado.")
     return CANONICAL_REA_CHARTS
 
 # ─── Utilitários Geográficos e de Conversão ────────────────────────────────────
@@ -254,36 +270,15 @@ def tile_bbox_mercator(x: int, y: int, z: int) -> tuple:
     miny = 20037508.342789244 - (y + 1) * res
     return (minx, miny, maxx, maxy)
 
-# ─── Validação de Tiles em Branco/Transparentes (1.7KB Threshold) ─────────────
+# ─── Validação de Tiles (Paridade 100% com o Robô WAC) ─────────────────────────
 
 def validate_tile_data(raw_data: bytes | None) -> tuple:
+    """
+    Mantém paridade 100% com o Robô WAC: salva os dados brutos da carta raster PNG.
+    Apenas descarta se o arquivo for corrompido ou menor que 100 bytes (erro WMS ou vazio).
+    """
     if not raw_data or len(raw_data) < 100:
         return False, None
-    
-    try:
-        img = Image.open(BytesIO(raw_data))
-        img_rgb = img.convert("RGB")
-        
-        # 1. Se a imagem tiver apenas 1 única cor sólida em toda a sua extensão
-        colors = img_rgb.getcolors(maxcolors=2)
-        if colors and len(colors) == 1:
-            return False, None
-            
-        # 2. Se a imagem tiver 93% ou mais de pixels branco puro (margem vazia de papel)
-        total_pixels = img_rgb.width * img_rgb.height
-        all_colors = img_rgb.getcolors(maxcolors=total_pixels)
-        if all_colors:
-            white_pixels = 0
-            for count, rgb in all_colors:
-                if rgb == (255, 255, 255):
-                    white_pixels = count
-                    break
-            if (white_pixels / total_pixels) >= 0.93:
-                return False, None
-                
-    except Exception as e:
-        return False, None
-        
     return True, raw_data
 
 # ─── Requisição WMS ───────────────────────────────────────────────────────────
@@ -597,7 +592,7 @@ def main():
     
     # 2. Filtra cartas a processar
     if chart_codes_env == "ALL":
-        codes_to_process = [k for k in available_charts.keys() if k != "REA_BR_COMPLETO"]
+        codes_to_process = list(available_charts.keys())
     else:
         codes_to_process = [c.strip() for c in chart_codes_env.split(",") if c.strip() in available_charts]
         
@@ -651,7 +646,7 @@ def main():
                 os.remove(consolidated_path)
                 
             conn = sqlite3.connect(consolidated_path)
-            global_bbox = available_charts.get("REA_BR_COMPLETO", {}).get("bbox", (-70.28, -30.75, -34.50, 0.30))
+            global_bbox = (-73.99, -33.75, -34.50, 5.27) # Cobertura de todo o espaço aéreo brasileiro
             init_mbtiles(conn, "REA_BRASIL_FULL", global_bbox, min_zoom, max_zoom)
             
             log_telemetry(f"Inicializando compilação unificada de {charts_total} cartas REA.")
