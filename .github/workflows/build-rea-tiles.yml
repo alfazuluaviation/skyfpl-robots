@@ -88,15 +88,16 @@ jobs:
       env:
         SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
         SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+        CYCLE_INPUT: ${{ github.event.inputs.cycle || '2609' }}
       run: |
         if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
           curl -s -X POST "$SUPABASE_URL/functions/v1/airac-rea-vfr-ingest" \
             -H "Authorization: Bearer $SUPABASE_KEY" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Content-Type: application/json" \
-            -d '{
-              "status": "FAILED",
-              "cycle": "${{ github.event.inputs.cycle || "2609" }}",
-              "error": "Falha crítica na execução do workflow GitHub Actions (build-rea-tiles)."
-            }' || true
+            -d "{
+              \"status\": \"FAILED\",
+              \"cycle\": \"$CYCLE_INPUT\",
+              \"error\": \"Falha critica na execucao do workflow GitHub Actions (build-rea-tiles).\"
+            }" || true
         fi
