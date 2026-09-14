@@ -317,6 +317,16 @@ EXCLUSIVE_REH_FIXES_BH = {
     'OLHOS'
 }
 
+# Fixos que pertencem EXCLUSIVAMENTE ao modal REA em SP (não pertencem a REH nem a Sorocaba)
+EXCLUSIVE_REA_FIXES_SP = {
+    'FURNAS'
+}
+
+# Fixos HÍBRIDOS da Terminal Curitiba (pertencem simultaneamente a REA e REH)
+HYBRID_FIXES_CURITIBA = {
+    'TAMANDARÉ', 'TAMANDARE', 'COLOMBO', 'BARIGUI', 'SANEPAR', 'ATUBA'
+}
+
 def is_rj_area(terminal: str) -> bool:
     t = (terminal or '').upper()
     return any(k in t for k in ['RIO', 'WJ1', 'WJ2', 'WJ3'])
@@ -324,6 +334,30 @@ def is_rj_area(terminal: str) -> bool:
 def is_bh_area(terminal: str) -> bool:
     t = (terminal or '').upper()
     return any(k in t for k in ['BELO', 'WH'])
+
+def is_curitiba_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['CURITIBA', 'WT'])
+
+def is_floripa_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['FLORIAN', 'XF', 'FLORIPA'])
+
+def is_sao_luis_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['SÃO LUÍS', 'SAO LUIS', 'WS-SÃO', 'WS-SAO', 'WS_SÃO', 'WS_SAO'])
+
+def is_natal_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['NATAL', 'XT'])
+
+def is_salvador_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['SALVADOR', 'XS'])
+
+def is_sp_area(terminal: str) -> bool:
+    t = (terminal or '').upper()
+    return any(k in t for k in ['SÃO PAULO', 'SAO PAULO', 'XP1', 'XP2', 'SÃOPAULO', 'SAOPAULO', 'SOROCABA'])
 
 def is_valid_fix_name(name: str) -> bool:
     """Valida se o nome do fixo eh aeronauticamente valido, descartando lixo de OCR e coordenadas."""
@@ -410,6 +444,88 @@ def extract_all_rea_vfr_points():
                             p['terminal'] = norm_term
                             p['type'] = 'REH'
 
+                        # Blindagem Curitiba: fixos híbridos são tratados com dupla instância oficial
+                        if is_curitiba_area(norm_term):
+                            norm_term = 'WT-CURITIBA'
+                            p['terminal'] = norm_term
+                            if name in HYBRID_FIXES_CURITIBA:
+                                continue
+                            elif 'REH' in (p.get('aic_source') or ''):
+                                c_type = 'REH'
+                                p['type'] = 'REH'
+                                p['id'] = f"reh-WT_CURITIBA-{name}"
+
+                        # Blindagem Florianópolis: sanitização canônica e fixo oficial ITAJAÍ-AÇU
+                        if is_floripa_area(norm_term):
+                            norm_term = 'XF-FLORIANÓPOLIS'
+                            p['terminal'] = norm_term
+                            if name == 'IBIRAMA':
+                                name = 'ITAJAÍ-AÇU'
+                                p['id'] = 'rea-XF_FLORIANOPOLIS-ITAJAI_ACU'
+                                p['name'] = 'ITAJAÍ-AÇU'
+                                p['lat'] = -27.113167
+                                p['lng'] = -49.517167
+                                p['aic_source'] = 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)'
+                                p['frequency'] = '122.850 MHz'
+                                p['remarks'] = 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+
+                        # Blindagem São Luís: normalizar terminal
+                        if is_sao_luis_area(norm_term):
+                            norm_term = 'WS-SÃO LUÍS'
+                            p['terminal'] = norm_term
+
+                        # Blindagem Natal: JUNDIAÍ não é fixo válido (é acidente hidrográfico), POTENGI é o fixo oficial
+                        if is_natal_area(norm_term):
+                            norm_term = 'XT-NATAL'
+                            p['terminal'] = norm_term
+                            if name in ['JUNDIAÍ', 'JUNDIAI', 'PONTEGI']:
+                                name = 'POTENGI'
+                                p['id'] = 'rea-XT_NATAL-POTENGI'
+                                p['name'] = 'POTENGI'
+                                p['lat'] = -5.805979
+                                p['lng'] = -35.263415
+                                p['aic_source'] = 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)'
+                                p['frequency'] = 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ'
+                                p['ceiling'] = '2000 ft'
+                                p['floor'] = '1100 ft'
+                                p['magnetic_heading'] = '75'
+                                p['remarks'] = 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+
+                        # Blindagem Salvador: fixo canônico oficial PRAIA DO FORTE na BA-099
+                        if is_salvador_area(norm_term):
+                            norm_term = 'XS-SALVADOR'
+                            p['terminal'] = norm_term
+                            if name in ['PRAIA DO FORTE', 'FORTE']:
+                                name = 'PRAIA DO FORTE'
+                                p['id'] = 'rea-XS_SALVADOR-PRAIA_DO_FORTE'
+                                p['name'] = 'PRAIA DO FORTE'
+                                p['lat'] = -12.5656
+                                p['lng'] = -38.0200
+                                p['aic_source'] = 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)'
+                                p['frequency'] = 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ'
+                                p['ceiling'] = '1500 ft'
+                                p['floor'] = '1200 ft'
+                                p['magnetic_heading'] = '245'
+                                p['remarks'] = 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+
+                        # Blindagem São Paulo: fixos exclusivos REA (FURNAS nunca deve ser REH nem Sorocaba)
+                        if is_sp_area(norm_term) and name in EXCLUSIVE_REA_FIXES_SP:
+                            if c_type != 'REA':
+                                continue
+                            norm_term = 'XP1-SÃO PAULO'
+                            c_type = 'REA'
+                            p['id'] = 'rea-XP1_SAO_PAULO-FURNAS'
+                            p['terminal'] = norm_term
+                            p['type'] = 'REA'
+                            p['lat'] = -23.670833
+                            p['lng'] = -47.106389
+                            p['aic_source'] = 'AIC N 32/25 (AISWEB CCV XP1) (DECEA Oficial)'
+                            p['frequency'] = 'SUL 126.650 MHZ'
+                            p['ceiling'] = '6000 ft'
+                            p['floor'] = '4100 ft'
+                            p['magnetic_heading'] = '142'
+                            p['remarks'] = '[REA] Portão Oficial DECEA (TMA São Paulo / Aviões)'
+
                         key = f"{c_type}::{norm_term}::{name}"
                         p['name'] = name
                         p['terminal'] = norm_term
@@ -459,6 +575,16 @@ def extract_all_rea_vfr_points():
                         raw_name = props.get(f'{prefix}_nome')
                         raw_lat = props.get(f'{prefix}_lat')
                         raw_lon = props.get(f'{prefix}_lon')
+
+                        # Cura automática de falha do WFS DECEA (fixo_a_nome nulo no corredor Echo de São Luís)
+                        if is_sao_luis_area(raw_term) and (not raw_name or str(raw_name).strip().upper() in {'NONE', 'NULL', ''}):
+                            if raw_lat is not None and raw_lon is not None:
+                                try:
+                                    if abs(float(raw_lat) - (-2.441389)) < 0.03 and abs(float(raw_lon) - (-44.4675)) < 0.03:
+                                        raw_name = 'ILHA DO CAJUAL'
+                                except:
+                                    pass
+
                         if raw_name and raw_lat is not None and raw_lon is not None:
                             name = sanitize_fix_name(str(raw_name))
                             if not is_valid_fix_name(name):
@@ -492,6 +618,45 @@ def extract_all_rea_vfr_points():
                             if is_bh_area(cur_term) and name in EXCLUSIVE_REH_FIXES_BH:
                                 cur_type = 'REH'
                                 cur_term = 'WH-BELO HORIZONTE'
+
+                            # Blindagem canônica Florianópolis: sanitizar erro do WFS DECEA (Ibirama -> ITAJAÍ-AÇU)
+                            if is_floripa_area(cur_term):
+                                cur_term = 'XF-FLORIANÓPOLIS'
+                                if name == 'IBIRAMA':
+                                    name = 'ITAJAÍ-AÇU'
+                                    lat = -27.113167
+                                    lng = -49.517167
+
+                            # Blindagem canônica São Luís: normalizar terminal e fixo ILHA DO CAJUAL
+                            if is_sao_luis_area(cur_term):
+                                cur_term = 'WS-SÃO LUÍS'
+                                if name in ['ILHA DO CAJUAL', 'CAJUAL']:
+                                    name = 'ILHA DO CAJUAL'
+                                    lat = -2.441333
+                                    lng = -44.467500
+
+                            # Blindagem canônica Natal: normalizar terminal e sanitizar erro do WFS DECEA (Jundiaí -> POTENGI)
+                            if is_natal_area(cur_term):
+                                cur_term = 'XT-NATAL'
+                                if name in ['JUNDIAÍ', 'JUNDIAI', 'PONTEGI']:
+                                    name = 'POTENGI'
+                                    lat = -5.805979
+                                    lng = -35.263415
+
+                            # Blindagem canônica Salvador: normalizar terminal e fixar coordenadas reais da BA-099
+                            if is_salvador_area(cur_term):
+                                cur_term = 'XS-SALVADOR'
+                                if name in ['PRAIA DO FORTE', 'FORTE']:
+                                    name = 'PRAIA DO FORTE'
+                                    lat = -12.5656
+                                    lng = -38.0200
+
+                            # Blindagem canônica São Paulo: FURNAS é exclusivo REA XP1
+                            if is_sp_area(cur_term) and name in EXCLUSIVE_REA_FIXES_SP:
+                                cur_type = 'REA'
+                                cur_term = 'XP1-SÃO PAULO'
+                                lat = -23.670833
+                                lng = -47.106389
                                 
                             key = f"{cur_type}::{cur_term}::{name}"
                             if key not in points_map:
@@ -501,6 +666,16 @@ def extract_all_rea_vfr_points():
                                     fix_id = f"{prefix_id}-WH_BELO_HORIZONTE-MANNESMANN"
                                 elif name == 'OLHOS' and is_bh_area(cur_term):
                                     fix_id = "reh-WH_BELO_HORIZONTE-OLHOS"
+                                elif name == 'ITAJAÍ-AÇU' and is_floripa_area(cur_term):
+                                    fix_id = "rea-XF_FLORIANOPOLIS-ITAJAI_ACU"
+                                elif name == 'ILHA DO CAJUAL' and is_sao_luis_area(cur_term):
+                                    fix_id = "rea-WS_SAO_LUIS-ILHA_DO_CAJUAL"
+                                elif name == 'POTENGI' and is_natal_area(cur_term):
+                                    fix_id = "rea-XT_NATAL-POTENGI"
+                                elif name == 'PRAIA DO FORTE' and is_salvador_area(cur_term):
+                                    fix_id = "rea-XS_SALVADOR-PRAIA_DO_FORTE"
+                                elif name == 'FURNAS' and is_sp_area(cur_term):
+                                    fix_id = "rea-XP1_SAO_PAULO-FURNAS"
                                 else:
                                     fix_id = f"{prefix_id}-{cur_term.replace(' ', '_').replace('-', '_')}-{name}-{coord_hash}"
 
@@ -577,7 +752,130 @@ def extract_all_rea_vfr_points():
             'remarks': '[REA] Portão Oficial DECEA (Aviões)'
         }
 
-    # Filtro final de blindagem: eliminar qualquer resquício de falsos modais no RJ e BH
+    # Blindagem e Injeção Canônica dos Fixos HÍBRIDOS de Curitiba (TMA-WT)
+    # Suporta coordenadas dedicadas de alta precisão quando o DECEA possui pontos físicos distintos para Avião e Helicóptero (ex: ATUBA)
+    curitiba_hybrids = [
+        ('TAMANDARÉ', -25.320667, -49.299333, -25.320667, -49.299333, '120.350 MHz', '122.550 MHz', '[REA] Portão Oficial DECEA (Híbrido REA/REH)', '[REH] Portao Oficial DECEA (Híbrido REA/REH)', '5500 ft', '3500 ft', '4500 ft', '3500 ft'),
+        ('COLOMBO', -25.292167, -49.222833, -25.292167, -49.222833, '120.350 MHz', '122.550 MHz', '[REA] Portão Oficial DECEA (Híbrido REA/REH)', '[REH] Portao Oficial DECEA (Híbrido REA/REH)', '5500 ft', '3500 ft', '4500 ft', '3500 ft'),
+        ('BARIGUI', -25.428500, -49.312667, -25.428500, -49.312667, '120.350 MHz', '129.200 MHz', '[REA] Portão Oficial DECEA (Híbrido REA/REH)', '[REH] Posicao Oficial DECEA (Híbrido REA/REH)', '5500 ft', '3500 ft', '4500 ft', '3500 ft'),
+        ('SANEPAR', -25.563333, -49.245500, -25.563333, -49.245500, '120.350 MHz', '129.200 MHz', '[REA] Portão Oficial DECEA (Híbrido REA/REH)', '[REH] Posicao Oficial DECEA (Híbrido REA/REH)', '5500 ft', '3500 ft', '4500 ft', '3500 ft'),
+        ('ATUBA', -25.385979, -49.203369, -25.388667, -49.205500, '120.350 MHz', '122.550 MHz', '[REA] Portão Oficial DECEA (Híbrido REA/REH)', '[REH] Portao Oficial DECEA (Híbrido REA/REH)', '5500 ft', '3500 ft', '4500 ft', '3500 ft')
+    ]
+    for h_name, rea_lat, rea_lng, reh_lat, reh_lng, rea_freq, reh_freq, rea_rem, reh_rem, rea_ceil, rea_fl, reh_ceil, reh_fl in curitiba_hybrids:
+        # 1. Instância REA Canônica (Avião)
+        points_map[f'REA::WT-CURITIBA::{h_name}'] = {
+            'id': f'rea-WT_CURITIBA-{h_name}',
+            'name': h_name,
+            'lat': rea_lat,
+            'lng': rea_lng,
+            'terminal': 'WT-CURITIBA',
+            'type': 'REA',
+            'aic_source': 'AIC N 22/21 (DECEA Oficial)',
+            'frequency': rea_freq,
+            'ceiling': rea_ceil,
+            'floor': rea_fl,
+            'remarks': rea_rem
+        }
+        # 2. Instância REH Canônica (Helicóptero)
+        points_map[f'REH::WT-CURITIBA::{h_name}'] = {
+            'id': f'reh-WT_CURITIBA-{h_name}',
+            'name': h_name,
+            'lat': reh_lat,
+            'lng': reh_lng,
+            'terminal': 'WT-CURITIBA',
+            'type': 'REH',
+            'aic_source': 'CCV REH WT CURITIBA (DECEA Oficial)',
+            'frequency': reh_freq,
+            'ceiling': reh_ceil,
+            'floor': reh_fl,
+            'remarks': reh_rem
+        }
+
+    # Garantir presença de ITAJAÍ-AÇU na TMA Florianópolis (Ground Truth da Tabela Oficial AISWEB / AIC N 22/24)
+    if 'REA::XF-FLORIANÓPOLIS::ITAJAÍ-AÇU' not in points_map:
+        points_map['REA::XF-FLORIANÓPOLIS::ITAJAÍ-AÇU'] = {
+            'id': 'rea-XF_FLORIANOPOLIS-ITAJAI_ACU',
+            'name': 'ITAJAÍ-AÇU',
+            'lat': -27.113167,
+            'lng': -49.517167,
+            'terminal': 'XF-FLORIANÓPOLIS',
+            'type': 'REA',
+            'aic_source': 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)',
+            'frequency': '122.850 MHz',
+            'ceiling': '2500 ft',
+            'floor': '0900 ft',
+            'remarks': 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+        }
+
+    # Garantir presença de ILHA DO CAJUAL na TMA São Luís (Ground Truth da Tabela Oficial AISWEB / AIC N 18/25)
+    if 'REA::WS-SÃO LUÍS::ILHA DO CAJUAL' not in points_map:
+        points_map['REA::WS-SÃO LUÍS::ILHA DO CAJUAL'] = {
+            'id': 'rea-WS_SAO_LUIS-ILHA_DO_CAJUAL',
+            'name': 'ILHA DO CAJUAL',
+            'lat': -2.441333,
+            'lng': -44.467500,
+            'terminal': 'WS-SÃO LUÍS',
+            'type': 'REA',
+            'aic_source': 'Carta CCV REA WS São Luís (Tabela Oficial AISWEB / AIC N 18/25)',
+            'frequency': 'APP-SL 119.45 MHz',
+            'ceiling': '1500 ft',
+            'floor': '1000 ft',
+            'magnetic_heading': '150',
+            'remarks': 'Portão Oficial DECEA Ilha do Cajual (Corredor Echo)'
+        }
+
+    # Garantir presença de POTENGI na TMA Natal (Ground Truth da Carta Visual / Corredor Bravo)
+    if 'REA::XT-NATAL::POTENGI' not in points_map:
+        points_map['REA::XT-NATAL::POTENGI'] = {
+            'id': 'rea-XT_NATAL-POTENGI',
+            'name': 'POTENGI',
+            'lat': -5.805979,
+            'lng': -35.263415,
+            'terminal': 'XT-NATAL',
+            'type': 'REA',
+            'aic_source': 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)',
+            'frequency': 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ',
+            'ceiling': '2000 ft',
+            'floor': '1100 ft',
+            'magnetic_heading': '75',
+            'remarks': 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+        }
+
+    # Garantir presença canônica de PRAIA DO FORTE na TMA Salvador (Posição Vetorial Canônica Rodovia BA-099)
+    if 'REA::XS-SALVADOR::PRAIA DO FORTE' not in points_map:
+        points_map['REA::XS-SALVADOR::PRAIA DO FORTE'] = {
+            'id': 'rea-XS_SALVADOR-PRAIA_DO_FORTE',
+            'name': 'PRAIA DO FORTE',
+            'lat': -12.5656,
+            'lng': -38.0200,
+            'terminal': 'XS-SALVADOR',
+            'type': 'REA',
+            'aic_source': 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)',
+            'frequency': 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ',
+            'ceiling': '1500 ft',
+            'floor': '1200 ft',
+            'magnetic_heading': '245',
+            'remarks': 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+        }
+
+    # Garantir presença canônica de FURNAS na TMA São Paulo (Exclusivo REA XP1)
+    if 'REA::XP1-SÃO PAULO::FURNAS' not in points_map:
+        points_map['REA::XP1-SÃO PAULO::FURNAS'] = {
+            'id': 'rea-XP1_SAO_PAULO-FURNAS',
+            'name': 'FURNAS',
+            'lat': -23.670833,
+            'lng': -47.106389,
+            'terminal': 'XP1-SÃO PAULO',
+            'type': 'REA',
+            'aic_source': 'AIC N 32/25 (AISWEB CCV XP1) (DECEA Oficial)',
+            'frequency': 'SUL 126.650 MHZ',
+            'ceiling': '6000 ft',
+            'floor': '4100 ft',
+            'magnetic_heading': '142',
+            'remarks': '[REA] Portão Oficial DECEA (TMA São Paulo / Aviões)'
+        }
+
+    # Filtro final de blindagem: eliminar qualquer resquício de falsos modais no RJ, BH, SP e descarte de IBIRAMA em Florianópolis e JUNDIAÍ em Natal
     purified_points = []
     for p in points_map.values():
         name = p.get('name', '')
@@ -590,6 +888,12 @@ def extract_all_rea_vfr_points():
         if is_bh_area(term) and name in EXCLUSIVE_REA_FIXES_BH and c_type != 'REA':
             continue
         if is_bh_area(term) and name in EXCLUSIVE_REH_FIXES_BH and c_type != 'REH':
+            continue
+        if is_sp_area(term) and name in EXCLUSIVE_REA_FIXES_SP and c_type != 'REA':
+            continue
+        if is_floripa_area(term) and name == 'IBIRAMA':
+            continue
+        if is_natal_area(term) and name in ['JUNDIAÍ', 'JUNDIAI']:
             continue
         purified_points.append(p)
 
@@ -607,10 +911,10 @@ def extract_all_rea_vfr_points():
                 print(f"🎯 [AIC Ground Truth] Fixo {name} ({term} [{c_type}]) calibrado com precisão métrica via {aic_src}: delta={delta_m}m")
                 p['lat'] = cal_lat
                 p['lng'] = cal_lng
-                p['aic_source'] = f"{aic_src} (DECEA Oficial)"
+                p['aic_source'] = f"{aic_src} (DECEA Oficial)" if "(DECEA Oficial)" not in aic_src else aic_src
                 certified_count += 1
             elif aic_src:
-                p['aic_source'] = f"{aic_src} (DECEA Oficial)"
+                p['aic_source'] = f"{aic_src} (DECEA Oficial)" if "(DECEA Oficial)" not in aic_src else aic_src
                 
             # Enriquecer com propriedades táticas da publicação
             if extra_props:

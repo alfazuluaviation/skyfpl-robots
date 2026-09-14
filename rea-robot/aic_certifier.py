@@ -54,6 +54,90 @@ AIC_OFFICIAL_REGISTRY = {
         'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2024',
         'slug': 'aic-n-2024',
         'effective_date': '2024-05-16'
+    },
+    'CURITIBA': {
+        'aic_id': 'AIC N 22/21',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Área de Controle Terminal de Curitiba (TMA-WT)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2221',
+        'slug': 'aic-n-2221',
+        'effective_date': '2021-12-02'
+    },
+    'WT-CURITIBA': {
+        'aic_id': 'AIC N 22/21',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Área de Controle Terminal de Curitiba (TMA-WT)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2221',
+        'slug': 'aic-n-2221',
+        'effective_date': '2021-12-02'
+    },
+    'FLORIANÓPOLIS': {
+        'aic_id': 'AIC N 22/24',
+        'title': 'Circulação Visual na Terminal Florianópolis (TMA-XF)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2224',
+        'slug': 'aic-n-2224',
+        'effective_date': '2024-10-03'
+    },
+    'XF-FLORIANÓPOLIS': {
+        'aic_id': 'AIC N 22/24',
+        'title': 'Circulação Visual na Terminal Florianópolis (TMA-XF)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-2224',
+        'slug': 'aic-n-2224',
+        'effective_date': '2024-10-03'
+    },
+    'SÃO LUÍS': {
+        'aic_id': 'AIC N 18/25',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal São Luís (TMA-WS)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-1825',
+        'slug': 'aic-n-1825',
+        'effective_date': '2025-06-12'
+    },
+    'WS-SÃO LUÍS': {
+        'aic_id': 'AIC N 18/25',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal São Luís (TMA-WS)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-1825',
+        'slug': 'aic-n-1825',
+        'effective_date': '2025-06-12'
+    },
+    'NATAL': {
+        'aic_id': 'AIC N 18/21',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal Natal (TMA-XT)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-1821',
+        'slug': 'aic-n-1821',
+        'effective_date': '2021-08-12'
+    },
+    'XT-NATAL': {
+        'aic_id': 'AIC N 18/21',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal Natal (TMA-XT)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-1821',
+        'slug': 'aic-n-1821',
+        'effective_date': '2021-08-12'
+    },
+    'SALVADOR': {
+        'aic_id': 'AIC N 06/22',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal Salvador (TMA-XS)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-0622',
+        'slug': 'aic-n-0622',
+        'effective_date': '2022-03-24'
+    },
+    'XS-SALVADOR': {
+        'aic_id': 'AIC N 06/22',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal Salvador (TMA-XS)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-0622',
+        'slug': 'aic-n-0622',
+        'effective_date': '2022-03-24'
+    },
+    'SÃO PAULO': {
+        'aic_id': 'AIC N 32/25',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal São Paulo (TMA-XP)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-3225',
+        'slug': 'aic-n-3225',
+        'effective_date': '2025-08-07'
+    },
+    'XP1-SÃO PAULO': {
+        'aic_id': 'AIC N 32/25',
+        'title': 'Rotas Especiais de Aeronaves em Voo Visual na Terminal São Paulo (TMA-XP)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-3225',
+        'slug': 'aic-n-3225',
+        'effective_date': '2025-08-07'
     }
 }
 
@@ -209,6 +293,376 @@ CERTIFIED_AIC_FIXES = {
             'dms': '19º38\'21" S / 043º53\'37" W',
             'source': 'CCV REH WH BELO HORIZONTE',
             'remarks': '[REA] [REH] Ponto VFR DECEA'
+        }
+    },
+    'CURITIBA': {
+        'TAMANDARÉ': {
+            'REA': {
+                'lat': -25.320667,
+                'lng': -49.299333,
+                'dms': '25º19\'14" S / 049º17\'58" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.320667,
+                'lng': -49.299333,
+                'dms': '25º19\'14" S / 049º17\'58" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '122.550 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Portao Oficial DECEA (Híbrido REA/REH)'
+            }
+        },
+        'TAMANDARE': {
+            'REA': {
+                'lat': -25.320667,
+                'lng': -49.299333,
+                'dms': '25º19\'14" S / 049º17\'58" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.320667,
+                'lng': -49.299333,
+                'dms': '25º19\'14" S / 049º17\'58" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '122.550 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Portao Oficial DECEA (Híbrido REA/REH)'
+            }
+        },
+        'COLOMBO': {
+            'REA': {
+                'lat': -25.292167,
+                'lng': -49.222833,
+                'dms': '25º17\'32" S / 049º13\'22" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.292167,
+                'lng': -49.222833,
+                'dms': '25º17\'32" S / 049º13\'22" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '122.550 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Portao Oficial DECEA (Híbrido REA/REH)'
+            }
+        },
+        'BARIGUI': {
+            'REA': {
+                'lat': -25.428500,
+                'lng': -49.312667,
+                'dms': '25º25\'43" S / 049º18\'46" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.428500,
+                'lng': -49.312667,
+                'dms': '25º25\'43" S / 049º18\'46" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '129.200 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Posicao Oficial DECEA (Híbrido REA/REH)'
+            }
+        },
+        'SANEPAR': {
+            'REA': {
+                'lat': -25.563333,
+                'lng': -49.245500,
+                'dms': '25º33\'48" S / 049º14\'44" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.563333,
+                'lng': -49.245500,
+                'dms': '25º33\'48" S / 049º14\'44" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '129.200 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Posicao Oficial DECEA (Híbrido REA/REH)'
+            }
+        },
+        'ATUBA': {
+            'REA': {
+                'lat': -25.385979,
+                'lng': -49.203369,
+                'dms': '25º23\'10" S / 049º12\'12" W',
+                'source': 'AIC N 22/21 (DECEA Oficial)',
+                'frequency': '120.350 MHz',
+                'ceiling': '5500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REA] Portão Oficial DECEA (Híbrido REA/REH)'
+            },
+            'REH': {
+                'lat': -25.388667,
+                'lng': -49.205500,
+                'dms': '25º23\'19" S / 049º12\'20" W',
+                'source': 'CCV REH WT CURITIBA',
+                'frequency': '122.550 MHz',
+                'ceiling': '4500 ft',
+                'floor': '3500 ft',
+                'remarks': '[REH] Portao Oficial DECEA (Híbrido REA/REH)'
+            }
+        }
+    },
+    'FLORIANÓPOLIS': {
+        'ITAJAÍ-AÇU': {
+            'lat': -27.113167,
+            'lng': -49.517167,
+            'dms': '27º06\'47" S / 049º31\'01" W',
+            'source': 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)',
+            'frequency': '122.850 MHz',
+            'ceiling': '2500 ft',
+            'floor': '0900 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '108',
+            'remarks': 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+        },
+        'ITAJAI-ACU': {
+            'lat': -27.113167,
+            'lng': -49.517167,
+            'dms': '27º06\'47" S / 049º31\'01" W',
+            'source': 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)',
+            'frequency': '122.850 MHz',
+            'ceiling': '2500 ft',
+            'floor': '0900 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '108',
+            'remarks': 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+        }
+    },
+    'XF-FLORIANÓPOLIS': {
+        'ITAJAÍ-AÇU': {
+            'lat': -27.113167,
+            'lng': -49.517167,
+            'dms': '27º06\'47" S / 049º31\'01" W',
+            'source': 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)',
+            'frequency': '122.850 MHz',
+            'ceiling': '2500 ft',
+            'floor': '0900 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '108',
+            'remarks': 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+        },
+        'ITAJAI-ACU': {
+            'lat': -27.113167,
+            'lng': -49.517167,
+            'dms': '27º06\'47" S / 049º31\'01" W',
+            'source': 'Carta CCV REA XF Florianópolis (Tabela Oficial AISWEB / AIC N 22/24)',
+            'frequency': '122.850 MHz',
+            'ceiling': '2500 ft',
+            'floor': '0900 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '108',
+            'remarks': 'Portão Oficial DECEA no Rio Itajaí-Açu no través de Ibirama'
+        }
+    },
+    'SÃO LUÍS': {
+        'ILHA DO CAJUAL': {
+            'lat': -2.441333,
+            'lng': -44.467500,
+            'dms': '02º26\'29" S / 044º28\'03" W',
+            'source': 'Carta CCV REA WS São Luís (Tabela Oficial AISWEB / AIC N 18/25)',
+            'frequency': 'APP-SL 119.45 MHz',
+            'ceiling': '1500 ft',
+            'floor': '1000 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '150',
+            'remarks': 'Portão Oficial DECEA Ilha do Cajual (Corredor Echo)'
+        },
+        'CAJUAL': {
+            'lat': -2.441333,
+            'lng': -44.467500,
+            'dms': '02º26\'29" S / 044º28\'03" W',
+            'source': 'Carta CCV REA WS São Luís (Tabela Oficial AISWEB / AIC N 18/25)',
+            'frequency': 'APP-SL 119.45 MHz',
+            'ceiling': '1500 ft',
+            'floor': '1000 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '150',
+            'remarks': 'Portão Oficial DECEA Ilha do Cajual (Corredor Echo)'
+        }
+    },
+    'WS-SÃO LUÍS': {
+        'ILHA DO CAJUAL': {
+            'lat': -2.441333,
+            'lng': -44.467500,
+            'dms': '02º26\'29" S / 044º28\'03" W',
+            'source': 'Carta CCV REA WS São Luís (Tabela Oficial AISWEB / AIC N 18/25)',
+            'frequency': 'APP-SL 119.45 MHz',
+            'ceiling': '1500 ft',
+            'floor': '1000 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '150',
+            'remarks': 'Portão Oficial DECEA Ilha do Cajual (Corredor Echo)'
+        },
+        'CAJUAL': {
+            'lat': -2.441333,
+            'lng': -44.467500,
+            'dms': '02º26\'29" S / 044º28\'03" W',
+            'source': 'Carta CCV REA WS São Luís (Tabela Oficial AISWEB / AIC N 18/25)',
+            'frequency': 'APP-SL 119.45 MHz',
+            'ceiling': '1500 ft',
+            'floor': '1000 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '150',
+            'remarks': 'Portão Oficial DECEA Ilha do Cajual (Corredor Echo)'
+        }
+    },
+    'NATAL': {
+        'POTENGI': {
+            'lat': -5.805979,
+            'lng': -35.263415,
+            'dms': '05º48\'22" S / 035º15\'48" W',
+            'source': 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)',
+            'frequency': 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ',
+            'ceiling': '2000 ft',
+            'floor': '1100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '75',
+            'remarks': 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+        },
+        'PONTEGI': {
+            'lat': -5.805979,
+            'lng': -35.263415,
+            'dms': '05º48\'22" S / 035º15\'48" W',
+            'source': 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)',
+            'frequency': 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ',
+            'ceiling': '2000 ft',
+            'floor': '1100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '75',
+            'remarks': 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+        }
+    },
+    'XT-NATAL': {
+        'POTENGI': {
+            'lat': -5.805979,
+            'lng': -35.263415,
+            'dms': '05º48\'22" S / 035º15\'48" W',
+            'source': 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)',
+            'frequency': 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ',
+            'ceiling': '2000 ft',
+            'floor': '1100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '75',
+            'remarks': 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+        },
+        'PONTEGI': {
+            'lat': -5.805979,
+            'lng': -35.263415,
+            'dms': '05º48\'22" S / 035º15\'48" W',
+            'source': 'Carta CCV REA XT Natal (Voo Visual / Corredor Bravo)',
+            'frequency': 'APP NATAL 1 119,30 / 120,65 MHZ APP NATAL 2 119,65 / 120,65 MHZ',
+            'ceiling': '2000 ft',
+            'floor': '1100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '75',
+            'remarks': 'Portão Oficial DECEA Potengi (Corredor Bravo)'
+        }
+    },
+    'SALVADOR': {
+        'PRAIA DO FORTE': {
+            'lat': -12.5656,
+            'lng': -38.0200,
+            'dms': '12º33\'56" S / 038º01\'12" W',
+            'source': 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)',
+            'frequency': 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ',
+            'ceiling': '1500 ft',
+            'floor': '1200 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '245',
+            'remarks': 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+        },
+        'FORTE': {
+            'lat': -12.5656,
+            'lng': -38.0200,
+            'dms': '12º33\'56" S / 038º01\'12" W',
+            'source': 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)',
+            'frequency': 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ',
+            'ceiling': '1500 ft',
+            'floor': '1200 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '245',
+            'remarks': 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+        }
+    },
+    'XS-SALVADOR': {
+        'PRAIA DO FORTE': {
+            'lat': -12.5656,
+            'lng': -38.0200,
+            'dms': '12º33\'56" S / 038º01\'12" W',
+            'source': 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)',
+            'frequency': 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ',
+            'ceiling': '1500 ft',
+            'floor': '1200 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '245',
+            'remarks': 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+        },
+        'FORTE': {
+            'lat': -12.5656,
+            'lng': -38.0200,
+            'dms': '12º33\'56" S / 038º01\'12" W',
+            'source': 'Carta CCV REA XS Salvador (Posição Vetorial Canônica Rodovia BA-099)',
+            'frequency': 'APP SALVADOR 119,80 / 120,80 / 119,35 / 129,45 MHZ',
+            'ceiling': '1500 ft',
+            'floor': '1200 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '245',
+            'remarks': 'Portão de Notificação Compulsório VFR sobre a Rodovia BA-099 (Linha Verde)'
+        }
+    },
+    'SÃO PAULO': {
+        'FURNAS': {
+            'lat': -23.670833,
+            'lng': -47.106389,
+            'dms': '23º40\'15" S / 047º06\'23" W',
+            'source': 'Carta CCV REA XP1 São Paulo (AIC N 32/25)',
+            'frequency': 'SUL 126.650 MHZ',
+            'ceiling': '6000 ft',
+            'floor': '4100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '142',
+            'remarks': 'Portão Oficial DECEA (TMA São Paulo / REA Aviões)'
+        }
+    },
+    'XP1-SÃO PAULO': {
+        'FURNAS': {
+            'lat': -23.670833,
+            'lng': -47.106389,
+            'dms': '23º40\'15" S / 047º06\'23" W',
+            'source': 'Carta CCV REA XP1 São Paulo (AIC N 32/25)',
+            'frequency': 'SUL 126.650 MHZ',
+            'ceiling': '6000 ft',
+            'floor': '4100 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': '142',
+            'remarks': 'Portão Oficial DECEA (TMA São Paulo / REA Aviões)'
         }
     }
 }

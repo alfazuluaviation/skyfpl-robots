@@ -1,0 +1,106 @@
+name: 🗺️ REA Raster MBTiles Builder — Compilação e Staging R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      cycle:
+        description: '📅 Ciclo AIRAC (ex: 2609)'
+        required: false
+        default: '2609'
+      chart_codes:
+        description: '🗺️ Cartas REA (ALL para todo o Brasil ou códigos separados por vírgula)'
+        required: false
+        default: 'ALL'
+      min_zoom:
+        description: 'Zoom Mínimo (padrão: 8)'
+        required: false
+        default: '8'
+      max_zoom:
+        description: 'Zoom Máximo (padrão: 11)'
+        required: false
+        default: '11'
+      single_file:
+        description: '📦 Gerar arquivo único consolidado Brasil (REA_BRASIL_FULL.mbtiles)?'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      staging:
+        description: '🛡️ Publicar em Quarentena / Staging (recomendado para auditoria)?'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+      workers:
+        description: '⚡ Quantidade de workers paralelos para download WMS'
+        required: false
+        default: '8'
+
+concurrency:
+  group: rea-tiles-builder
+  cancel-in-progress: true
+
+jobs:
+  build_rea_mbtiles:
+    name: Compilar MBTiles REA
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+    - name: 📥 Checkout do repositório
+      uses: actions/checkout@v4
+
+    - name: 🐍 Configurar Python 3.10
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+        cache-dependency-path: rea-robot/requirements.txt
+
+    - name: 📦 Instalar Dependências
+      working-directory: rea-robot
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 🚀 Executar Robô Construtor REA
+      working-directory: rea-robot
+      env:
+        CYCLE: ${{ github.event.inputs.cycle || '2609' }}
+        CHART_CODES: ${{ github.event.inputs.chart_codes || 'ALL' }}
+        MIN_ZOOM: ${{ github.event.inputs.min_zoom || '8' }}
+        MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+        SINGLE_FILE: ${{ github.event.inputs.single_file || 'true' }}
+        STAGING: ${{ github.event.inputs.staging || 'true' }}
+        WORKERS: ${{ github.event.inputs.workers || '8' }}
+        RUN_ID: ${{ github.run_id }}
+        CLOUDFLARE_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+        CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+        CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+        CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+      run: |
+        python build_rea.py
+
+    - name: 🚨 Notificar Falha no Supabase / Telegram
+      if: failure()
+      env:
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+      run: |
+        if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
+          curl -s -X POST "$SUPABASE_URL/functions/v1/airac-rea-vfr-ingest" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "status": "FAILED",
+              "cycle": "${{ github.event.inputs.cycle || "2609" }}",
+              "error": "Falha crítica na execução do workflow GitHub Actions (build-rea-tiles)."
+            }' || true
+        fi
