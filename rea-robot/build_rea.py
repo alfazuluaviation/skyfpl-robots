@@ -23,7 +23,7 @@ import threading
 import argparse
 import xml.etree.ElementTree as ET
 from io import BytesIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
@@ -481,6 +481,25 @@ def log_telemetry(msg: str):
     if len(TELEMETRY_LOGS_BUFFER) > 60:
         TELEMETRY_LOGS_BUFFER.pop()
 
+def get_airac_dates(cycle: str) -> tuple:
+    """Retorna (effective_date, expiration_date) em formato YYYY-MM-DD para um ciclo AIRAC."""
+    calendar_path = os.path.join(os.path.dirname(__file__), 'calendar.json')
+    if os.path.exists(calendar_path):
+        try:
+            with open(calendar_path, 'r', encoding='utf-8') as f:
+                master_cal = json.load(f)
+            for year, cycles in master_cal.items():
+                if cycle in cycles:
+                    date_str = cycles[cycle]  # DD/MM/YYYY
+                    parts = [int(p) for p in date_str.split('/')]
+                    dt = datetime(parts[2], parts[1], parts[0])
+                    exp_dt = dt + timedelta(days=28)
+                    return dt.strftime('%Y-%m-%d'), exp_dt.strftime('%Y-%m-%d')
+        except Exception as e:
+            print(f"⚠️ Erro ao ler calendar.json: {e}")
+    # Fallback canônico caso não localize no arquivo
+    return "2026-09-03", "2026-10-01"
+
 def upload_progress(
     r2_client,
     bucket: str,
@@ -495,9 +514,13 @@ def upload_progress(
     is_staging: bool,
     metadata: dict
 ):
+    effective_date, expiration_date = get_airac_dates(cycle)
     progress_data = {
         "status": status,
         "cycle": cycle,
+        "airac_cycle": cycle,
+        "effective_date": effective_date,
+        "expiration_date": expiration_date,
         "is_staging": is_staging,
         "percent": round(percent, 1),
         "current_chart": current_chart,
@@ -627,8 +650,12 @@ def main():
     upload_progress(r2_client, r2_bucket, progress_key, "in_progress", 0.0, codes_to_process[0], 0, charts_total, run_id, cycle, is_staging, chart_metadata)
     
     try:
+        effective_date, expiration_date = get_airac_dates(cycle)
         manifest_data = {
             "cycle": cycle,
+            "airac_cycle": cycle,
+            "effective_date": effective_date,
+            "expiration_date": expiration_date,
             "is_staging": is_staging,
             "generated_at": datetime.utcnow().isoformat() + "Z",
             "min_zoom": min_zoom,
@@ -767,6 +794,8 @@ def main():
                     "target": "tiles",
                     "status": "VALIDATED",
                     "cycle": cycle,
+                    "effective_date": effective_date,
+                    "expiration_date": expiration_date,
                     "is_staging": is_staging,
                     "r2_staging_path": f"{r2_prefix}/",
                     "charts_count": charts_total,
