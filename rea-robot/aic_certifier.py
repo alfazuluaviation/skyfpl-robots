@@ -138,6 +138,20 @@ AIC_OFFICIAL_REGISTRY = {
         'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-3225',
         'slug': 'aic-n-3225',
         'effective_date': '2025-08-07'
+    },
+    'VITÓRIA': {
+        'aic_id': 'AIC N 09/22',
+        'title': 'Rotas Especiais em Voo Visual na Terminal Vitória (TMA-XR)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-0922',
+        'slug': 'aic-n-0922',
+        'effective_date': '2022-05-19'
+    },
+    'XR-VITÓRIA': {
+        'aic_id': 'AIC N 09/22',
+        'title': 'Rotas Especiais em Voo Visual na Terminal Vitória (TMA-XR)',
+        'url': 'https://publicacoes.decea.mil.br/publicacao/aic-n-0922',
+        'slug': 'aic-n-0922',
+        'effective_date': '2022-05-19'
     }
 }
 
@@ -293,6 +307,18 @@ CERTIFIED_AIC_FIXES = {
             'dms': '19º38\'21" S / 043º53\'37" W',
             'source': 'CCV REH WH BELO HORIZONTE',
             'remarks': '[REA] [REH] Ponto VFR DECEA'
+        },
+        'MARAVILHAS': {
+            'lat': -19.513056,
+            'lng': -44.678333,
+            'dms': '19º30\'47" S / 044º40\'42" W',
+            'source': 'AIC N 20/24 (AISWEB CCV WH)',
+            'frequency': '122.550 MHz',
+            'ceiling': '6000 ft',
+            'floor': '4000 ft',
+            'mandatory_alt': None,
+            'magnetic_heading': None,
+            'remarks': '[REA] Portão Oficial Exclusivo REA (Corredor REA MIKE)'
         }
     },
     'CURITIBA': {
@@ -663,6 +689,72 @@ CERTIFIED_AIC_FIXES = {
             'mandatory_alt': None,
             'magnetic_heading': '142',
             'remarks': 'Portão Oficial DECEA (TMA São Paulo / REA Aviões)'
+        }
+    },
+    'VITÓRIA': {
+        'PACOTES': {
+            'lat': -20.352000,
+            'lng': -40.250500,
+            'dms': '20º21\'07" S / 040º15\'02" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '123.450 MHz',
+            'mandatory_alt': '500 ft',
+            'magnetic_heading': '223',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
+        },
+        'ITAPARICA': {
+            'lat': -20.394667,
+            'lng': -40.313667,
+            'dms': '20º23\'41" S / 040º18\'49" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '122.550 MHz',
+            'mandatory_alt': '500 ft',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
+        },
+        'SIVU': {
+            'lat': -20.423100,
+            'lng': -40.332500,
+            'dms': '20º25\'23" S / 040º19\'57" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '122.550 MHz',
+            'mandatory_alt': '1000 ft',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
+        }
+    },
+    'XR-VITÓRIA': {
+        'PACOTES': {
+            'lat': -20.352000,
+            'lng': -40.250500,
+            'dms': '20º21\'07" S / 040º15\'02" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '123.450 MHz',
+            'mandatory_alt': '500 ft',
+            'magnetic_heading': '223',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
+        },
+        'ITAPARICA': {
+            'lat': -20.394667,
+            'lng': -40.313667,
+            'dms': '20º23\'41" S / 040º18\'49" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '122.550 MHz',
+            'mandatory_alt': '500 ft',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
+        },
+        'SIVU': {
+            'lat': -20.423100,
+            'lng': -40.332500,
+            'dms': '20º25\'23" S / 040º19\'57" W',
+            'source': 'CCV REH XR VITÓRIA',
+            'type': 'REH',
+            'frequency': '122.550 MHz',
+            'mandatory_alt': '1000 ft',
+            'remarks': '[REH] Portão Oficial Exclusivo de Helicópteros (REH Litoral)'
         }
     }
 }

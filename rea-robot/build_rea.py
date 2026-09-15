@@ -606,11 +606,12 @@ def main():
         "REA_XP1_SAO_PAULO": 10,
         "REA_XP2_SAO_PAULO": 9,
         "REA_WJ1_RIO_DE_JANEIRO": 10,
-        "REA_CURITIBA": 9,
         "REA_WH_BELO_HORIZONTE": 9,
+        "REA_XF_FLORIANOPOLIS": 9,
         "REA_XS_SALVADOR": 8,
         "REA_WF_RECIFE": 8,
         "REA_WP_PORTO_ALEGRE": 8,
+        "REA_CURITIBA": 7,
     }
     codes_to_process.sort(key=lambda c: PRIORITY_WEIGHTS.get(c, 0))
     charts_total = len(codes_to_process)
