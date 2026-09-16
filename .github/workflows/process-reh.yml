@@ -1,67 +1,105 @@
-name: 🚁 SkyFPL - Robô Processador de Rotas Especiais de Helicópteros (REH)
+name: 🚁 REH Raster MBTiles Builder — Compilação e Staging R2
 
 on:
   workflow_dispatch:
     inputs:
-      chart_type:
-        description: 'Tipo de carta para compatibilidade com o trigger (ex: REH)'
+      cycle:
+        description: '📅 Ciclo AIRAC (ex: 2609 ou 2610)'
         required: false
-        default: 'REH'
+        default: '2609'
       chart_codes:
-        description: 'Códigos das cartas (ex: REH_WJ2_RIO_DE_JANEIRO, ou ALL)'
+        description: '🚁 Cartas REH (ALL para todo o Brasil ou códigos separados por vírgula)'
         required: false
         default: 'ALL'
       min_zoom:
-        description: 'Zoom Mínimo (padrão 8)'
+        description: 'Zoom Mínimo (padrão: 8)'
         required: false
         default: '8'
       max_zoom:
-        description: 'Zoom Máximo (padrão 11)'
+        description: 'Zoom Máximo (padrão: 11)'
         required: false
         default: '11'
       single_file:
-        description: 'Mesclar em Arquivo Único? (true/false)'
+        description: '📦 Gerar arquivo único consolidado Brasil (true/false)'
+        required: false
+        default: 'true'
+      staging:
+        description: '🛡️ Publicar em Quarentena / Staging (true/false)'
         required: false
         default: 'true'
       workers:
-        description: 'Quantidade de Workers (Threads)'
+        description: '⚡ Quantidade de workers paralelos para download WMS'
         required: false
-        default: '6'
+        default: '8'
       run_id:
-        description: 'ID de Execução (Controle Dashboard)'
+        description: 'ID da execução (Controle Dashboard)'
         required: false
         default: 'manual_run'
 
+concurrency:
+  group: reh-tiles-builder
+  cancel-in-progress: true
+
 jobs:
-  process_reh:
+  build_reh_mbtiles:
+    name: Compilar MBTiles REH
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+
     steps:
-      - name: Checkout do Código
+      - name: 📥 Checkout do repositório
         uses: actions/checkout@v4
 
-      - name: Configurar Python
+      - name: 🐍 Configurar Python 3.10
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: reh-robot/requirements.txt
 
-      - name: Instalar Dependências
+      - name: 📦 Instalar Dependências
+        working-directory: reh-robot
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Executar Robô REH
+      - name: 🚀 Executar Robô Construtor REH
+        working-directory: reh-robot
+        env:
+          CYCLE: ${{ github.event.inputs.cycle || '2609' }}
+          CHART_CODES: ${{ github.event.inputs.chart_codes || 'ALL' }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom || '8' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+          SINGLE_FILE: ${{ github.event.inputs.single_file || 'true' }}
+          STAGING: ${{ github.event.inputs.staging || 'true' }}
+          WORKERS: ${{ github.event.inputs.workers || '8' }}
+          RUN_ID: ${{ github.run_id }}
+          CLOUDFLARE_R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          CLOUDFLARE_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          CLOUDFLARE_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          python build_reh.py
+
+      - name: 🚨 Notificar Falha no Supabase / Telegram
+        if: failure()
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          CHART_CODES: ${{ github.event.inputs.chart_codes }}
-          MIN_ZOOM: ${{ github.event.inputs.min_zoom }}
-          MAX_ZOOM: ${{ github.event.inputs.max_zoom }}
-          SINGLE_FILE: ${{ github.event.inputs.single_file }}
-          WORKERS: ${{ github.event.inputs.workers }}
-          RUN_ID: ${{ github.event.inputs.run_id }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+          CYCLE_INPUT: ${{ github.event.inputs.cycle || '2609' }}
         run: |
-          python reh-robot/build_reh.py
-
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_KEY" ]; then
+            curl -s -X POST "$SUPABASE_URL/functions/v1/airac-rea-vfr-ingest" \
+              -H "Authorization: Bearer $SUPABASE_KEY" \
+              -H "apikey: $SUPABASE_KEY" \
+              -H "Content-Type: application/json" \
+              -d "{
+                \"target\": \"reh_tiles\",
+                \"status\": \"FAILED\",
+                \"cycle\": \"$CYCLE_INPUT\",
+                \"error\": \"Falha crítica na execução do workflow GitHub Actions (process-reh).\"
+              }" || true
+          fi
