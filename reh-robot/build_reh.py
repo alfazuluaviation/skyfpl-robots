@@ -396,7 +396,7 @@ def process_chart(
                 pass
                 
             done += 1
-            if done % 100 == 0:
+            if done % 15 == 0 or done == total_tiles:
                 with mbtiles_lock:
                     conn.commit()
                 if progress_callback:
@@ -629,6 +629,11 @@ def main():
                 chart_info = available_charts[code]
                 log_telemetry(f"Processando setor [{idx+1}/{charts_total}]: {code} ({chart_info.get('title', code)})")
                 
+                upload_progress(
+                    r2_client, r2_bucket, progress_key, "in_progress", (idx / charts_total) * 100,
+                    f"{code} (Setor {idx+1}/{charts_total})", idx, charts_total, run_id, cycle, is_staging, chart_metadata
+                )
+                
                 def on_progress(done_tiles, total_tiles):
                     single_percent = (done_tiles / total_tiles) * 100
                     overall_percent = ((idx + (done_tiles / total_tiles)) / charts_total) * 100
@@ -640,12 +645,25 @@ def main():
                 process_chart(code, chart_info, min_zoom, max_zoom, workers, consolidated_path, existing_conn=conn, progress_callback=on_progress)
                 log_telemetry(f"Setor {code} compilado com sucesso.")
                 
+                upload_progress(
+                    r2_client, r2_bucket, progress_key, "in_progress", ((idx + 1) / charts_total) * 100,
+                    f"{code} (Concluído {idx+1}/{charts_total})", idx + 1, charts_total, run_id, cycle, is_staging, chart_metadata
+                )
+                
             log_telemetry("Otimizando base unificada de helicópteros (VACUUM)...")
+            upload_progress(
+                r2_client, r2_bucket, progress_key, "in_progress", 96.0,
+                "Otimizando base unificada (VACUUM)...", charts_total, charts_total, run_id, cycle, is_staging, chart_metadata
+            )
             conn.execute("VACUUM")
             conn.close()
             
             # Auditoria de Integridade MBTiles
             log_telemetry("Executando verificação de integridade SQLite no arquivo consolidado REH...")
+            upload_progress(
+                r2_client, r2_bucket, progress_key, "in_progress", 98.0,
+                "Auditando integridade física SQLite...", charts_total, charts_total, run_id, cycle, is_staging, chart_metadata
+            )
             audit_stats = verify_mbtiles_integrity(consolidated_path)
             log_telemetry(f"Integridade 100% OK: {audit_stats['total_tiles']} tiles válidos, {audit_stats['size_bytes'] / (1024*1024):.2f} MB")
             
