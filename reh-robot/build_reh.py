@@ -573,18 +573,27 @@ def main():
         print("❌ Nenhuma carta REH válida para processar. Finalizando.")
         sys.exit(1)
         
-    # Ordenação com grandes centros por último para sobreposição limpa no Alpha Composite
+    # Ordenação estrita das cartas para sobreposição correta no Alpha Composite:
+    # 1. Bacia de Santos/Campos no fundo (peso 1)
+    # 2. Demais setores regionais (peso 5)
+    # 3. WJ1 Cabo Frio sobrepõe a Bacia de Santos (peso 10)
+    # 4. WJ2 Rio de Janeiro sobrepõe a Bacia de Santos (peso 20)
+    # 5. WJ3 Rio de Janeiro sobrepõe com prioridade máxima a WJ2 (peso 30)
     PRIORITY_WEIGHTS = {
-        "CCV_REH_XP2_SAO_PAULO_1": 10,
-        "CCV_REH_XP2_SAO_PAULO_2": 9,
-        "CCV_REH_WJ2_RIO_DE_JANEIRO": 10,
-        "CCV_REH_WJ3_RIO_DE_JANEIRO": 9,
-        "CCV_REH_WH_BELO_HORIZONTE": 8,
-        "REH_BACIA_DE_SANTOS": 8,
-        "REH_CURITIBA": 7,
-        "REH_VITORIA": 7,
+        "REH_BACIA_DE_SANTOS": 1,
+        "REH_CURITIBA": 5,
+        "REH_VITORIA": 5,
+        "CCV_REH_WH_BELO_HORIZONTE": 5,
+        "CCV_REH_XP1_SOROCABA": 5,
+        "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": 5,
+        "CCV_REH_XP2_CAMPINAS": 5,
+        "CCV_REH_XP2_SAO_PAULO_2": 8,
+        "CCV_REH_XP2_SAO_PAULO_1": 9,
+        "CCV_REH_WJ1_CABO_FRIO": 10,
+        "CCV_REH_WJ2_RIO_DE_JANEIRO": 20,
+        "CCV_REH_WJ3_RIO_DE_JANEIRO": 30,
     }
-    codes_to_process.sort(key=lambda c: PRIORITY_WEIGHTS.get(c, 0))
+    codes_to_process.sort(key=lambda c: PRIORITY_WEIGHTS.get(c, 5))
     charts_total = len(codes_to_process)
     
     print(f"📋 Total de cartas REH a compilar: {charts_total} setores")
