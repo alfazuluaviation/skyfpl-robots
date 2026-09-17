@@ -194,35 +194,18 @@ def tile_bbox_mercator(x: int, y: int, z: int) -> tuple:
     miny = 20037508.342789244 - (y + 1) * res
     return (minx, miny, maxx, maxy)
 
-# ─── Validação de Tiles (Filtro Inteligente RGBA) ─────────────────────────────
+# ─── Validação de Tiles (Paridade 100% com o Padrão Ouro REA) ─────────────────
 
 def validate_tile_data(raw_data: bytes | None) -> tuple:
-    """Valida se o tile possui conteúdo útil real (descarta vazio, 100% transparente ou papel branco)."""
+    """
+    Mantém paridade 100% com o Padrão Ouro REA:
+    Salva os dados brutos da carta raster PNG.
+    Descarta se for vazio, menor que 100 bytes ou erro de XML/ServiceException do WMS.
+    """
     if not raw_data or len(raw_data) < 100:
         return False, None
-        
-    try:
-        img = Image.open(BytesIO(raw_data)).convert("RGBA")
-        pixels = list(img.getdata())
-        
-        # 1. Filtra pixels com alguma opacidade
-        visible = [(r, g, b) for r, g, b, a in pixels if a > 0]
-        if not visible:
-            return False, None # 100% transparente
-            
-        # 2. Descarta cor sólida única
-        unique_colors = set(visible)
-        if len(unique_colors) <= 1:
-            return False, None
-            
-        # 3. Descarta se 100% dos pixels forem branco puro (fundo de papel sem desenho)
-        white_count = sum(1 for r, g, b in visible if r >= 254 and g >= 254 and b >= 254)
-        if white_count / len(visible) >= 0.999:
-            return False, None
-            
-    except Exception:
+    if b"<?xml" in raw_data[:50] or b"<ServiceException" in raw_data[:100]:
         return False, None
-        
     return True, raw_data
 
 # ─── Requisição WMS com Resiliência e Backoff ─────────────────────────────────
@@ -327,7 +310,7 @@ def process_chart(
     if existing_conn:
         conn = existing_conn
     else:
-        conn = sqlite3.connect(output_path)
+        conn = sqlite3.connect(output_path, check_same_thread=False)
         init_mbtiles(conn, chart_code, bbox, min_zoom, max_zoom)
         
     session = requests.Session()
@@ -385,15 +368,15 @@ def process_chart(
                                 out_io = BytesIO()
                                 bg_img.save(out_io, format="PNG")
                                 tile_data = out_io.getvalue()
-                            except Exception:
+                            except Exception as comp_err:
                                 pass
                                 
                         conn.execute(
                             "INSERT OR REPLACE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
                             (z, x, tms_y, tile_data)
                         )
-            except Exception:
-                pass
+            except Exception as tile_err:
+                print(f"  [{chart_code}] ⚠️ Falha no processamento do tile ({z}/{x}/{y}): {tile_err}")
                 
             done += 1
             if done % 15 == 0 or done == total_tiles:
@@ -404,13 +387,16 @@ def process_chart(
                     
     with mbtiles_lock:
         conn.commit()
+        cursor = conn.cursor()
+        cursor.execute("SELECT count(*) FROM tiles;")
+        saved_count = cursor.fetchone()[0]
         
     if not existing_conn:
         print(f"  [{chart_code}] Otimizando MBTiles (VACUUM)...")
         conn.execute("VACUUM")
         conn.close()
         
-    print(f"  [{chart_code}] Setor concluído com sucesso: {done}/{total_tiles} processados.")
+    print(f"  [{chart_code}] Setor concluído com sucesso: {done}/{total_tiles} processados | Total no MBTiles: {saved_count} tiles.")
 
 # ─── Buffer de Logs e Telemetria em Tempo Real ───────────────────────────────
 
@@ -630,7 +616,7 @@ def main():
             if os.path.exists(consolidated_path):
                 os.remove(consolidated_path)
                 
-            conn = sqlite3.connect(consolidated_path)
+            conn = sqlite3.connect(consolidated_path, check_same_thread=False)
             init_mbtiles(conn, "REH_BRASIL_FULL", GLOBAL_REH_BBOX, min_zoom, max_zoom)
             
             log_telemetry(f"Inicializando compilação unificada de {charts_total} setores REH.")
