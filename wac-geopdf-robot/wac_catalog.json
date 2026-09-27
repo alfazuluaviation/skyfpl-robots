@@ -6,7 +6,13 @@
     "amdt": "2401A1",
     "publication_date": "21/12/2023",
     "effective_date": "25/01/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-luis---em-vigor-25-jan-24_wac_20240125.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-luis---em-vigor-25-jan-24_wac_20240125.pdf",
+    "bbox": [
+      -47.0,
+      -4.0,
+      -41.0,
+      0.0
+    ]
   },
   "WAC3015": {
     "code": "WAC3015",
@@ -15,7 +21,13 @@
     "amdt": "2401A1",
     "publication_date": "21/12/2023",
     "effective_date": "25/01/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/itaituba---em-vigor-25-jan-24_wac_20240125.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/itaituba---em-vigor-25-jan-24_wac_20240125.pdf",
+    "bbox": [
+      -58.0,
+      -8.0,
+      -52.0,
+      -4.0
+    ]
   },
   "WAC3140": {
     "code": "WAC3140",
@@ -24,7 +36,13 @@
     "amdt": "2401A1",
     "publication_date": "21/12/2023",
     "effective_date": "25/01/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/brasilia---em-vigor-em-25-jan-24-_wac_20240125.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/brasilia---em-vigor-em-25-jan-24-_wac_20240125.pdf",
+    "bbox": [
+      -49.0,
+      -16.0,
+      -43.0,
+      -12.0
+    ]
   },
   "WAC3068": {
     "code": "WAC3068",
@@ -33,7 +51,13 @@
     "amdt": "2405A1",
     "publication_date": "11/04/2024",
     "effective_date": "16/05/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-nacional_wac_20240516.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-nacional_wac_20240516.pdf",
+    "bbox": [
+      -51.0,
+      -12.0,
+      -45.0,
+      -8.0
+    ]
   },
   "WAC3189": {
     "code": "WAC3189",
@@ -42,7 +66,13 @@
     "amdt": "2405A1",
     "publication_date": "11/04/2024",
     "effective_date": "16/05/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/belo-horizonte_wac_20240516.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/belo-horizonte_wac_20240516.pdf",
+    "bbox": [
+      -44.0,
+      -20.0,
+      -38.0,
+      -16.0
+    ]
   },
   "WAC3190": {
     "code": "WAC3190",
@@ -51,7 +81,13 @@
     "amdt": "2405A1",
     "publication_date": "11/04/2024",
     "effective_date": "16/05/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/goiania_wac_20240516.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/goiania_wac_20240516.pdf",
+    "bbox": [
+      -50.0,
+      -20.0,
+      -44.0,
+      -16.0
+    ]
   },
   "WAC3313": {
     "code": "WAC3313",
@@ -60,7 +96,13 @@
     "amdt": "2405A1",
     "publication_date": "11/04/2024",
     "effective_date": "16/05/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/curitiba_wac_20240516.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/curitiba_wac_20240516.pdf",
+    "bbox": [
+      -51.0,
+      -28.0,
+      -45.0,
+      -24.0
+    ]
   },
   "WAC3016": {
     "code": "WAC3016",
@@ -69,7 +111,13 @@
     "amdt": "2407A0",
     "publication_date": "27/06/2024",
     "effective_date": "11/07/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/imperatriz_wac_20240711.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/imperatriz_wac_20240711.pdf",
+    "bbox": [
+      -52.0,
+      -8.0,
+      -46.0,
+      -4.0
+    ]
   },
   "WAC3141": {
     "code": "WAC3141",
@@ -78,7 +126,13 @@
     "amdt": "2408A0",
     "publication_date": "25/07/2024",
     "effective_date": "08/08/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/salvador_wac_20240808.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/salvador_wac_20240808.pdf",
+    "bbox": [
+      -43.0,
+      -16.0,
+      -37.0,
+      -12.0
+    ]
   },
   "WAC3261": {
     "code": "WAC3261",
@@ -87,7 +141,13 @@
     "amdt": "2408A0",
     "publication_date": "25/07/2024",
     "effective_date": "08/08/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/campo-grande_wac_20240808.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/campo-grande_wac_20240808.pdf",
+    "bbox": [
+      -56.0,
+      -24.0,
+      -50.0,
+      -20.0
+    ]
   },
   "WAC3383": {
     "code": "WAC3383",
@@ -96,7 +156,13 @@
     "amdt": "2408A0",
     "publication_date": "25/07/2024",
     "effective_date": "08/08/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/uruguaiana_wac_20240808.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/uruguaiana_wac_20240808.pdf",
+    "bbox": [
+      -60.0,
+      -32.0,
+      -54.0,
+      -28.0
+    ]
   },
   "WAC2944": {
     "code": "WAC2944",
@@ -105,7 +171,13 @@
     "amdt": "2411A1",
     "publication_date": "26/09/2024",
     "effective_date": "31/10/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/fortaleza_wac_20241031.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/fortaleza_wac_20241031.pdf",
+    "bbox": [
+      -41.0,
+      -4.0,
+      -35.0,
+      0.0
+    ]
   },
   "WAC2946": {
     "code": "WAC2946",
@@ -114,7 +186,13 @@
     "amdt": "2411A1",
     "publication_date": "26/09/2024",
     "effective_date": "31/10/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/belem_wac_20241031.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/belem_wac_20241031.pdf",
+    "bbox": [
+      -53.0,
+      -4.0,
+      -47.0,
+      0.0
+    ]
   },
   "WAC3072": {
     "code": "WAC3072",
@@ -123,7 +201,13 @@
     "amdt": "2411A1",
     "publication_date": "26/09/2024",
     "effective_date": "31/10/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tarauaca_wac_20241031.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tarauaca_wac_20241031.pdf",
+    "bbox": [
+      -75.0,
+      -12.0,
+      -69.0,
+      -8.0
+    ]
   },
   "WAC3434": {
     "code": "WAC3434",
@@ -132,7 +216,13 @@
     "amdt": "2411A1",
     "publication_date": "26/09/2024",
     "effective_date": "31/10/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rio-da-prata_wac_20241031.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rio-da-prata_wac_20241031.pdf",
+    "bbox": [
+      -59.0,
+      -36.0,
+      -52.0,
+      -32.0
+    ]
   },
   "WAC3018": {
     "code": "WAC3018",
@@ -141,7 +231,13 @@
     "amdt": "2412A1",
     "publication_date": "24/10/2024",
     "effective_date": "28/11/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/natal_wac_20241128.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/natal_wac_20241128.pdf",
+    "bbox": [
+      -40.0,
+      -8.0,
+      -34.0,
+      -4.0
+    ]
   },
   "WAC2893": {
     "code": "WAC2893",
@@ -150,7 +246,13 @@
     "amdt": "2413A1",
     "publication_date": "21/11/2024",
     "effective_date": "26/12/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/boa-vista_wac_20241226.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/boa-vista_wac_20241226.pdf",
+    "bbox": [
+      -64.0,
+      0.0,
+      -58.0,
+      4.0
+    ]
   },
   "WAC2894": {
     "code": "WAC2894",
@@ -159,7 +261,13 @@
     "amdt": "2413A1",
     "publication_date": "21/11/2024",
     "effective_date": "26/12/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tumucumaque_wac_20241226.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tumucumaque_wac_20241226.pdf",
+    "bbox": [
+      -58.0,
+      0.0,
+      -52.0,
+      4.0
+    ]
   },
   "WAC2895": {
     "code": "WAC2895",
@@ -168,7 +276,13 @@
     "amdt": "2413A1",
     "publication_date": "21/11/2024",
     "effective_date": "26/12/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/macapa_wac_20241226.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/macapa_wac_20241226.pdf",
+    "bbox": [
+      -52.0,
+      0.0,
+      -46.0,
+      4.0
+    ]
   },
   "WAC3260": {
     "code": "WAC3260",
@@ -177,7 +291,13 @@
     "amdt": "2413A1",
     "publication_date": "21/11/2024",
     "effective_date": "26/12/2024",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/bela-vista_wac_20241226.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/bela-vista_wac_20241226.pdf",
+    "bbox": [
+      -62.0,
+      -24.0,
+      -56.0,
+      -20.0
+    ]
   },
   "WAC3384": {
     "code": "WAC3384",
@@ -186,7 +306,13 @@
     "amdt": "2506A1",
     "publication_date": "08/05/2025",
     "effective_date": "12/06/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-alegre_wac_20250612.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-alegre_wac_20250612.pdf",
+    "bbox": [
+      -54.0,
+      -32.0,
+      -48.0,
+      -28.0
+    ]
   },
   "WAC3067": {
     "code": "WAC3067",
@@ -195,7 +321,13 @@
     "amdt": "2507A1",
     "publication_date": "05/06/2025",
     "effective_date": "10/07/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/petrolina_wac_20250710.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/petrolina_wac_20250710.pdf",
+    "bbox": [
+      -45.0,
+      -12.0,
+      -39.0,
+      -8.0
+    ]
   },
   "WAC3070": {
     "code": "WAC3070",
@@ -204,7 +336,13 @@
     "amdt": "2507A1",
     "publication_date": "05/06/2025",
     "effective_date": "10/07/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/ji-parana_wac_20250710.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/ji-parana_wac_20250710.pdf",
+    "bbox": [
+      -63.0,
+      -12.0,
+      -57.0,
+      -8.0
+    ]
   },
   "WAC3137": {
     "code": "WAC3137",
@@ -213,7 +351,13 @@
     "amdt": "2507A1",
     "publication_date": "05/06/2025",
     "effective_date": "10/07/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/principe-da-beira_wac_20250710.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/principe-da-beira_wac_20250710.pdf",
+    "bbox": [
+      -67.0,
+      -16.0,
+      -61.0,
+      -12.0
+    ]
   },
   "WAC3314": {
     "code": "WAC3314",
@@ -222,7 +366,13 @@
     "amdt": "2507A1",
     "publication_date": "05/06/2025",
     "effective_date": "10/07/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/foz-do-iguacu-_wac_20250710.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/foz-do-iguacu-_wac_20250710.pdf",
+    "bbox": [
+      -57.0,
+      -28.0,
+      -51.0,
+      -24.0
+    ]
   },
   "WAC2825": {
     "code": "WAC2825",
@@ -231,7 +381,13 @@
     "amdt": "2508A1",
     "publication_date": "03/07/2025",
     "effective_date": "07/08/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cabo-orange_wac_20250807.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cabo-orange_wac_20250807.pdf",
+    "bbox": [
+      -56.0,
+      4.0,
+      -50.0,
+      8.0
+    ]
   },
   "WAC2826": {
     "code": "WAC2826",
@@ -240,7 +396,13 @@
     "amdt": "2508A1",
     "publication_date": "03/07/2025",
     "effective_date": "07/08/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/monte-roraima_wac_20250807.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/monte-roraima_wac_20250807.pdf",
+    "bbox": [
+      -62.0,
+      4.0,
+      -56.0,
+      8.0
+    ]
   },
   "WAC3262": {
     "code": "WAC3262",
@@ -249,7 +411,13 @@
     "amdt": "2508A1",
     "publication_date": "03/07/2025",
     "effective_date": "07/08/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-paulo_wac_20250807.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-paulo_wac_20250807.pdf",
+    "bbox": [
+      -50.0,
+      -24.0,
+      -44.0,
+      -20.0
+    ]
   },
   "WAC2827": {
     "code": "WAC2827",
@@ -258,7 +426,13 @@
     "amdt": "2508A1",
     "publication_date": "03/07/2025",
     "effective_date": "07/08/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/serra-pacaraima_wac_20250807.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/serra-pacaraima_wac_20250807.pdf",
+    "bbox": [
+      -68.0,
+      4.0,
+      -62.0,
+      8.0
+    ]
   },
   "WAC3191": {
     "code": "WAC3191",
@@ -267,7 +441,13 @@
     "amdt": "2510A1",
     "publication_date": "28/08/2025",
     "effective_date": "02/10/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rondonopolis_wac_20251002.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rondonopolis_wac_20251002.pdf",
+    "bbox": [
+      -56.0,
+      -20.0,
+      -50.0,
+      -16.0
+    ]
   },
   "WAC2949": {
     "code": "WAC2949",
@@ -276,7 +456,13 @@
     "amdt": "2511A1",
     "publication_date": "25/09/2025",
     "effective_date": "30/10/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-gabriel-da-cachoeira_wac_20251030.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/sao-gabriel-da-cachoeira_wac_20251030.pdf",
+    "bbox": [
+      -71.0,
+      -4.0,
+      -65.0,
+      0.0
+    ]
   },
   "WAC3139": {
     "code": "WAC3139",
@@ -285,7 +471,13 @@
     "amdt": "2511A1",
     "publication_date": "25/09/2025",
     "effective_date": "30/10/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/aragarcas_wac_20251030.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/aragarcas_wac_20251030.pdf",
+    "bbox": [
+      -55.0,
+      -16.0,
+      -49.0,
+      -12.0
+    ]
   },
   "WAC3263": {
     "code": "WAC3263",
@@ -294,7 +486,13 @@
     "amdt": "2511A1",
     "publication_date": "25/09/2025",
     "effective_date": "30/10/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rio-de-janeiro_wac_20251030.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/rio-de-janeiro_wac_20251030.pdf",
+    "bbox": [
+      -44.0,
+      -24.0,
+      -38.0,
+      -20.0
+    ]
   },
   "WAC3014": {
     "code": "WAC3014",
@@ -303,7 +501,13 @@
     "amdt": "2512A1",
     "publication_date": "23/10/2025",
     "effective_date": "27/11/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/humaita_wac_20251127.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/humaita_wac_20251127.pdf",
+    "bbox": [
+      -64.0,
+      -8.0,
+      -58.0,
+      -4.0
+    ]
   },
   "WAC3019": {
     "code": "WAC3019",
@@ -312,7 +516,13 @@
     "amdt": "2512A1",
     "publication_date": "23/10/2025",
     "effective_date": "27/11/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/fernando-de-noronha_wac_20251127.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/fernando-de-noronha_wac_20251127.pdf",
+    "bbox": [
+      -36.0,
+      -8.3,
+      -30.0,
+      -4.0
+    ]
   },
   "WAC3069": {
     "code": "WAC3069",
@@ -321,7 +531,13 @@
     "amdt": "2512A1",
     "publication_date": "23/10/2025",
     "effective_date": "27/11/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cachimbo_wac_20251127.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cachimbo_wac_20251127.pdf",
+    "bbox": [
+      -57.0,
+      -12.0,
+      -51.0,
+      -8.0
+    ]
   },
   "WAC3138": {
     "code": "WAC3138",
@@ -330,7 +546,13 @@
     "amdt": "2512A1",
     "publication_date": "23/10/2025",
     "effective_date": "27/11/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cuiaba_wac_20251127.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cuiaba_wac_20251127.pdf",
+    "bbox": [
+      -61.0,
+      -16.0,
+      -55.0,
+      -12.0
+    ]
   },
   "WAC2892": {
     "code": "WAC2892",
@@ -339,7 +561,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/pico-da-neblina_wac_20251225.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/pico-da-neblina_wac_20251225.pdf",
+    "bbox": [
+      -70.0,
+      0.0,
+      -64.0,
+      4.0
+    ]
   },
   "WAC2948": {
     "code": "WAC2948",
@@ -348,7 +576,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/manaus_wac_20251225.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/manaus_wac_20251225.pdf",
+    "bbox": [
+      -65.0,
+      -4.0,
+      -59.0,
+      0.0
+    ]
   },
   "WAC3013": {
     "code": "WAC3013",
@@ -357,7 +591,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tabatinga_wac_20251225.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/tabatinga_wac_20251225.pdf",
+    "bbox": [
+      -70.0,
+      -8.0,
+      -64.0,
+      -4.0
+    ]
   },
   "WAC3017": {
     "code": "WAC3017",
@@ -366,7 +606,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/teresina_wac_20251225.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/teresina_wac_20251225.pdf",
+    "bbox": [
+      -46.0,
+      -8.0,
+      -40.0,
+      -4.0
+    ]
   },
   "WAC3066": {
     "code": "WAC3066",
@@ -375,7 +621,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "#"
+    "pdf_url": "#",
+    "bbox": [
+      -39.0,
+      -12.0,
+      -33.0,
+      -8.0
+    ]
   },
   "WAC3071": {
     "code": "WAC3071",
@@ -384,7 +636,13 @@
     "amdt": "2513A1",
     "publication_date": "20/11/2025",
     "effective_date": "25/12/2025",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-velho_wac_20251225.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/porto-velho_wac_20251225.pdf",
+    "bbox": [
+      -69.0,
+      -12.0,
+      -63.0,
+      -8.0
+    ]
   },
   "WAC3192": {
     "code": "WAC3192",
@@ -393,7 +651,13 @@
     "amdt": "2609A1",
     "publication_date": "30/07/2026",
     "effective_date": "03/09/2026",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/corumba_wac_20260903.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/corumba_wac_20260903.pdf",
+    "bbox": [
+      -62.0,
+      -20.0,
+      -56.0,
+      -16.0
+    ]
   },
   "WAC3012": {
     "code": "WAC3012",
@@ -402,7 +666,13 @@
     "amdt": "2609A1",
     "publication_date": "30/07/2026",
     "effective_date": "03/09/2026",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cruzeiro-do-sul_wac_20260903.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/cruzeiro-do-sul_wac_20260903.pdf",
+    "bbox": [
+      -76.0,
+      -8.0,
+      -70.0,
+      -4.0
+    ]
   },
   "WAC2947": {
     "code": "WAC2947",
@@ -411,6 +681,12 @@
     "amdt": "2609A1",
     "publication_date": "30/07/2026",
     "effective_date": "03/09/2026",
-    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/santarem_wac_20260903.pdf"
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/wac/santarem_wac_20260903.pdf",
+    "bbox": [
+      -59.0,
+      -4.0,
+      -53.0,
+      0.0
+    ]
   }
 }

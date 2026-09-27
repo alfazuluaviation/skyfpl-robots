@@ -1,19 +1,21 @@
 """
-build_wac_geopdf.py — SkyFPL High-Definition WAC Chart Engine (GeoPDF / GDAL)
+build_wac_geopdf.py — SkyFPL High-Definition WAC Chart Engine (GeoPDF / GDAL) v2.0
 =============================================================================
 Processa cartas aeronáuticas WAC (World Aeronautical Charts) do DECEA diretamente
 a partir dos arquivos mestres GeoPDF vetoriais de altíssima definição.
 
-Diferenciais em relação ao robô legado (WMS GetMap):
-  1. Rasterização nativa vetorial em 254-300 DPI (nitidez de texto cristalina em Z5-Z8).
-  2. Recorte automático perfeito da área útil via NEATLINE oficial do DECEA (zero borda).
-  3. Reamostragem matemática Lanczos em todas as pirâmides de zoom.
-  4. Suporte a tiles WebP (50-60% mais leves que PNG, com qualidade superior).
-  5. Upload isolado para o Cloudflare R2 (wac-test/WAC{code}_HD.mbtiles).
-  6. Progresso em tempo real salvo em wac_geopdf_progress.json.
+Diferenciais e Correções v2.1:
+  1. Recorte geográfico exato (-te minLon minLat maxLon maxLat -te_srs EPSG:4326):
+     Elimina 100% de bordas brancas, legendas laterais e sobreposições ("papel rasgado").
+  2. Resolução direcionada para Zoom 12 (38.2185 m/px):
+     Garante nitidez cirúrgica em aeródromos, waypoints e aerovias sem interpolação borrada.
+  3. Pirâmides completas de overviews Lanczos (Z5 a Z12).
+  4. Suporte a tiles WebP de alto rendimento (50-60% mais leves que PNG).
+  5. Upload isolado para Cloudflare R2 (wac-test/WAC{code}_HD.mbtiles).
+  6. Telemetria e progresso em tempo real salvos em wac_geopdf_progress.json.
 
 Uso:
-  CHART_CODES=WAC3140 DPI=254 RESAMPLING=lanczos TILE_FORMAT=webp python build_wac_geopdf.py
+  CHART_CODES=WAC3262 DPI=300 MAX_ZOOM=12 RESAMPLING=lanczos TILE_FORMAT=webp python build_wac_geopdf.py
   CHART_CODES=ALL python build_wac_geopdf.py
 """
 
@@ -31,13 +33,13 @@ from datetime import datetime, timezone
 
 # ─── Configurações Dinâmicas (Injetadas pelo Dashboard / GitHub Actions) ───────
 
-CHART_CODES_ENV = os.environ.get("CHART_CODES", "WAC3140").strip()
-DPI = int(os.environ.get("DPI", 254))
+CHART_CODES_ENV = os.environ.get("CHART_CODES", "WAC3262").strip()
+DPI = int(os.environ.get("DPI", 300))
 RESAMPLING = os.environ.get("RESAMPLING", "lanczos").strip().lower()
 TILE_FORMAT = os.environ.get("TILE_FORMAT", "webp").strip().lower()
 WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
-MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
+MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 12))
 R2_PREFIX = os.environ.get("R2_PREFIX", "wac-test").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "wac_geopdf_progress.json").strip()
 
@@ -45,6 +47,58 @@ R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_END
 R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("CLOUDFLARE_R2_ACCESS_KEY_ID", "")
 R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY") or os.environ.get("R2_SECRET_ACCESS_KEY") or os.environ.get("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET = os.environ.get("R2_BUCKET") or os.environ.get("CLOUDFLARE_R2_BUCKET", "skyfpl-charts")
+
+# ─── Bounding Boxes Oficiais das 46 Folhas WAC do Brasil ──────────────────────
+# Formato: (minLon, minLat, maxLon, maxLat) em coordenadas geográficas WGS84 (EPSG:4326)
+
+WAC_BBOXES = {
+    "WAC2825": (-56.0, 4.0,  -50.0, 8.0),   # Cabo Orange
+    "WAC2826": (-62.0, 4.0,  -56.0, 8.0),   # Monte Roraima
+    "WAC2827": (-68.0, 4.0,  -62.0, 8.0),   # Serra Paracaima
+    "WAC2892": (-70.0, 0.0,  -64.0, 4.0),   # Pico da Neblina
+    "WAC2893": (-64.0, 0.0,  -58.0, 4.0),   # Boa Vista
+    "WAC2894": (-58.0, 0.0,  -52.0, 4.0),   # Tumucumaque
+    "WAC2895": (-52.0, 0.0,  -46.0, 4.0),   # Macapá
+    "WAC2944": (-41.0, -4.0, -35.0, 0.0),   # Fortaleza
+    "WAC2945": (-47.0, -4.0, -41.0, 0.0),   # São Luís
+    "WAC2946": (-53.0, -4.0, -47.0, 0.0),   # Belém
+    "WAC2947": (-59.0, -4.0, -53.0, 0.0),   # Santarém
+    "WAC2948": (-65.0, -4.0, -59.0, 0.0),   # Manaus
+    "WAC2949": (-71.0, -4.0, -65.0, 0.0),   # São Gabriel da Cachoeira
+    "WAC3012": (-76.0, -8.0, -70.0, -4.0),  # Cruzeiro do Sul
+    "WAC3013": (-70.0, -8.0, -64.0, -4.0),  # Tabatinga
+    "WAC3014": (-64.0, -8.0, -58.0, -4.0),  # Humaitá
+    "WAC3015": (-58.0, -8.0, -52.0, -4.0),  # Itaituba
+    "WAC3016": (-52.0, -8.0, -46.0, -4.0),  # Imperatriz
+    "WAC3017": (-46.0, -8.0, -40.0, -4.0),  # Teresina
+    "WAC3018": (-40.0, -8.0, -34.0, -4.0),  # Natal
+    "WAC3019": (-36.0, -8.3, -30.0, -4.0),  # Fernando de Noronha
+    "WAC3066": (-39.0, -12.0, -33.0, -8.0), # Recife
+    "WAC3067": (-45.0, -12.0, -39.0, -8.0), # Petrolina
+    "WAC3068": (-51.0, -12.0, -45.0, -8.0), # Porto Nacional
+    "WAC3069": (-57.0, -12.0, -51.0, -8.0), # Cachimbo
+    "WAC3070": (-63.0, -12.0, -57.0, -8.0), # Ji-Paraná
+    "WAC3071": (-69.0, -12.0, -63.0, -8.0), # Porto Velho
+    "WAC3072": (-75.0, -12.0, -69.0, -8.0), # Tarauacá
+    "WAC3137": (-67.0, -16.0, -61.0, -12.0), # Príncipe da Beira
+    "WAC3138": (-61.0, -16.0, -55.0, -12.0), # Cuiabá
+    "WAC3139": (-55.0, -16.0, -49.0, -12.0), # Aragarças
+    "WAC3140": (-49.0, -16.0, -43.0, -12.0), # Brasília
+    "WAC3141": (-43.0, -16.0, -37.0, -12.0), # Salvador
+    "WAC3189": (-44.0, -20.0, -38.0, -16.0), # Belo Horizonte
+    "WAC3190": (-50.0, -20.0, -44.0, -16.0), # Goiânia
+    "WAC3191": (-56.0, -20.0, -50.0, -16.0), # Rondonópolis
+    "WAC3192": (-62.0, -20.0, -56.0, -16.0), # Corumbá
+    "WAC3260": (-62.0, -24.0, -56.0, -20.0), # Bela Vista
+    "WAC3261": (-56.0, -24.0, -50.0, -20.0), # Campo Grande
+    "WAC3262": (-50.0, -24.0, -44.0, -20.0), # São Paulo
+    "WAC3263": (-44.0, -24.0, -38.0, -20.0), # Rio de Janeiro
+    "WAC3313": (-51.0, -28.0, -45.0, -24.0), # Curitiba
+    "WAC3314": (-57.0, -28.0, -51.0, -24.0), # Foz do Iguaçu
+    "WAC3383": (-60.0, -32.0, -54.0, -28.0), # Uruguaiana
+    "WAC3384": (-54.0, -32.0, -48.0, -28.0), # Porto Alegre
+    "WAC3434": (-59.0, -36.0, -52.0, -32.0), # Rio da Prata
+}
 
 # ─── Catálogo de Cartas WAC do Brasil (46 Folhas) ─────────────────────────────
 
@@ -81,7 +135,8 @@ def load_catalog() -> dict:
                         "ident": ident,
                         "name": clean[2],
                         "amdt": clean[3],
-                        "pdf_url": link
+                        "pdf_url": link,
+                        "bbox": WAC_BBOXES.get(code)
                     }
     except Exception as ex:
         print(f"[Erro] Falha ao obter catálogo ao vivo do AISWEB: {ex}")
@@ -103,7 +158,6 @@ def find_gdal_tool(tool_name: str) -> str:
         if found:
             return found
 
-        # Locais conhecidos de instalação do QGIS / OSGeo4W no Windows
         possible_paths = [
             f"C:\\Program Files\\QGIS 3.40.15\\bin\\{tool_name}.exe",
             f"C:\\Program Files\\QGIS 3.38.3\\bin\\{tool_name}.exe",
@@ -160,24 +214,42 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
     gdal_translate = find_gdal_tool("gdal_translate")
     gdaladdo = find_gdal_tool("gdaladdo")
 
+    bbox = chart_meta.get("bbox") or WAC_BBOXES.get(code)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
 
-        # 1. GDALWARP: Rasteriza GeoPDF no DPI desejado, corta no NEATLINE oficial e reprojeta para Web Mercator (EPSG:3857)
-        print(f"  [GDAL] Reprojetando para EPSG:3857 (DPI={DPI}, Resampling={RESAMPLING}, NEATLINE=AUTO)...")
+        # 1. GDALWARP: Rasteriza GeoPDF, aplica recorte geográfico exato da folha e projeta em Web Mercator
+        print(f"  [GDAL] Reprojetando para EPSG:3857 (DPI={DPI}, Resampling={RESAMPLING}, Recorte Geográfico Exato)...")
         warp_cmd = [
             gdalwarp,
             "--config", "GDAL_PDF_DPI", str(DPI),
-            "--config", "GDAL_PDF_BBOX", "NEATLINE",
             "-t_srs", "EPSG:3857",
             "-r", RESAMPLING,
             "-dstalpha",
             "-co", "COMPRESS=DEFLATE",
             "-co", "TILED=YES",
-            "-overwrite",
-            pdf_path,
-            warped_tif
+            "-overwrite"
         ]
+
+        # Recorte cirúrgico pelos meridianos/paralelos da folha (zero bordas brancas, zero sobreposição)
+        if bbox:
+            min_lon, min_lat, max_lon, max_lat = bbox
+            print(f"  [GDAL] Aplicando BBOX exata da folha: {min_lon}°W a {max_lon}°W, {min_lat}°S a {max_lat}°S")
+            warp_cmd.extend([
+                "-te", str(min_lon), str(min_lat), str(max_lon), str(max_lat),
+                "-te_srs", "EPSG:4326"
+            ])
+
+        # Resolução alvo por nível de zoom máximo (garante a criação do nível de zoom nativo correto)
+        if MAX_ZOOM >= 12:
+            # Resolução nativa de Zoom 12 no Web Mercator: 38.2185 m/pixel
+            warp_cmd.extend(["-tr", "38.21851897", "38.21851897"])
+        elif MAX_ZOOM == 11:
+            warp_cmd.extend(["-tr", "76.43703794", "76.43703794"])
+
+        warp_cmd.extend([pdf_path, warped_tif])
+
         res1 = subprocess.run(warp_cmd, capture_output=True, text=True)
         if res1.returncode != 0:
             print(f"  [ERRO GDALWARP]: {res1.stderr}")
@@ -185,7 +257,7 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
 
         # 2. GDAL_TRANSLATE: Converte o GeoTIFF para MBTiles com compressão moderna (WEBP ou PNG)
         tile_fmt_upper = TILE_FORMAT.upper()
-        print(f"  [GDAL] Empacotando em MBTiles com compressão {tile_fmt_upper}...")
+        print(f"  [GDAL] Empacotando em MBTiles com compressão {tile_fmt_upper} (Qualidade: {WEBP_QUALITY})...")
         translate_cmd = [
             gdal_translate,
             "-of", "MBTILES",
@@ -201,11 +273,15 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             return False
 
         # 3. GDALADDO: Gera pirâmides completas de zoom (overviews) com interpolação matemática Lanczos
-        print(f"  [GDAL] Gerando pirâmides de overviews de alta fidelidade (Lanczos)...")
+        print(f"  [GDAL] Gerando pirâmides de overviews Lanczos (Z{MIN_ZOOM} até Z{MAX_ZOOM})...")
+        # Overviews de potências de 2 a partir do zoom base
+        # Se MAX_ZOOM = 12: 2(Z11), 4(Z10), 8(Z9), 16(Z8), 32(Z7), 64(Z6), 128(Z5)
+        overviews = ["2", "4", "8", "16", "32", "64", "128"] if MAX_ZOOM >= 12 else ["2", "4", "8", "16", "32", "64"]
         addo_cmd = [
             gdaladdo,
             "-r", RESAMPLING,
-            output_mbtiles
+            output_mbtiles,
+            *overviews
         ]
         res3 = subprocess.run(addo_cmd, capture_output=True, text=True)
         if res3.returncode != 0:
@@ -221,27 +297,31 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         cur.execute("SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles")
         actual_min_zoom, actual_max_zoom = cur.fetchone()
         
+        bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "-180,-85,180,85"
+
         cur.execute("""
             INSERT OR REPLACE INTO metadata (name, value) VALUES
             ('name', ?),
             ('type', 'overlay'),
-            ('version', '2.0-HD'),
+            ('version', '2.1-HD'),
             ('description', ?),
             ('format', ?),
+            ('bounds', ?),
             ('minzoom', ?),
             ('maxzoom', ?),
             ('scheme', 'tms'),
-            ('generator', 'SkyFPL WAC GeoPDF HD Engine v2.0')
+            ('generator', 'SkyFPL WAC GeoPDF HD Engine v2.1')
         """, (
             f"SkyFPL WAC {code} HD",
             f"WAC {code} {chart_meta.get('name', '')} - DECEA Vector GeoPDF ({DPI} DPI, {RESAMPLING})",
             TILE_FORMAT.lower(),
+            bounds_str,
             str(actual_min_zoom if actual_min_zoom is not None else MIN_ZOOM),
             str(actual_max_zoom if actual_max_zoom is not None else MAX_ZOOM)
         ))
         
         conn.commit()
-        # Otimização do arquivo
+        # Otimização do arquivo SQLite
         cur.execute("PRAGMA page_size = 4096")
         cur.execute("VACUUM")
         conn.close()
@@ -309,9 +389,10 @@ def update_progress_json(s3_client, status: str, charts_done: list, total_charts
 
 def main():
     print("=" * 70)
-    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.0")
+    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.1")
     print("=" * 70)
     print(f"  DPI de Rasterização: {DPI}")
+    print(f"  Zoom Alvo: Z{MIN_ZOOM} a Z{MAX_ZOOM}")
     print(f"  Algoritmo de Resampling: {RESAMPLING}")
     print(f"  Formato dos Tiles: {TILE_FORMAT.upper()} (Qualidade: {WEBP_QUALITY})")
     print(f"  Prefixo de Destino R2: {R2_PREFIX}/")
@@ -399,6 +480,8 @@ def main():
                 "size_mb": round(size_mb, 2),
                 "r2_key": r2_key,
                 "dpi": DPI,
+                "minzoom": MIN_ZOOM,
+                "maxzoom": MAX_ZOOM,
                 "tile_format": TILE_FORMAT,
                 "resampling": RESAMPLING,
                 "processed_at": datetime.now(timezone.utc).isoformat()

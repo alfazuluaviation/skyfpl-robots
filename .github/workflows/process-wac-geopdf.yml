@@ -8,9 +8,9 @@ on:
         required: true
         default: 'WAC3140'
       dpi:
-        description: '🎯 Resolução de Rasterização (254 ou 300 DPI)'
+        description: '🎯 Resolução de Rasterização (254, 300 ou 350 DPI)'
         required: false
-        default: '254'
+        default: '300'
       resampling:
         description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
         required: false
@@ -28,9 +28,9 @@ on:
         required: false
         default: '5'
       max_zoom:
-        description: 'Zoom Máximo (padrão: 11)'
+        description: 'Zoom Máximo (padrão: 12)'
         required: false
-        default: '11'
+        default: '12'
       r2_prefix:
         description: '🛡️ Prefixo R2 Quarentena/Testes (ex: wac-test)'
         required: false
@@ -75,13 +75,13 @@ jobs:
       - name: 🚀 Executar Motor WAC GeoPDF HD
         working-directory: wac-geopdf-robot
         env:
-          CHART_CODES: ${{ github.event.inputs.chart_codes || 'WAC3140' }}
-          DPI: ${{ github.event.inputs.dpi || '254' }}
+          CHART_CODES: ${{ github.event.inputs.chart_codes || 'WAC3262' }}
+          DPI: ${{ github.event.inputs.dpi || '300' }}
           RESAMPLING: ${{ github.event.inputs.resampling || 'lanczos' }}
           TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
           WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
           MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
-          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '12' }}
           R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'wac-test' }}
           PROGRESS_KEY: 'wac_geopdf_progress.json'
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
