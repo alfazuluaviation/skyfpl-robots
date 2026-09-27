@@ -421,6 +421,7 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         pub_date = str(chart_meta.get("publication_date", ""))
         eff_date = str(chart_meta.get("effective_date", ""))
         amdt_code = str(chart_meta.get("amdt", ""))
+        bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "-180,-85,180,85"
 
         cur.execute("""
             INSERT OR REPLACE INTO metadata (name, value) VALUES
