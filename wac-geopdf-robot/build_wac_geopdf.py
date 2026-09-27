@@ -1,5 +1,5 @@
 """
-build_wac_geopdf.py — SkyFPL High-Definition WAC Chart Engine (GeoPDF / GDAL) v2.0
+build_wac_geopdf.py — SkyFPL High-Definition WAC Chart Engine (GeoPDF / GDAL) v2.1
 =============================================================================
 Processa cartas aeronáuticas WAC (World Aeronautical Charts) do DECEA diretamente
 a partir dos arquivos mestres GeoPDF vetoriais de altíssima definição.
@@ -12,7 +12,7 @@ Diferenciais e Correções v2.1:
   3. Pirâmides completas de overviews Lanczos (Z5 a Z12).
   4. Suporte a tiles WebP de alto rendimento (50-60% mais leves que PNG).
   5. Upload isolado para Cloudflare R2 (wac-test/WAC{code}_HD.mbtiles).
-  6. Telemetria e progresso em tempo real salvos em wac_geopdf_progress.json.
+  6. Telemetria e Logs ao Vivo em tempo real para o Dashboard Admin (wac_geopdf_progress.json).
 
 Uso:
   CHART_CODES=WAC3262 DPI=300 MAX_ZOOM=12 RESAMPLING=lanczos TILE_FORMAT=webp python build_wac_geopdf.py
@@ -179,9 +179,78 @@ def find_gdal_tool(tool_name: str) -> str:
 
     raise FileNotFoundError(f"Utilitário GDAL '{tool_name}' não encontrado no ambiente.")
 
+# ─── Gerenciador de Telemetria e Logs em Tempo Real (R2) ──────────────────────
+
+class TelemetryManager:
+    """Gerencia telemetria granular e logs em tempo real sincronizados com o Cloudflare R2."""
+    def __init__(self, s3_client, target_codes: list):
+        self.s3 = s3_client
+        self.target_codes = target_codes
+        self.charts_done = []
+        self.metadata = {}
+        self.logs = []
+        self.current_chart = None
+        self.current_phase = None
+        self.percent = 0
+
+    def log(self, message: str, chart_idx: int = None, chart_sub_percent: float = None, level: str = "INFO"):
+        """Registra log com timestamp e envia atualização imediata de progresso ao R2."""
+        now_str = datetime.now().strftime("%H:%M:%S")
+        prefix = "✓" if level == "SUCCESS" else ("⚠" if level == "WARN" else ("✖" if level == "ERROR" else "›"))
+        formatted = f"[{now_str}] {prefix} {message}"
+        print(formatted, flush=True)
+        self.logs.append(formatted)
+        if len(self.logs) > 80:
+            self.logs = self.logs[-80:]
+
+        self.current_phase = message
+
+        if chart_idx is not None and chart_sub_percent is not None:
+            n_total = len(self.target_codes)
+            chart_base = ((chart_idx - 1) / n_total) * 100.0
+            sub_contrib = (chart_sub_percent / n_total)
+            self.percent = min(99, max(0, int(chart_base + sub_contrib)))
+
+        self.sync_r2(status="processing")
+
+    def sync_r2(self, status: str = "processing"):
+        if not self.s3 or not R2_BUCKET:
+            return
+
+        payload = {
+            "status": status,
+            "engine": "geopdf_hd",
+            "current": self.current_chart,
+            "phase": self.current_phase,
+            "completed": self.charts_done,
+            "total": self.target_codes,
+            "percent": 100 if status == "completed" else self.percent,
+            "logs": self.logs,
+            "config": {
+                "dpi": DPI,
+                "resampling": RESAMPLING,
+                "tile_format": TILE_FORMAT,
+                "minzoom": MIN_ZOOM,
+                "maxzoom": MAX_ZOOM,
+                "r2_prefix": R2_PREFIX
+            },
+            "metadata": self.metadata,
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }
+        try:
+            self.s3.put_object(
+                Bucket=R2_BUCKET,
+                Key=PROGRESS_KEY,
+                Body=json.dumps(payload, ensure_ascii=False, indent=2),
+                ContentType="application/json",
+                CacheControl="no-cache, no-store"
+            )
+        except Exception as e:
+            print(f"  [Aviso Telemetria]: {e}", flush=True)
+
 # ─── Download Seguro do GeoPDF ────────────────────────────────────────────────
 
-def download_geopdf(url: str, dest_path: str, max_retries: int = 4) -> bool:
+def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 4) -> bool:
     """Baixa o GeoPDF mestre com retries e verificação de integridade."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SkyFPL/Robot-HD",
@@ -189,7 +258,7 @@ def download_geopdf(url: str, dest_path: str, max_retries: int = 4) -> bool:
     }
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"  [Download] Baixando GeoPDF mestre (tentativa {attempt}/{max_retries})...")
+            telemetry.log(f"Baixando GeoPDF mestre do AISWEB (tentativa {attempt}/{max_retries})...", chart_idx, 8)
             r = requests.get(url, headers=headers, stream=True, timeout=60)
             if r.status_code == 200:
                 with open(dest_path, "wb") as f:
@@ -197,18 +266,18 @@ def download_geopdf(url: str, dest_path: str, max_retries: int = 4) -> bool:
                         if chunk:
                             f.write(chunk)
                 size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-                print(f"  [Download] Sucesso! Tamanho: {size_mb:.2f} MB")
+                telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
                 return True
             else:
-                print(f"  [Aviso] HTTP {r.status_code} ao baixar {url}")
+                telemetry.log(f"HTTP {r.status_code} ao baixar {url}", chart_idx, 10, level="WARN")
         except Exception as e:
-            print(f"  [Aviso] Erro na tentativa {attempt}: {e}")
+            telemetry.log(f"Erro na tentativa {attempt}: {e}", chart_idx, 10, level="WARN")
         time.sleep(2 * attempt)
     return False
 
 # ─── Processamento GDAL: GeoPDF -> MBTiles HD ─────────────────────────────────
 
-def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, chart_meta: dict) -> bool:
+def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, chart_meta: dict, telemetry: TelemetryManager, chart_idx: int) -> bool:
     """Executa a transformação de alta fidelidade: GeoPDF -> EPSG:3857 -> MBTiles WebP/PNG."""
     gdalwarp = find_gdal_tool("gdalwarp")
     gdal_translate = find_gdal_tool("gdal_translate")
@@ -220,7 +289,7 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
 
         # 1. GDALWARP: Rasteriza GeoPDF, aplica recorte geográfico exato da folha e projeta em Web Mercator
-        print(f"  [GDAL] Reprojetando para EPSG:3857 (DPI={DPI}, Resampling={RESAMPLING}, Recorte Geográfico Exato)...")
+        telemetry.log(f"Reprojetando GeoPDF para EPSG:3857 ({DPI} DPI, {RESAMPLING.upper()}, Recorte Exato)...", chart_idx, 20)
         warp_cmd = [
             gdalwarp,
             "--config", "GDAL_PDF_DPI", str(DPI),
@@ -232,32 +301,31 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             "-overwrite"
         ]
 
-        # Recorte cirúrgico pelos meridianos/paralelos da folha (zero bordas brancas, zero sobreposição)
         if bbox:
             min_lon, min_lat, max_lon, max_lat = bbox
-            print(f"  [GDAL] Aplicando BBOX exata da folha: {min_lon}°W a {max_lon}°W, {min_lat}°S a {max_lat}°S")
+            telemetry.log(f"Aplicando BBOX oficial: {min_lon}°W a {max_lon}°W, {min_lat}°S a {max_lat}°S", chart_idx, 25)
             warp_cmd.extend([
                 "-te", str(min_lon), str(min_lat), str(max_lon), str(max_lat),
                 "-te_srs", "EPSG:4326"
             ])
 
-        # Resolução alvo por nível de zoom máximo (garante a criação do nível de zoom nativo correto)
         if MAX_ZOOM >= 12:
-            # Resolução nativa de Zoom 12 no Web Mercator: 38.2185 m/pixel
             warp_cmd.extend(["-tr", "38.21851897", "38.21851897"])
         elif MAX_ZOOM == 11:
             warp_cmd.extend(["-tr", "76.43703794", "76.43703794"])
 
         warp_cmd.extend([pdf_path, warped_tif])
 
+        t0 = time.time()
         res1 = subprocess.run(warp_cmd, capture_output=True, text=True)
         if res1.returncode != 0:
-            print(f"  [ERRO GDALWARP]: {res1.stderr}")
+            telemetry.log(f"ERRO GDALWARP: {res1.stderr[:200]}", chart_idx, 30, level="ERROR")
             return False
+        telemetry.log(f"Rasterização e recorte concluídos em {time.time()-t0:.1f}s!", chart_idx, 48)
 
         # 2. GDAL_TRANSLATE: Converte o GeoTIFF para MBTiles com compressão moderna (WEBP ou PNG)
         tile_fmt_upper = TILE_FORMAT.upper()
-        print(f"  [GDAL] Empacotando em MBTiles com compressão {tile_fmt_upper} (Qualidade: {WEBP_QUALITY})...")
+        telemetry.log(f"Empacotando em MBTiles com compressão {tile_fmt_upper} (Qualidade: {WEBP_QUALITY})...", chart_idx, 52)
         translate_cmd = [
             gdal_translate,
             "-of", "MBTILES",
@@ -267,15 +335,15 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             translate_cmd.extend(["-co", f"QUALITY={WEBP_QUALITY}"])
 
         translate_cmd.extend([warped_tif, output_mbtiles])
+        t1 = time.time()
         res2 = subprocess.run(translate_cmd, capture_output=True, text=True)
         if res2.returncode != 0:
-            print(f"  [ERRO GDAL_TRANSLATE]: {res2.stderr}")
+            telemetry.log(f"ERRO GDAL_TRANSLATE: {res2.stderr[:200]}", chart_idx, 60, level="ERROR")
             return False
+        telemetry.log(f"Base MBTiles gerado em {time.time()-t1:.1f}s!", chart_idx, 70)
 
         # 3. GDALADDO: Gera pirâmides completas de zoom (overviews) com interpolação matemática Lanczos
-        print(f"  [GDAL] Gerando pirâmides de overviews Lanczos (Z{MIN_ZOOM} até Z{MAX_ZOOM})...")
-        # Overviews de potências de 2 a partir do zoom base
-        # Se MAX_ZOOM = 12: 2(Z11), 4(Z10), 8(Z9), 16(Z8), 32(Z7), 64(Z6), 128(Z5)
+        telemetry.log(f"Gerando pirâmides de overviews Lanczos (Z{MIN_ZOOM} até Z{MAX_ZOOM})...", chart_idx, 75)
         overviews = ["2", "4", "8", "16", "32", "64", "128"] if MAX_ZOOM >= 12 else ["2", "4", "8", "16", "32", "64"]
         addo_cmd = [
             gdaladdo,
@@ -283,19 +351,21 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             output_mbtiles,
             *overviews
         ]
+        t2 = time.time()
         res3 = subprocess.run(addo_cmd, capture_output=True, text=True)
         if res3.returncode != 0:
-            print(f"  [ERRO GDALADDO]: {res3.stderr}")
+            telemetry.log(f"ERRO GDALADDO: {res3.stderr[:200]}", chart_idx, 80, level="ERROR")
             return False
+        telemetry.log(f"Pirâmides de zoom concluídas em {time.time()-t2:.1f}s!", chart_idx, 88)
 
     # 4. Ajuste e padronização dos Metadados Canônicos no SQLite
     try:
         conn = sqlite3.connect(output_mbtiles)
         cur = conn.cursor()
         
-        # Obter limites reais dos tiles gerados
-        cur.execute("SELECT MIN(zoom_level), MAX(zoom_level) FROM tiles")
-        actual_min_zoom, actual_max_zoom = cur.fetchone()
+        cur.execute("SELECT MIN(zoom_level), MAX(zoom_level), count(*) FROM tiles")
+        row = cur.fetchone()
+        actual_min_zoom, actual_max_zoom, total_tiles = row[0], row[1], row[2]
         
         bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "-180,-85,180,85"
 
@@ -321,16 +391,16 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         ))
         
         conn.commit()
-        # Otimização do arquivo SQLite
         cur.execute("PRAGMA page_size = 4096")
         cur.execute("VACUUM")
         conn.close()
+        telemetry.log(f"SQLite otimizado: {total_tiles:,} tiles indexados (Z{actual_min_zoom}-Z{actual_max_zoom}).", chart_idx, 92)
     except Exception as e:
-        print(f"  [Aviso] Falha ao ajustar metadados SQLite: {e}")
+        telemetry.log(f"Aviso SQLite: {e}", chart_idx, 92, level="WARN")
 
     return True
 
-# ─── Upload R2 e Gestão de Progresso ──────────────────────────────────────────
+# ─── Upload R2 ───────────────────────────────────────────────────────────────
 
 def upload_to_r2(s3_client, local_path: str, r2_key: str) -> int:
     """Faz upload de um arquivo para o bucket Cloudflare R2."""
@@ -346,63 +416,24 @@ def upload_to_r2(s3_client, local_path: str, r2_key: str) -> int:
         )
     return size_bytes
 
-def update_progress_json(s3_client, status: str, charts_done: list, total_charts: list, current: str = None, metadata: dict = None):
-    """Grava o status do robô em wac_geopdf_progress.json no R2 para o Dashboard Admin."""
-    if not R2_BUCKET or not s3_client:
-        return
-
-    n_done = len(charts_done)
-    n_total = len(total_charts)
-    base_percent = int((n_done / n_total) * 100) if n_total > 0 else 0
-
-    progress_payload = {
-        "status": status,
-        "engine": "geopdf_hd",
-        "current": current,
-        "completed": charts_done,
-        "total": total_charts,
-        "percent": base_percent,
-        "config": {
-            "dpi": DPI,
-            "resampling": RESAMPLING,
-            "tile_format": TILE_FORMAT,
-            "minzoom": MIN_ZOOM,
-            "maxzoom": MAX_ZOOM,
-            "r2_prefix": R2_PREFIX
-        },
-        "metadata": metadata or {},
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
-
-    try:
-        s3_client.put_object(
-            Bucket=R2_BUCKET,
-            Key=PROGRESS_KEY,
-            Body=json.dumps(progress_payload, ensure_ascii=False, indent=2),
-            ContentType="application/json",
-            CacheControl="no-cache, no-store"
-        )
-    except Exception as e:
-        print(f"  [Aviso] Falha ao atualizar {PROGRESS_KEY} no R2: {e}")
-
 # ─── Execução Principal ───────────────────────────────────────────────────────
 
 def main():
-    print("=" * 70)
-    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.1")
-    print("=" * 70)
-    print(f"  DPI de Rasterização: {DPI}")
-    print(f"  Zoom Alvo: Z{MIN_ZOOM} a Z{MAX_ZOOM}")
-    print(f"  Algoritmo de Resampling: {RESAMPLING}")
-    print(f"  Formato dos Tiles: {TILE_FORMAT.upper()} (Qualidade: {WEBP_QUALITY})")
-    print(f"  Prefixo de Destino R2: {R2_PREFIX}/")
-    print(f"  Arquivo de Progresso: {PROGRESS_KEY}")
-    print("=" * 70)
+    print("=" * 70, flush=True)
+    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.1", flush=True)
+    print("=" * 70, flush=True)
+    print(f"  DPI de Rasterização: {DPI}", flush=True)
+    print(f"  Zoom Alvo: Z{MIN_ZOOM} a Z{MAX_ZOOM}", flush=True)
+    print(f"  Algoritmo de Resampling: {RESAMPLING}", flush=True)
+    print(f"  Formato dos Tiles: {TILE_FORMAT.upper()} (Qualidade: {WEBP_QUALITY})", flush=True)
+    print(f"  Prefixo de Destino R2: {R2_PREFIX}/", flush=True)
+    print(f"  Arquivo de Progresso: {PROGRESS_KEY}", flush=True)
+    print("=" * 70, flush=True)
 
     # 1. Carregar catálogo oficial
     catalog = load_catalog()
     if not catalog:
-        print("[ERRO FATAL] Não foi possível carregar o catálogo de cartas WAC.")
+        print("[ERRO FATAL] Não foi possível carregar o catálogo de cartas WAC.", flush=True)
         sys.exit(1)
 
     # 2. Determinar cartas a processar
@@ -413,13 +444,10 @@ def main():
         target_codes = [c for c in requested if c in catalog]
 
     if not target_codes:
-        print(f"[ERRO] Nenhum código WAC válido encontrado em CHART_CODES='{CHART_CODES_ENV}'.")
-        print(f"Exemplos válidos: WAC3140, WAC3262, WAC3263. Disponíveis: {len(catalog)} folhas.")
+        print(f"[ERRO] Nenhum código WAC válido encontrado em CHART_CODES='{CHART_CODES_ENV}'.", flush=True)
         sys.exit(1)
 
-    print(f"[WAC HD] Cartas selecionadas para processamento ({len(target_codes)}): {', '.join(target_codes)}\n")
-
-    # 3. Inicializar Cliente S3 (Cloudflare R2) se credenciais estiverem configuradas
+    # 3. Inicializar Cliente S3 (Cloudflare R2)
     s3 = None
     if R2_ENDPOINT and R2_ACCESS_KEY and R2_SECRET_KEY and R2_BUCKET:
         s3 = boto3.client(
@@ -430,50 +458,50 @@ def main():
             region_name="auto"
         )
     else:
-        print("[Aviso] Credenciais do Cloudflare R2 não detectadas no ambiente. Uploads serão ignorados (Modo Local).")
+        print("[Aviso] Credenciais do Cloudflare R2 não detectadas no ambiente. Uploads serão ignorados (Modo Local).", flush=True)
 
-    charts_done = []
-    metadata = {}
+    # Inicializar Telemetria
+    telemetry = TelemetryManager(s3, target_codes)
+    telemetry.log(f"Motor GeoPDF HD iniciado. {len(target_codes)} cartas selecionadas: {', '.join(target_codes)}", 1, 0)
 
     with tempfile.TemporaryDirectory() as workdir:
         for idx, code in enumerate(target_codes, 1):
             chart_info = catalog[code]
-            print(f"[{idx}/{len(target_codes)}] Iniciando: {code} — {chart_info.get('name', '')}")
-            update_progress_json(s3, "processing", charts_done, target_codes, current=code, metadata=metadata)
+            telemetry.current_chart = code
+            telemetry.log(f"[{idx}/{len(target_codes)}] Iniciando processamento: {code} — {chart_info.get('name', '')}", idx, 2)
 
             pdf_url = chart_info.get("pdf_url")
             if not pdf_url:
-                print(f"  [Pular] URL do GeoPDF não disponível para {code}.")
+                telemetry.log(f"URL do GeoPDF não disponível para {code}. Pulando...", idx, 100, level="WARN")
                 continue
 
             local_pdf = os.path.join(workdir, f"{code}.pdf")
             local_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
 
             # A. Download do GeoPDF
-            download_ok = download_geopdf(pdf_url, local_pdf)
+            download_ok = download_geopdf(pdf_url, local_pdf, telemetry, idx)
             if not download_ok:
-                print(f"  [ERRO] Download falhou para {code}.")
+                telemetry.log(f"Download falhou para {code}.", idx, 100, level="ERROR")
                 continue
 
             # B. Processamento GDAL de alta fidelidade
-            process_ok = process_chart_to_mbtiles(code, local_pdf, local_mbtiles, chart_info)
+            process_ok = process_chart_to_mbtiles(code, local_pdf, local_mbtiles, chart_info, telemetry, idx)
             if not process_ok or not os.path.exists(local_mbtiles):
-                print(f"  [ERRO] Falha no pipeline GDAL para {code}.")
+                telemetry.log(f"Falha no pipeline GDAL para {code}.", idx, 100, level="ERROR")
                 continue
 
             size_bytes = os.path.getsize(local_mbtiles)
             size_mb = size_bytes / (1024 * 1024)
-            print(f"  [Sucesso] {code}_HD.mbtiles gerado com sucesso! Tamanho: {size_mb:.2f} MB")
 
             # C. Upload para R2
             r2_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
             if s3:
-                print(f"  [R2 Upload] Enviando para {R2_BUCKET}/{r2_key}...")
+                telemetry.log(f"Enviando {code}_HD.mbtiles ({size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_key})...", idx, 94)
                 upload_to_r2(s3, local_mbtiles, r2_key)
-                print("  [R2 Upload] Upload concluído com sucesso!")
+                telemetry.log(f"Upload de {code}_HD.mbtiles concluído com sucesso!", idx, 100, level="SUCCESS")
 
-            charts_done.append(code)
-            metadata[code] = {
+            telemetry.charts_done.append(code)
+            telemetry.metadata[code] = {
                 "name": chart_info.get("name", ""),
                 "amdt": chart_info.get("amdt", ""),
                 "size_bytes": size_bytes,
@@ -489,15 +517,20 @@ def main():
 
             # Limpar arquivos temporários da folha
             if os.path.exists(local_pdf):
-                os.remove(local_pdf)
+                try: os.remove(local_pdf)
+                except Exception: pass
             if os.path.exists(local_mbtiles):
-                os.remove(local_mbtiles)
+                try: os.remove(local_mbtiles)
+                except Exception: pass
 
     # 4. Finalização
-    update_progress_json(s3, "completed", charts_done, target_codes, metadata=metadata)
-    print("\n" + "=" * 70)
-    print(f"🏁 Processamento Concluído! {len(charts_done)}/{len(target_codes)} cartas WAC HD geradas com sucesso.")
-    print("=" * 70)
+    telemetry.current_chart = None
+    telemetry.current_phase = "Todas as cartas processadas com sucesso!"
+    telemetry.log(f"🏁 Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD geradas e publicadas.", len(target_codes), 100, level="SUCCESS")
+    telemetry.sync_r2(status="completed")
+    print("\n" + "=" * 70, flush=True)
+    print(f"🏁 Processamento Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD geradas com sucesso.", flush=True)
+    print("=" * 70, flush=True)
 
 if __name__ == "__main__":
     main()
