@@ -32,9 +32,9 @@ on:
         required: false
         default: '12'
       r2_prefix:
-        description: '🛡️ Prefixo R2 Quarentena/Testes (ex: wac-test)'
+        description: '🛡️ Prefixo R2 Staging (ex: wac/staging)'
         required: false
-        default: 'wac-test'
+        default: 'wac/staging'
 
 concurrency:
   group: wac-geopdf-hd-builder
@@ -82,7 +82,7 @@ jobs:
           WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
           MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
           MAX_ZOOM: ${{ github.event.inputs.max_zoom || '13' }}
-          R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'wac-test' }}
+          R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'wac/staging' }}
           PROGRESS_KEY: 'wac_geopdf_progress.json'
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}

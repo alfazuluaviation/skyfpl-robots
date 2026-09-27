@@ -42,8 +42,8 @@ def main():
     print("🚀 SkyFPL — Promoção das Cartas WAC HD para Produção (R2)", flush=True)
     print("=" * 70, flush=True)
     print(f"  Bucket: {R2_BUCKET}", flush=True)
-    print(f"  Origem: wac-test/{{code}}_HD.mbtiles", flush=True)
-    print(f"  Destino: wac/{{code}}.mbtiles", flush=True)
+    print("  Origem: wac/staging/{code}_HD.mbtiles", flush=True)
+    print("  Destino: wac/{code}.mbtiles", flush=True)
     print("=" * 70, flush=True)
 
     if not (R2_ENDPOINT and R2_ACCESS_KEY and R2_SECRET_KEY and R2_BUCKET):
@@ -71,18 +71,33 @@ def main():
     promoted_count = 0
     total_bytes = 0
 
-    print("\n📦 ETAPA 1: Copiando server-side de 'wac-test/' para 'wac/'...", flush=True)
+    print("\n📦 ETAPA 1: Copiando server-side de 'wac/staging/' para 'wac/'...", flush=True)
     for idx, code in enumerate(ALL_WAC_CODES, start=1):
-        src_key = f"wac-test/{code}_HD.mbtiles"
+        candidates = [
+            f"wac/staging/{code}_HD.mbtiles",
+            f"wac/staging/{code}.mbtiles",
+            f"wac-test/{code}_HD.mbtiles"
+        ]
+        
+        src_key = None
+        size = 0
+        for cand in candidates:
+            try:
+                head = s3.head_object(Bucket=R2_BUCKET, Key=cand)
+                src_key = cand
+                size = head.get("ContentLength", 0)
+                break
+            except ClientError:
+                continue
+
         dst_key = f"wac/{code}.mbtiles"
 
-        try:
-            # Verifica se o arquivo de origem existe
-            head = s3.head_object(Bucket=R2_BUCKET, Key=src_key)
-            size = head.get("ContentLength", 0)
-            total_bytes += size
+        if not src_key:
+            print(f"  [{idx:02d}/46] ⚠️ Arquivo de origem não encontrado em staging para {code}", flush=True)
+            continue
 
-            # Cópia server-side no Cloudflare R2 (ultra-rápida)
+        try:
+            total_bytes += size
             copy_source = {"Bucket": R2_BUCKET, "Key": src_key}
             s3.copy_object(
                 Bucket=R2_BUCKET,
@@ -95,33 +110,33 @@ def main():
             promoted_count += 1
             print(f"  [{idx:02d}/46] ✅ Promovido: {src_key} ➔ {dst_key} ({size / 1024 / 1024:.2f} MB)", flush=True)
 
-            # Atualiza metadados
             if code in metadata:
                 metadata[code]["r2_key"] = dst_key
                 metadata[code]["promoted_at"] = datetime.now(timezone.utc).isoformat()
 
         except ClientError as e:
-            if e.response.get("Error", {}).get("Code") == "404":
-                print(f"  [{idx:02d}/46] ⚠️ Arquivo de origem não encontrado: {src_key}", flush=True)
-            else:
-                print(f"  [{idx:02d}/46] ❌ Erro ao copiar {src_key}: {e}", flush=True)
+            print(f"  [{idx:02d}/46] ❌ Erro ao copiar {src_key}: {e}", flush=True)
 
     print(f"\n✨ Total de cartas promovidas com sucesso: {promoted_count}/46 ({total_bytes / 1024 / 1024:.2f} MB)", flush=True)
 
     # 2. Preservar o arquivo WAC_BRASIL_FULL.mbtiles conforme solicitado
     print("\n🛡️ ETAPA 2: Preservando 'wac/WAC_BRASIL_FULL.mbtiles' (conforme solicitado pelo usuário até migração completa).", flush=True)
 
-    # 3. Expurgar a pasta de quarentena wac-test/
-    print("\n🧹 ETAPA 3: Limpando pasta de quarentena 'wac-test/'...", flush=True)
-    delete_objects = [{"Key": f"wac-test/{code}_HD.mbtiles"} for code in ALL_WAC_CODES]
+    # 3. Expurgar a pasta de staging wac/staging/
+    print("\n🧹 ETAPA 3: Limpando pasta de staging 'wac/staging/'...", flush=True)
+    delete_objects = []
+    for code in ALL_WAC_CODES:
+        delete_objects.append({"Key": f"wac/staging/{code}_HD.mbtiles"})
+        delete_objects.append({"Key": f"wac/staging/{code}.mbtiles"})
+        delete_objects.append({"Key": f"wac-test/{code}_HD.mbtiles"})
     try:
         s3.delete_objects(
             Bucket=R2_BUCKET,
             Delete={"Objects": delete_objects}
         )
-        print(f"  ✅ {len(delete_objects)} arquivos de teste removidos de 'wac-test/'.", flush=True)
+        print("  ✅ Arquivos transitórios de staging limpos com sucesso.", flush=True)
     except Exception as e:
-        print(f"  ⚠️ Aviso ao limpar 'wac-test/': {e}", flush=True)
+        print(f"  ⚠️ Aviso ao limpar staging: {e}", flush=True)
 
     # 4. Atualiza a telemetria e o índice oficial no R2
     print("\n📝 ETAPA 4: Atualizando telemetria 'wac_geopdf_progress.json' no R2...", flush=True)
