@@ -109,7 +109,10 @@ def load_catalog() -> dict:
     if os.path.exists(WAC_CATALOG_FILE):
         try:
             with open(WAC_CATALOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                cat = json.load(f)
+                if cat.get("WAC3066", {}).get("pdf_url") in ("#", "", None):
+                    cat["WAC3066"]["pdf_url"] = "https://aisweb.decea.mil.br/cartas/visuais/wac/recife_wac_20251225.pdf"
+                return cat
         except Exception as e:
             print(f"[Aviso] Falha ao ler catálogo local ({e}). Consultando AISWEB...")
 
@@ -125,8 +128,15 @@ def load_catalog() -> dict:
             if "WAC" in row:
                 tds = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
                 clean = [re.sub(r"<[^>]+>", "", td).strip() for td in tds]
-                link_m = re.search(r'href=["\']([^"\']+)["\']', row)
-                link = link_m.group(1) if link_m else ""
+                # Extrai a URL real do PDF (priorizando data-href ou href que contenha .pdf, evitando '#')
+                pdf_m = re.search(r'(https?://[^\s"\'<>]+?\.pdf)', row)
+                link = pdf_m.group(1) if pdf_m else ""
+                if not link:
+                    href_m = re.search(r'(?:href|data-href)=["\']([^"\']+\.pdf)["\']', row)
+                    if href_m:
+                        val = href_m.group(1)
+                        link = val if val.startswith("http") else f"https://aisweb.decea.mil.br/{val.lstrip('/')}"
+
                 if len(clean) >= 4 and clean[1].isdigit():
                     ident = clean[1]
                     code = f"WAC{ident}"
@@ -135,6 +145,8 @@ def load_catalog() -> dict:
                         "ident": ident,
                         "name": clean[2],
                         "amdt": clean[3],
+                        "publication_date": clean[4] if len(clean) > 4 else "",
+                        "effective_date": clean[5] if len(clean) > 5 else "",
                         "pdf_url": link,
                         "bbox": WAC_BBOXES.get(code)
                     }
@@ -406,7 +418,9 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         cur.execute("DELETE FROM metadata")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_name ON metadata (name)")
 
-        bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "-180,-85,180,85"
+        pub_date = str(chart_meta.get("publication_date", ""))
+        eff_date = str(chart_meta.get("effective_date", ""))
+        amdt_code = str(chart_meta.get("amdt", ""))
 
         cur.execute("""
             INSERT OR REPLACE INTO metadata (name, value) VALUES
@@ -419,14 +433,20 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             ('minzoom', ?),
             ('maxzoom', ?),
             ('scheme', 'tms'),
-            ('generator', 'SkyFPL WAC GeoPDF HD Engine v2.1')
+            ('generator', 'SkyFPL WAC GeoPDF HD Engine v2.1'),
+            ('amdt', ?),
+            ('publication_date', ?),
+            ('effective_date', ?)
         """, (
             f"SkyFPL WAC {code} HD",
             f"WAC {code} {chart_meta.get('name', '')} - DECEA Vector GeoPDF ({DPI} DPI, {RESAMPLING})",
             TILE_FORMAT.lower(),
             bounds_str,
             str(actual_min_zoom if actual_min_zoom is not None else MIN_ZOOM),
-            str(actual_max_zoom if actual_max_zoom is not None else MAX_ZOOM)
+            str(actual_max_zoom if actual_max_zoom is not None else MAX_ZOOM),
+            amdt_code,
+            pub_date,
+            eff_date
         ))
         
         conn.commit()
@@ -543,6 +563,8 @@ def main():
             telemetry.metadata[code] = {
                 "name": chart_info.get("name", ""),
                 "amdt": chart_info.get("amdt", ""),
+                "publication_date": chart_info.get("publication_date", ""),
+                "effective_date": chart_info.get("effective_date", ""),
                 "size_bytes": size_bytes,
                 "size_mb": round(size_mb, 2),
                 "r2_key": r2_key,
