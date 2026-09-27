@@ -193,6 +193,17 @@ class TelemetryManager:
         self.current_phase = None
         self.percent = 0
 
+        # Carrega histórico cumulativo de cartas já salvas no R2
+        if self.s3 and R2_BUCKET:
+            try:
+                resp = self.s3.get_object(Bucket=R2_BUCKET, Key=PROGRESS_KEY)
+                prev = json.loads(resp['Body'].read().decode('utf-8'))
+                if isinstance(prev.get("metadata"), dict):
+                    self.metadata = dict(prev["metadata"])
+                    print(f"  [Telemetria] Carregadas {len(self.metadata)} cartas prévias do histórico R2.", flush=True)
+            except Exception:
+                pass
+
     def log(self, message: str, chart_idx: int = None, chart_sub_percent: float = None, level: str = "INFO"):
         """Registra log com timestamp e envia atualização imediata de progresso ao R2."""
         now_str = datetime.now().strftime("%H:%M:%S")
