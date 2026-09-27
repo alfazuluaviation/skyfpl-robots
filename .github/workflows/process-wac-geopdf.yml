@@ -1,0 +1,105 @@
+name: 🗺️ WAC GeoPDF HD Engine — Compilação Alta Resolução e Testes R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_codes:
+        description: '🗺️ Cartas WAC (ex: WAC3140 ou WAC3140,WAC3262 ou ALL)'
+        required: true
+        default: 'WAC3140'
+      dpi:
+        description: '🎯 Resolução de Rasterização (254 ou 300 DPI)'
+        required: false
+        default: '254'
+      resampling:
+        description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
+        required: false
+        default: 'lanczos'
+      tile_format:
+        description: '📦 Formato dos Tiles (webp ou png)'
+        required: false
+        default: 'webp'
+      webp_quality:
+        description: '💎 Qualidade WebP (1-100)'
+        required: false
+        default: '85'
+      min_zoom:
+        description: 'Zoom Mínimo (padrão: 5)'
+        required: false
+        default: '5'
+      max_zoom:
+        description: 'Zoom Máximo (padrão: 11)'
+        required: false
+        default: '11'
+      r2_prefix:
+        description: '🛡️ Prefixo R2 Quarentena/Testes (ex: wac-test)'
+        required: false
+        default: 'wac-test'
+
+concurrency:
+  group: wac-geopdf-hd-builder
+  cancel-in-progress: false
+
+jobs:
+  build_wac_hd:
+    name: Compilar Cartas WAC HD (GeoPDF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: wac-geopdf-robot/requirements.txt
+
+      - name: 🌍 Instalar GDAL Nativo & Utilitários de Sistema
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gdal-bin python3-gdal libgdal-dev
+          echo "=== GDAL Version ==="
+          gdalinfo --version
+          echo "=== Formatos Suportados (PDF / MBTILES / WEBP) ==="
+          gdal_translate --formats | grep -E "PDF|MBTILES|WEBP" || true
+
+      - name: 📦 Instalar Dependências Python
+        working-directory: wac-geopdf-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🚀 Executar Motor WAC GeoPDF HD
+        working-directory: wac-geopdf-robot
+        env:
+          CHART_CODES: ${{ github.event.inputs.chart_codes || 'WAC3140' }}
+          DPI: ${{ github.event.inputs.dpi || '254' }}
+          RESAMPLING: ${{ github.event.inputs.resampling || 'lanczos' }}
+          TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
+          WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+          R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'wac-test' }}
+          PROGRESS_KEY: 'wac_geopdf_progress.json'
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+        run: |
+          python build_wac_geopdf.py
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🗺️ Relatório de Execução — WAC GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor Configurado |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas Selecionadas** | \`${{ github.event.inputs.chart_codes }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **DPI** | \`${{ github.event.inputs.dpi }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Resampling** | \`${{ github.event.inputs.resampling }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Formato do Tile** | \`${{ github.event.inputs.tile_format }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Destino R2** | \`${{ github.event.inputs.r2_prefix }}/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY
