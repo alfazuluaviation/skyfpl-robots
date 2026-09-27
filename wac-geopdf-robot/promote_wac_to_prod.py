@@ -108,13 +108,8 @@ def main():
 
     print(f"\n✨ Total de cartas promovidas com sucesso: {promoted_count}/46 ({total_bytes / 1024 / 1024:.2f} MB)", flush=True)
 
-    # 2. Expurgar o arquivo legado gigante WAC_BRASIL_FULL.mbtiles
-    print("\n🧹 ETAPA 2: Expurgando arquivo legado gigante 'wac/WAC_BRASIL_FULL.mbtiles' (1.56 GB)...", flush=True)
-    try:
-        s3.delete_object(Bucket=R2_BUCKET, Key="wac/WAC_BRASIL_FULL.mbtiles")
-        print("  ✅ 'wac/WAC_BRASIL_FULL.mbtiles' deletado com sucesso do R2! (~1.56 GB liberados)", flush=True)
-    except Exception as e:
-        print(f"  ⚠️ Aviso ao expurgar WAC_BRASIL_FULL.mbtiles: {e}", flush=True)
+    # 2. Preservar o arquivo WAC_BRASIL_FULL.mbtiles conforme solicitado
+    print("\n🛡️ ETAPA 2: Preservando 'wac/WAC_BRASIL_FULL.mbtiles' (conforme solicitado pelo usuário até migração completa).", flush=True)
 
     # 3. Expurgar a pasta de quarentena wac-test/
     print("\n🧹 ETAPA 3: Limpando pasta de quarentena 'wac-test/'...", flush=True)
@@ -154,7 +149,7 @@ def main():
     print("🎉 PROMOÇÃO CONCLUÍDA COM TOTAL SUCESSO!", flush=True)
     print("  • 46 Cartas HD em vigor na pasta 'wac/WAC{codigo}.mbtiles'")
     print("  • Quarentena 'wac-test/' limpa")
-    print("  • 1.56 GB economizados com a eliminação do WAC_BRASIL_FULL legado")
+    print("  • WAC_BRASIL_FULL mantido intacto conforme solicitado")
     print("  • App SkyFPL já compatível sem necessidade de alteração de código!")
     print("=" * 70, flush=True)
 
