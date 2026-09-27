@@ -34,12 +34,12 @@ from datetime import datetime, timezone
 # ─── Configurações Dinâmicas (Injetadas pelo Dashboard / GitHub Actions) ───────
 
 CHART_CODES_ENV = os.environ.get("CHART_CODES", "WAC3262").strip()
-DPI = int(os.environ.get("DPI", 300))
+DPI = int(os.environ.get("DPI", 600))
 RESAMPLING = os.environ.get("RESAMPLING", "lanczos").strip().lower()
 TILE_FORMAT = os.environ.get("TILE_FORMAT", "webp").strip().lower()
 WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
-MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 12))
+MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 13))
 R2_PREFIX = os.environ.get("R2_PREFIX", "wac-test").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "wac_geopdf_progress.json").strip()
 
@@ -309,7 +309,10 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
                 "-te_srs", "EPSG:4326"
             ])
 
-        if MAX_ZOOM >= 12:
+        if MAX_ZOOM >= 13:
+            # Resolução nativa de Zoom 13 no Web Mercator: 19.10925948 m/pixel
+            warp_cmd.extend(["-tr", "19.10925948", "19.10925948"])
+        elif MAX_ZOOM == 12:
             warp_cmd.extend(["-tr", "38.21851897", "38.21851897"])
         elif MAX_ZOOM == 11:
             warp_cmd.extend(["-tr", "76.43703794", "76.43703794"])
@@ -342,9 +345,26 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             return False
         telemetry.log(f"Base MBTiles gerado em {time.time()-t1:.1f}s!", chart_idx, 70)
 
+        # 2.1. CRUCIAL: Escrever 'format=webp' na tabela metadata ANTES de chamar gdaladdo!
+        # Sem isso, o GDAL assume por padrão 'format=png' e gera overviews PNG descompactados (100x mais pesados)!
+        try:
+            conn = sqlite3.connect(output_mbtiles)
+            cur = conn.cursor()
+            cur.execute("INSERT OR REPLACE INTO metadata (name, value) VALUES ('format', ?)", (TILE_FORMAT.lower(),))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            telemetry.log(f"Aviso metadata format: {e}", chart_idx, 72, level="WARN")
+
         # 3. GDALADDO: Gera pirâmides completas de zoom (overviews) com interpolação matemática Lanczos
-        telemetry.log(f"Gerando pirâmides de overviews Lanczos (Z{MIN_ZOOM} até Z{MAX_ZOOM})...", chart_idx, 75)
-        overviews = ["2", "4", "8", "16", "32", "64", "128"] if MAX_ZOOM >= 12 else ["2", "4", "8", "16", "32", "64"]
+        telemetry.log(f"Gerando pirâmides de overviews Lanczos ({tile_fmt_upper} Z{MIN_ZOOM} até Z{MAX_ZOOM})...", chart_idx, 75)
+        if MAX_ZOOM >= 13:
+            overviews = ["2", "4", "8", "16", "32", "64", "128", "256"]
+        elif MAX_ZOOM >= 12:
+            overviews = ["2", "4", "8", "16", "32", "64", "128"]
+        else:
+            overviews = ["2", "4", "8", "16", "32", "64"]
+
         addo_cmd = [
             gdaladdo,
             "-r", RESAMPLING,
