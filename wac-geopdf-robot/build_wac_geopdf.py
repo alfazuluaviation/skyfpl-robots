@@ -386,7 +386,15 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
         cur.execute("SELECT MIN(zoom_level), MAX(zoom_level), count(*) FROM tiles")
         row = cur.fetchone()
         actual_min_zoom, actual_max_zoom, total_tiles = row[0], row[1], row[2]
-        
+
+        # 4.1. CRUCIAL: Garantir unicidade absoluta na tabela metadata!
+        # Sem UNIQUE index, o GDAL MBTiles não substitui linhas e duplica 'minzoom'.
+        # O leitor C++ do GDAL lê a 2ª linha de 'minzoom' como 'maxzoom', travando o mapa no Zoom 5!
+        cur.execute("SELECT name, value FROM metadata")
+        existing_meta = dict(cur.fetchall())
+        cur.execute("DELETE FROM metadata")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_name ON metadata (name)")
+
         bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else "-180,-85,180,85"
 
         cur.execute("""
