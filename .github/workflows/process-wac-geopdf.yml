@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       chart_codes:
-        description: '🗺️ Cartas WAC (ex: WAC3140 ou WAC3140,WAC3262 ou ALL)'
+        description: '🗺️ Cartas WAC (ex: WAC3262 ou WAC3189,WAC3262 ou ALL)'
         required: true
-        default: 'WAC3140'
+        default: 'WAC3262'
       dpi:
         description: '🎯 Resolução de Rasterização (300, 450 ou 600 DPI)'
         required: false
@@ -14,7 +14,7 @@ on:
       resampling:
         description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
         required: false
-        default: 'lanczos'
+        default: 'cubic'
       tile_format:
         description: '📦 Formato dos Tiles (webp ou png)'
         required: false
@@ -28,9 +28,9 @@ on:
         required: false
         default: '5'
       max_zoom:
-        description: 'Zoom Máximo (padrão: 13)'
+        description: 'Zoom Máximo (padrão: 12)'
         required: false
-        default: '13'
+        default: '12'
       r2_prefix:
         description: '🛡️ Prefixo R2 Quarentena/Testes (ex: wac-test)'
         required: false

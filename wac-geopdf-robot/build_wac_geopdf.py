@@ -35,11 +35,11 @@ from datetime import datetime, timezone
 
 CHART_CODES_ENV = os.environ.get("CHART_CODES", "WAC3262").strip()
 DPI = int(os.environ.get("DPI", 600))
-RESAMPLING = os.environ.get("RESAMPLING", "lanczos").strip().lower()
+RESAMPLING = os.environ.get("RESAMPLING", "cubic").strip().lower()
 TILE_FORMAT = os.environ.get("TILE_FORMAT", "webp").strip().lower()
 WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
-MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 13))
+MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 12))
 R2_PREFIX = os.environ.get("R2_PREFIX", "wac-test").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "wac_geopdf_progress.json").strip()
 
