@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 
 # ─── Configurações Dinâmicas (Injetadas pelo Dashboard / GitHub Actions) ───────
 
-CHART_CODES_ENV = os.environ.get("CHART_CODES", "WAC3262").strip()
+CHART_CODES_ENV = os.environ.get("CHART_CODES", "").strip()
 DPI = int(os.environ.get("DPI", 600))
 RESAMPLING = os.environ.get("RESAMPLING", "cubic").strip().lower()
 TILE_FORMAT = os.environ.get("TILE_FORMAT", "webp").strip().lower()
@@ -460,12 +460,43 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
 
     return True
 
+# ─── Conversão PMTiles ────────────────────────────────────────────────────────
+
+def convert_to_pmtiles(local_mbtiles: str, local_pmtiles: str, telemetry, chart_idx: int) -> bool:
+    """Converte um arquivo MBTiles (WebP/PNG) para o formato PMTiles usando go-pmtiles CLI."""
+    pmtiles_bin = shutil.which("pmtiles") or "/usr/local/bin/pmtiles"
+    if not os.path.exists(pmtiles_bin) and not shutil.which("pmtiles"):
+        telemetry.log("Binário 'pmtiles' não encontrado no PATH. Conversão PMTiles pulada.", chart_idx, 93, level="WARN")
+        return False
+
+    cmd = [pmtiles_bin, "convert", local_mbtiles, local_pmtiles]
+    telemetry.log(f"Convertendo MBTiles para PMTiles via Protomaps CLI...", chart_idx, 93)
+    try:
+        t0 = time.time()
+        res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        dur = time.time() - t0
+        pmtiles_size_mb = os.path.getsize(local_pmtiles) / (1024 * 1024)
+        telemetry.log(f"PMTiles gerado com sucesso em {dur:.1f}s ({pmtiles_size_mb:.2f} MB)!", chart_idx, 94, level="SUCCESS")
+        return True
+    except subprocess.CalledProcessError as e:
+        telemetry.log(f"Aviso conversão PMTiles: {e.stderr or e.stdout or str(e)}", chart_idx, 93, level="WARN")
+        return False
+    except Exception as e:
+        telemetry.log(f"Exceção conversão PMTiles: {e}", chart_idx, 93, level="WARN")
+        return False
+
 # ─── Upload R2 ───────────────────────────────────────────────────────────────
 
 def upload_to_r2(s3_client, local_path: str, r2_key: str) -> int:
     """Faz upload de um arquivo para o bucket Cloudflare R2."""
     size_bytes = os.path.getsize(local_path)
-    content_type = "application/vnd.sqlite3" if local_path.endswith(".mbtiles") else "application/json"
+    if local_path.endswith(".pmtiles"):
+        content_type = "application/x-pmtiles"
+    elif local_path.endswith(".mbtiles"):
+        content_type = "application/vnd.sqlite3"
+    else:
+        content_type = "application/json"
+
     with open(local_path, "rb") as f:
         s3_client.put_object(
             Bucket=R2_BUCKET,
@@ -537,6 +568,7 @@ def main():
 
             local_pdf = os.path.join(workdir, f"{code}.pdf")
             local_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
+            local_pmtiles = os.path.join(workdir, f"{code}.pmtiles")
 
             # A. Download do GeoPDF
             download_ok = download_geopdf(pdf_url, local_pdf, telemetry, idx)
@@ -553,12 +585,24 @@ def main():
             size_bytes = os.path.getsize(local_mbtiles)
             size_mb = size_bytes / (1024 * 1024)
 
-            # C. Upload para R2
-            r2_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
+            # C. Conversão para PMTiles (para consumo direto pelo Web via Range Requests)
+            pmtiles_ok = convert_to_pmtiles(local_mbtiles, local_pmtiles, telemetry, idx)
+            pmtiles_size_bytes = os.path.getsize(local_pmtiles) if (pmtiles_ok and os.path.exists(local_pmtiles)) else 0
+            pmtiles_size_mb = pmtiles_size_bytes / (1024 * 1024)
+
+            # D. Upload para Cloudflare R2 (Híbrido: MBTiles para Mobile / PMTiles para Web)
+            r2_mbtiles_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
+            r2_pmtiles_key = f"{R2_PREFIX}/{code}.pmtiles"
+
             if s3:
-                telemetry.log(f"Enviando {code}_HD.mbtiles ({size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_key})...", idx, 94)
-                upload_to_r2(s3, local_mbtiles, r2_key)
-                telemetry.log(f"Upload de {code}_HD.mbtiles concluído com sucesso!", idx, 100, level="SUCCESS")
+                telemetry.log(f"Enviando {code}_HD.mbtiles ({size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_mbtiles_key})...", idx, 95)
+                upload_to_r2(s3, local_mbtiles, r2_mbtiles_key)
+
+                if pmtiles_ok and os.path.exists(local_pmtiles):
+                    telemetry.log(f"Enviando {code}.pmtiles ({pmtiles_size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_pmtiles_key})...", idx, 98)
+                    upload_to_r2(s3, local_pmtiles, r2_pmtiles_key)
+
+                telemetry.log(f"Upload duplo ({code}_HD.mbtiles + {code}.pmtiles) concluído com sucesso!", idx, 100, level="SUCCESS")
 
             telemetry.charts_done.append(code)
             telemetry.metadata[code] = {
@@ -568,7 +612,10 @@ def main():
                 "effective_date": chart_info.get("effective_date", ""),
                 "size_bytes": size_bytes,
                 "size_mb": round(size_mb, 2),
-                "r2_key": r2_key,
+                "pmtiles_size_bytes": pmtiles_size_bytes,
+                "pmtiles_size_mb": round(pmtiles_size_mb, 2),
+                "r2_key": r2_mbtiles_key,
+                "r2_pmtiles_key": r2_pmtiles_key if pmtiles_ok else None,
                 "dpi": DPI,
                 "minzoom": MIN_ZOOM,
                 "maxzoom": MAX_ZOOM,
@@ -583,6 +630,9 @@ def main():
                 except Exception: pass
             if os.path.exists(local_mbtiles):
                 try: os.remove(local_mbtiles)
+                except Exception: pass
+            if os.path.exists(local_pmtiles):
+                try: os.remove(local_pmtiles)
                 except Exception: pass
 
     # 4. Finalização

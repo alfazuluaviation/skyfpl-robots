@@ -6,7 +6,7 @@ on:
       chart_codes:
         description: '🗺️ Cartas WAC (ex: WAC3262 ou WAC3189,WAC3262 ou ALL)'
         required: true
-        default: 'WAC3262'
+        default: ''
       dpi:
         description: '🎯 Resolução de Rasterização (300, 450 ou 600 DPI)'
         required: false
@@ -66,6 +66,13 @@ jobs:
           echo "=== Formatos Suportados (PDF / MBTILES / WEBP) ==="
           gdal_translate --formats | grep -E "PDF|MBTILES|WEBP" || true
 
+      - name: 📦 Instalar Utilitário PMTiles (Protomaps CLI)
+        run: |
+          curl -sL https://github.com/protomaps/go-pmtiles/releases/download/v1.27.1/go-pmtiles_1.27.1_Linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin pmtiles
+          sudo chmod +x /usr/local/bin/pmtiles
+          echo "=== PMTiles CLI Version ==="
+          pmtiles version
+
       - name: 📦 Instalar Dependências Python
         working-directory: wac-geopdf-robot
         run: |
@@ -75,7 +82,7 @@ jobs:
       - name: 🚀 Executar Motor WAC GeoPDF HD
         working-directory: wac-geopdf-robot
         env:
-          CHART_CODES: ${{ github.event.inputs.chart_codes || 'WAC3262' }}
+          CHART_CODES: ${{ github.event.inputs.chart_codes }}
           DPI: ${{ github.event.inputs.dpi || '600' }}
           RESAMPLING: ${{ github.event.inputs.resampling || 'lanczos' }}
           TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
