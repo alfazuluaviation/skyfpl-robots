@@ -69,43 +69,76 @@ graph TD
   * Runner Linux com ambiente GDAL nativo (`gdal-bin`, `python3-gdal`, `libgdal-dev`) e Python 3.11.
 
 ### Fase 3: Modernização do Dashboard Admin (`WacManagement.tsx`) — ✅ CONCLUÍDA
-* **Localização:** `c:\Users\josemir\Desktop\skynav-pro-official\admin\src\WacManagement.tsx`.
+* **Localização:** `skynav-pro-official/admin/src/WacManagement.tsx` e `WacMapViewer.tsx`.
 * **Implementação da Interface de Dupla Aba:**
-  * **Aba 1: `📡 WMS GeoServer (Padrão Atual)`**
-    * Mantém 100% dos controles, status e histórico que já funcionam hoje.
-  * **Aba 2: `🚀 Motor GeoPDF HD (Alta Resolução - Teste)`**
-    * Seletor de cartas WAC com busca rápida em tempo real (46 folhas).
-    * Controles de precisão: Seletor de DPI (254 / 300), Interpolação (Lanczos / Cubic) e Formato (WebP / PNG).
-    * Card de Telemetria em tempo real do novo robô lendo `wac_geopdf_progress.json` do Cloudflare R2.
-    * Botão de disparo direto via API do GitHub Actions no repositório de robôs.
-    * Tabela/Cards de MBTiles gerados com link direto para download e cópia de URL.
+  * **Aba 1: `📡 WMS GeoServer (Padrão Legado)`**
+    * Mantém 100% dos controles, status e histórico de processamento legado intactos.
+  * **Aba 2: `🚀 Motor GeoPDF HD (Alta Resolução & Homologação)`**
+    * Seletor de cartas WAC com busca rápida em tempo real (46 folhas) e contagem dinâmica.
+    * Controles de precisão: Seletor de DPI (300 a 600 DPI), Interpolação (Lanczos / Cubic) e Formato (WebP RGBA / PNG).
+    * Card de Telemetria com visualizador de logs de terminal animado, lendo `wac_geopdf_progress.json` do Cloudflare R2 em tempo real via polling a cada 3s.
+    * Tabela de cartas geradas em quarentena (`wac/staging/`) com links diretos para download do MBTiles, cópia de URL pública e botão de auditoria imediata.
+  * **Aba 3: `🗺️ Mapa Tático & Auditoria Visual (Tela Cheia)` (`WacMapViewer.tsx`)**
+    * Visualizador MapLibre WebGL dedicado para comparação visual lado a lado.
+    * Alternância instantânea entre GeoServer DECEA Live (WMS) e WAC GeoPDF HD (Quarentena/Staging).
+    * Renderização dos 46 polígonos BBOX tracejados oficiais com detecção de interseção e clique interativo.
+    * Slider de opacidade de camada em tempo real (0 a 100%).
+    * HUD de coordenadas aeronáuticas com projeção Web Mercator e detecção de nível de zoom (ativação de raster a partir de Z ≥ 5.0).
+    * Indicação dinâmica de status de prontidão (`✓ R2 Quarentena` vs `Fallback: DECEA Live WMS`).
 
-### Fase 4: Teste Piloto e Comparação A/B — 🔄 PRÓXIMA ETAPA
-* Executar o teste com uma carta piloto representativa (ex: **WAC 3140 Brasília** ou **WAC 3262 São Paulo**).
-* Realizar a comparação visual lado a lado:
-  * MBTiles Legado (WMS DECEA 72 DPI) vs MBTiles Novo (GeoPDF/TIFF HD 254-300 DPI).
-  * Inspeção de nitidez nos níveis de zoom Z5, Z6, Z7 e Z8.
-  * Auditoria do tamanho do arquivo (MB) e tempo de resposta.
+### Fase 4: Conversão Nativa para PMTiles (Pipeline Híbrido) — ✅ CONCLUÍDA
+* **Localização:** Integrado em `.github/workflows/process-wac-geopdf.yml` e `build_wac_geopdf.py`.
+* **Arquitetura Híbrida Unificada:**
+  * No mesmo job do GitHub Actions, o binário oficial Protomaps Go CLI (`go-pmtiles v1.27.1`) é instalado em `/usr/local/bin/pmtiles`.
+  * Logo após o empacotamento do SQLite MBTiles, o script invoca `convert_to_pmtiles()`.
+  * Tempo de conversão registrado em bancada: **apenas 0.4 segundos** por folha, pois os blocos WebP já estão calculados; a ferramenta apenas reorganiza a estrutura de bytes em diretórios compactos Hilbert v3.
+  * Upload duplo automático para o Cloudflare R2:
+    * `wac/staging/{code}_HD.mbtiles` (`application/vnd.sqlite3`) para o **SkyFPL Native (iOS e Android)**.
+    * `wac/staging/{code}.pmtiles` (`application/x-pmtiles`) para o **SkyFPL Web (HTTP Range Requests sem servidor)**.
+
+### Fase 5: Homologação Piloto e Validação Visual (Folha WAC3141 Salvador) — ✅ CONCLUÍDA
+* **Execução Real:** Disparada pelo Dashboard Admin em 2026-09-28T03:25:11Z.
+* **Métricas Registradas no Log:**
+  * Download GeoPDF AISWEB: 3.77 MB (13.0s).
+  * Rasterização e Recorte GDAL (600 DPI, Cubic, EPSG:3857): 44.0s.
+  * Empacotamento Base MBTiles (WebP Qualidade 85): 32.6s.
+  * Pirâmides Overviews Lanczos (Z5 a Z12): 23.5s (4.568 tiles indexados).
+  * Otimização SQLite (`PRAGMA page_size=4096`, `VACUUM`): 0.8s.
+  * Conversão Protomaps PMTiles CLI: **0.4s** (65.85 MB).
+  * Upload Duplo Cloudflare R2: MBTiles (68.84 MB) + PMTiles (65.85 MB) concluídos em 10.0s.
+  * **Tempo total do ciclo completo:** ~2 minutos e 15 segundos.
+* **Auditoria Visual no Mapa Tático:** Aprovada com louvor. Recorte exato nos limites de coordenadas geográficas (-43°W a -37°W, -16°S a -12°S), nitidez cirúrgica nos relevos e waypoints, e zero bordas brancas.
 
 ---
 
-## 📂 4. Arquivos que Serão Criados e Modificados
+## 🔬 4. Detalhamento Técnico das Funções do Motor (`build_wac_geopdf.py`)
 
-### Repositório de Robôs (`skyfpl-robots`):
-* 🆕 `wac-geopdf-robot/build_wac_geopdf.py`
-* 🆕 `wac-geopdf-robot/requirements.txt`
-* 🆕 `wac-geopdf-robot/README.md`
-* 🆕 `.github/workflows/process-wac-geopdf.yml`
-
-### Repositório do Dashboard (`skynav-pro-official/admin`):
-* ✏️ `src/WacManagement.tsx` *(Adição do sistema de abas e painel do novo robô)*
+| Função | Responsabilidade Técnica |
+| :--- | :--- |
+| `load_catalog()` | Lê o mapeamento canônico de metadados das 46 folhas WAC (nomes, datas de efetividade, emendas AMDT e URLs de download oficiais do AISWEB). |
+| `download_geopdf(url, local_path, telemetry, idx)` | Realiza o download com streaming de blocos, validação de cabeçalho binário `%PDF` e até 4 tentativas com backoff exponencial contra timeouts ou throttling do DECEA. |
+| `process_chart_to_mbtiles(code, pdf_path, output_mbtiles, ...)` | **Coração do motor:**<br>1. Executa `gdal_translate` aplicando o recorte exato `-te minLon minLat maxLon maxLat -te_srs EPSG:4326` com resolução de 600 DPI em coordenadas projetadas EPSG:3857, eliminando 100% das bordas brancas e molduras do papel.<br>2. Empacota a imagem em formato MBTiles com blocos 256x256 e compressão WebP nativa.<br>3. Executa `gdaladdo` gerando pirâmides completas de overviews Lanczos de Z5 a Z12.<br>4. Atualiza os metadados canônicos na tabela `metadata` (bounds, minzoom, maxzoom, amdt, datas) e executa `VACUUM` no SQLite. |
+| `convert_to_pmtiles(local_mbtiles, local_pmtiles, telemetry, idx)` | Invoca o utilitário nativo `pmtiles convert`, convertendo a base SQLite em um arquivo PMTiles v3 otimizado para requisições parciais por faixas de bytes (`Range Requests`). Possui tratamento defensivo de fallback caso o binário não esteja presente. |
+| `upload_to_r2(s3_client, local_path, r2_key)` | Envia o artefato para o bucket Cloudflare R2 com os cabeçalhos MIME corretos (`application/vnd.sqlite3` para MBTiles e `application/x-pmtiles` para PMTiles) com cabeçalho `Cache-Control: no-cache, no-store`. |
+| `TelemetryManager` | Gerencia o estado de processamento, sincronizando logs estruturados e porcentagem de conclusão diretamente no R2 (`wac_geopdf_progress.json`) para consumo reativo em tempo real pelo Dashboard Admin. |
 
 ---
 
-## 🛡️ 5. Matriz de Riscos e Mitigações
+## 📋 5. Próximos Passos & Tarefas Pendentes
 
-| Risco Potencial | Nível | Medida Mitigatória Adotada |
-| :--- | :---: | :--- |
-| **Interferência no app em produção** | **Zero** | O novo robô salva em pasta isolada no R2 (`wac-test/`), sem alterar os links consumidos atualmente pelo app e pelo site. |
-| **Falha ou quebra no Dashboard atual** | **Zero** | A gestão atual da WAC foi preservada intacta na Aba 1; a Aba 2 é um módulo autônomo e isolado. |
-| **Consumo excessivo de memória na geração** | **Baixo** | O GDAL opera com memória virtual mapeada em disco (`TILED=YES` e `BIGTIFF=YES`), processando matrizes de 300 Megapixels sem estourar a RAM do runner. |
+1. **Atualização do Script de Promoção Server-Side ([promote_wac_to_prod.py](file:///c:/Users/josemir/Desktop/skyfpl-robots_temp/wac-geopdf-robot/promote_wac_to_prod.py)):**
+   * Atualmente, o script copia apenas `wac/staging/{code}_HD.mbtiles` para `wac/{code}.mbtiles`.
+   * **Ajuste necessário:** Adicionar a cópia simultânea do PMTiles:
+     ```python
+     # Copiar também o PMTiles server-side para a pasta de produção oficial
+     s3.copy_object(
+         Bucket=R2_BUCKET,
+         CopySource={"Bucket": R2_BUCKET, "Key": f"wac/staging/{code}.pmtiles"},
+         Key=f"wac/{code}.pmtiles",
+         ContentType="application/x-pmtiles",
+         MetadataDirective="COPY"
+     )
+     ```
+   * Isso garantirá que o botão **"Promover para Produção"** do Dashboard promova simultaneamente ambos os formatos de forma 100% serverless, sem tráfego de download/upload no runner.
+2. **Processamento em Lote das Demais 45 Folhas:**
+   * Após aprovação final da homologação, disparar o processamento em lotes ou integral (`CHART_CODES=ALL`) via GitHub Actions.

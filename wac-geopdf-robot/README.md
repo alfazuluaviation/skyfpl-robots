@@ -6,14 +6,18 @@ Robô de última geração para processamento de cartas aeronáuticas **WAC (Wor
 
 ## 🎯 Por que este motor foi criado?
 
-O robô legado (`wac-robot/`) consome tiles 256x256 do GeoServer DECEA via requisições WMS `GetMap`. Em níveis de zoom reduzidos (Z5 a Z8), o GeoServer aplica downsampling matemático que borra textos, frequências e aerovias.
+O robô legado (`wac-robot/`) consumia tiles 256x256 do GeoServer DECEA via requisições WMS `GetMap`. Em níveis de zoom reduzidos (Z5 a Z8), o GeoServer aplicava downsampling matemático que borrava textos, frequências e aerovias.
 
 Este novo motor (`wac-geopdf-robot/`):
-1. **Rasterização Vetorial Direta:** Renderiza os arquivos GeoPDF oficiais do AISWEB em **254 a 300 DPI** nativos.
-2. **Eliminação Automática de Borda (`NEATLINE`):** O GDAL reconhece a tag `NEATLINE` oficial do DECEA, aplicando máscara Alpha precisa na área útil e descartando bordas brancas e legendas sem cortar dados da carta.
-3. **Reamostragem Lanczos:** Interpolação de altíssima definição em todas as pirâmides de zoom.
+1. **Rasterização Vetorial Direta:** Renderiza os arquivos GeoPDF oficiais do AISWEB em **300 a 600 DPI** nativos.
+2. **Recorte Geográfico Cirúrgico:** Aplica o BBOX oficial com `-te minLon minLat maxLon maxLat -te_srs EPSG:4326`, descartando 100% de bordas brancas e molduras de papel.
+3. **Reamostragem Lanczos:** Interpolação de altíssima definição em todas as pirâmides de zoom (Z5 a Z12).
 4. **Compressão Moderna WebP:** Reduz o tamanho final dos MBTiles em até 60% comparado a PNG, com qualidade visual impecável e total suporte a transparência RGBA.
-5. **Isolamento Total:** Salva os arquivos de teste no prefixo `wac-test/` do Cloudflare R2, mantendo a produção (`wac/`) 100% segura e inalterada.
+5. **Conversão Nativa para PMTiles (0.4s):** Gera instantaneamente a versão `.pmtiles` para o site Web via Protomaps Go CLI.
+6. **Upload Híbrido Duplo:** Envia para o Cloudflare R2 (`wac/staging/`):
+   * `WAC{code}_HD.mbtiles` para o SkyFPL Native (iOS e Android).
+   * `WAC{code}.pmtiles` para o SkyFPL Web (HTTP Range Requests).
+7. **Telemetria ao Vivo:** Registra em streaming no R2 (`wac_geopdf_progress.json`) os logs de terminal e a porcentagem em tempo real para o Dashboard Admin.
 
 ---
 
@@ -21,14 +25,14 @@ Este novo motor (`wac-geopdf-robot/`):
 
 | Variável | Padrão | Descrição |
 | :--- | :---: | :--- |
-| `CHART_CODES` | `WAC3140` | Códigos separados por vírgula (ex: `WAC3140,WAC3262`) ou `ALL` para todas as 46 folhas. |
-| `DPI` | `254` | Resolução de rasterização do GeoPDF (254 ou 300 DPI). |
-| `RESAMPLING` | `lanczos` | Algoritmo de interpolação (`lanczos`, `cubic`, `bilinear`). |
-| `TILE_FORMAT` | `webp` | Formato dos tiles gravados no MBTiles (`webp` ou `png`). |
+| `CHART_CODES` | `(vazio)` | Códigos separados por vírgula (ex: `WAC3141` ou `WAC3141,WAC3262`) ou `ALL` para todas as 46 folhas. |
+| `DPI` | `600` | Resolução de rasterização do GeoPDF (300, 450 ou 600 DPI). |
+| `RESAMPLING` | `cubic` | Algoritmo de interpolação no GDAL (`cubic`, `lanczos`, `bilinear`). |
+| `TILE_FORMAT` | `webp` | Formato dos tiles gravados (`webp` ou `png`). |
 | `WEBP_QUALITY` | `85` | Qualidade de compressão do WebP (1 a 100). |
 | `MIN_ZOOM` | `5` | Zoom mínimo gerado. |
-| `MAX_ZOOM` | `11` | Zoom máximo gerado. |
-| `R2_PREFIX` | `wac-test` | Pasta de destino no Cloudflare R2 (mantém isolamento). |
+| `MAX_ZOOM` | `12` | Zoom máximo gerado. |
+| `R2_PREFIX` | `wac/staging` | Pasta de destino no Cloudflare R2 (mantém quarentena). |
 | `PROGRESS_KEY` | `wac_geopdf_progress.json` | Arquivo JSON de progresso lido pelo Dashboard Admin. |
 
 ---
@@ -36,11 +40,11 @@ Este novo motor (`wac-geopdf-robot/`):
 ## 📦 Como Rodar Localmente (Teste de Bancada)
 
 ```bash
-# 1. Instalar dependências Python
+# 1. Instalar dependências Python e CLI pmtiles
 pip install -r requirements.txt
 
-# 2. Executar teste com uma carta piloto (ex: Brasília)
-CHART_CODES=WAC3140 DPI=254 RESAMPLING=lanczos TILE_FORMAT=webp python build_wac_geopdf.py
+# 2. Executar teste com uma carta piloto (ex: Salvador)
+CHART_CODES=WAC3141 DPI=600 RESAMPLING=cubic TILE_FORMAT=webp python build_wac_geopdf.py
 ```
 
 ---
