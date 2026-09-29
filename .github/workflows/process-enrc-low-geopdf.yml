@@ -1,0 +1,112 @@
+name: 🗺️ ENRC LOW GeoPDF HD Engine — Compilação Alta Resolução e Testes R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_codes:
+        description: '🗺️ Cartas ENRC LOW (ex: L1 ou L1,L2 ou FULL ou ALL)'
+        required: true
+        default: 'ALL'
+      dpi:
+        description: '🎯 Resolução de Rasterização (254, 300 ou 600 DPI)'
+        required: false
+        default: '600'
+      resampling:
+        description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
+        required: false
+        default: 'cubic'
+      tile_format:
+        description: '📦 Formato dos Tiles (webp ou png)'
+        required: false
+        default: 'webp'
+      webp_quality:
+        description: '💎 Qualidade WebP (1-100)'
+        required: false
+        default: '85'
+      min_zoom:
+        description: 'Zoom Mínimo (padrão: 5)'
+        required: false
+        default: '5'
+      max_zoom:
+        description: 'Zoom Máximo (padrão: 11)'
+        required: false
+        default: '11'
+      r2_prefix:
+        description: '🛡️ Prefixo R2 Staging (ex: enrc/staging)'
+        required: false
+        default: 'enrc/staging'
+
+concurrency:
+  group: enrc-low-geopdf-hd-builder
+  cancel-in-progress: false
+
+jobs:
+  build_enrc_hd:
+    name: Compilar Cartas ENRC LOW HD (GeoPDF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: enrc-geopdf-robot/requirements.txt
+
+      - name: 🌍 Instalar GDAL Nativo & Utilitários de Sistema
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gdal-bin python3-gdal libgdal-dev
+          echo "=== GDAL Version ==="
+          gdalinfo --version
+          echo "=== Formatos Suportados (PDF / MBTILES / WEBP) ==="
+          gdal_translate --formats | grep -E "PDF|MBTILES|WEBP" || true
+
+      - name: 📦 Instalar Utilitário PMTiles (Protomaps CLI)
+        run: |
+          curl -sL https://github.com/protomaps/go-pmtiles/releases/download/v1.27.1/go-pmtiles_1.27.1_Linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin pmtiles
+          sudo chmod +x /usr/local/bin/pmtiles
+          echo "=== PMTiles CLI Version ==="
+          pmtiles version
+
+      - name: 📦 Instalar Dependências Python
+        working-directory: enrc-geopdf-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🚀 Executar Motor ENRC LOW GeoPDF HD
+        working-directory: enrc-geopdf-robot
+        env:
+          CHART_CODES: ${{ github.event.inputs.chart_codes }}
+          DPI: ${{ github.event.inputs.dpi || '600' }}
+          RESAMPLING: ${{ github.event.inputs.resampling || 'cubic' }}
+          TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
+          WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+          R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'enrc/staging' }}
+          PROGRESS_KEY: 'enrcl_hd_progress.json'
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+        run: |
+          python build_enrc_geopdf.py
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🗺️ Relatório de Execução — ENRC LOW GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor Configurado |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas Selecionadas** | \`${{ github.event.inputs.chart_codes }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **DPI** | \`${{ github.event.inputs.dpi }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Resampling** | \`${{ github.event.inputs.resampling }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Formato do Tile** | \`${{ github.event.inputs.tile_format }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Destino R2** | \`${{ github.event.inputs.r2_prefix }}/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY

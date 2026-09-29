@@ -1,0 +1,50 @@
+name: 🚀 ENRC LOW GeoPDF HD — Promoção Oficial para Produção (enrc/)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: enrc-low-geopdf-hd-promoter
+  cancel-in-progress: false
+
+jobs:
+  promote_enrc:
+    name: Promover Cartas ENRC LOW HD para enrc/
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: enrc-geopdf-robot/requirements.txt
+
+      - name: 📦 Instalar Dependências Python
+        working-directory: enrc-geopdf-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: 🚀 Executar Promoção Server-Side no Cloudflare R2
+        working-directory: enrc-geopdf-robot
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+        run: |
+          python promote_enrc_to_prod.py
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🚀 Relatório de Promoção — ENRC LOW GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Etapa | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas HD Copiadas** | \`enrc/{codigo}.mbtiles\` e \`enrc/{codigo}.pmtiles\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY

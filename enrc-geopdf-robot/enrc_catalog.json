@@ -1,0 +1,92 @@
+{
+  "L1": {
+    "code": "L1",
+    "name": "Região Sul (Porto Alegre, Curitiba, Foz)",
+    "region": "Sul",
+    "layer": "ICA:ENRC_L1",
+    "bbox": [-59.1915, -35.1336, -40.7361, -23.6989],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=d04e19d6-4b3c-4f1d-a30cfe3871b062d3&nome=ENRC L1",
+    "z_order": 2
+  },
+  "L2": {
+    "code": "L2",
+    "name": "Sudeste/Centro (SP/RJ/BSB/BH)",
+    "region": "Sudeste e Centro",
+    "layer": "ICA:ENRC_L2",
+    "bbox": [-46.5628, -24.5372, -30.0679, -14.0602],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=ae612a1d-8dc2-4105-b5c735e98bcf69b3&nome=ENRC L2",
+    "z_order": 3
+  },
+  "L3": {
+    "code": "L3",
+    "name": "Nordeste Litoral (REC/SSA/FOR/NAT)",
+    "region": "Nordeste Litoral",
+    "layer": "ICA:ENRC_L3",
+    "bbox": [-45.2284, -14.6637, -29.7087, -4.2552],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6883fc34-17cb-4987-9b34dc86efbd1eeb&nome=ENRC L3",
+    "z_order": 1
+  },
+  "L4": {
+    "code": "L4",
+    "name": "Nordeste Oceânico (Atlântico / F. Noronha)",
+    "region": "Oceânico",
+    "layer": "ICA:ENRC_L4",
+    "bbox": [-42.0407, -4.8905, -26.8957, 5.9842],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=af9bc32e-bd64-4f46-b0656cbc3ad2cc37&nome=ENRC L4",
+    "z_order": 6
+  },
+  "L5": {
+    "code": "L5",
+    "name": "Centro-Oeste Sul (CGR/CGB/Rondonópolis)",
+    "region": "Centro-Oeste Sul",
+    "layer": "ICA:ENRC_L5",
+    "bbox": [-61.703, -25.4271, -45.139, -14.7391],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=5a6d26aa-156e-48f5-8c3a3236e1b2c6ee&nome=ENRC L5",
+    "z_order": 4
+  },
+  "L6": {
+    "code": "L6",
+    "name": "Centro/Norte Interior (Porto Nacional / Cachimbo)",
+    "region": "Centro/Norte Interior",
+    "layer": "ICA:ENRC_L6",
+    "bbox": [-59.4753, -15.2618, -43.9354, -4.8545],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=b9e63d21-9d73-4c18-9142bf81227b5279&nome=ENRC L6",
+    "z_order": 5
+  },
+  "L7": {
+    "code": "L7",
+    "name": "Norte Oriental (Belém / Macapá / Santarém)",
+    "region": "Norte Oriental",
+    "layer": "ICA:ENRC_L7",
+    "bbox": [-56.2437, -5.4284, -41.1565, 4.9379],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6dec370f-aadc-457f-8cdae62d4554d559&nome=ENRC L7",
+    "z_order": 7
+  },
+  "L8": {
+    "code": "L8",
+    "name": "Norte Central (Boa Vista / Manaus)",
+    "region": "Norte Central",
+    "layer": "ICA:ENRC_L8",
+    "bbox": [-70.9413, -5.3416, -55.8549, 5.5722],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=3e560047-79d7-4313-abbeeb44b8619613&nome=ENRC L8",
+    "z_order": 8
+  },
+  "L9": {
+    "code": "L9",
+    "name": "Norte Ocidental (Rio Branco / Porto Velho)",
+    "region": "Norte Ocidental",
+    "layer": "ICA:ENRC_L9",
+    "bbox": [-74.1917, -14.9904, -58.654, -4.0446],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=14bbdffc-0298-4c7d-b09be5c565e1af19&nome=ENRC L9",
+    "z_order": 9
+  },
+  "FULL": {
+    "code": "FULL",
+    "name": "Brasil Completo (Fusão L1 a L9)",
+    "region": "Brasil Nacional",
+    "layer": "ICA:ENRC_L",
+    "bbox": [-74.1917, -35.1336, -26.8957, 5.9842],
+    "pdf_url": "",
+    "z_order": 0
+  }
+}

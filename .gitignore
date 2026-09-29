@@ -49,3 +49,10 @@ scratch/
 
 # Backups
 Backups/
+
+# Geospatial Big Data & Robot Output
+*.mbtiles
+*.pmtiles
+*.tif
+*.tiff
+output/
