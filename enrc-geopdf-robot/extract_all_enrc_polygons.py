@@ -80,25 +80,44 @@ def extract_polygon_from_tif(tif_path: str, code: str) -> dict:
 
     print(f"  Área do polígono principal: {max_area:.4f} graus²")
 
-    # Testar tolerância de simplificação para obter curva suave sem dentes
-    # Tolerância de 0.001 graus corresponde a aprox. 110 metros na latitude média do Brasil
-    tol = 0.001
-    simp = best_geom.SimplifyPreserveTopology(tol)
+    # 🛡️ INSET BUFFER: Recuo de segurança de ~1.3 km (0.012 graus)
+    # Impede que a lâmina de corte encoste no traço preto da moldura externa do GeoPDF
+    inset_deg = -0.012
+    buffered_geom = best_geom.Buffer(inset_deg)
+    if buffered_geom and not buffered_geom.IsEmpty():
+        if buffered_geom.GetGeometryType() == ogr.wkbMultiPolygon:
+            max_p_area = 0.0
+            chosen = None
+            for p_idx in range(buffered_geom.GetGeometryCount()):
+                sub_p = buffered_geom.GetGeometryRef(p_idx)
+                if sub_p.GetArea() > max_p_area:
+                    max_p_area = sub_p.GetArea()
+                    chosen = sub_p.Clone()
+            working_geom = chosen or buffered_geom
+        else:
+            working_geom = buffered_geom
+        print(f"  Inset Buffer aplicado: {inset_deg}° (~1.3 km de recuo interno)")
+    else:
+        working_geom = best_geom
+
+    # Tolerância calibrada para alta densidade cônica (~120 a 180 vértices, 1 ponto a cada 5-8 km)
+    tol = 0.0007
+    simp = working_geom.SimplifyPreserveTopology(tol)
     ring = simp.GetGeometryRef(0)
     pt_count = ring.GetPointCount()
 
-    if pt_count < 20:
-        tol = 0.0006
-        simp = best_geom.SimplifyPreserveTopology(tol)
+    if pt_count < 60:
+        tol = 0.0005
+        simp = working_geom.SimplifyPreserveTopology(tol)
         ring = simp.GetGeometryRef(0)
         pt_count = ring.GetPointCount()
-    elif pt_count > 120:
-        tol = 0.0012
-        simp = best_geom.SimplifyPreserveTopology(tol)
+    elif pt_count > 250:
+        tol = 0.00085
+        simp = working_geom.SimplifyPreserveTopology(tol)
         ring = simp.GetGeometryRef(0)
         pt_count = ring.GetPointCount()
 
-    print(f"  Polígono simplificado com tolerância {tol}°: {pt_count} vértices")
+    print(f"  Polígono calibrado com tolerância {tol}°: {pt_count} vértices")
 
     pts = []
     lons = []
