@@ -462,12 +462,12 @@ def process_chart_to_mbtiles(
         telemetry.log(f"Pirâmides Lanczos concluídas em {time.time()-t2:.1f}s!", chart_idx, 82)
 
     # 5. Filtragem rigorosa do Threshold de 1700 bytes + Otimização de Metadados
-    telemetry.log("Aplicando filtro de qualidade SkyFPL (Threshold 1700B) e metadados...", chart_idx, 85)
+    telemetry.log(f"Aplicando filtro de qualidade SkyFPL (Threshold {ENRC_EMPTY_THRESHOLD}B para {TILE_FORMAT.upper()}) e metadados...", chart_idx, 85)
     try:
         conn = sqlite3.connect(output_mbtiles)
         cur = conn.cursor()
 
-        # Remove tiles menores que 1700 bytes (oceano vazio / nulo)
+        # Remove tiles menores que o threshold (oceano vazio / nulo / transparente puro)
         cur.execute("DELETE FROM tiles WHERE length(tile_data) < ?", (ENRC_EMPTY_THRESHOLD,))
         purged = cur.rowcount
         if purged > 0:
