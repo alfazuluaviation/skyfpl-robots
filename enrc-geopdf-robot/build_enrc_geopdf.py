@@ -349,8 +349,8 @@ def process_chart_to_mbtiles(
 
         warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
 
-        # 2. GDALWARP: Rasteriza GeoPDF vetorial (DPI nativo), reprojeta em EPSG:3857 e aplica cutline dos 41 vértices
-        telemetry.log(f"Renderizando via GDAL ({DPI} DPI, EPSG:3857, Recorte dos 41 Vértices Oficiais)...", chart_idx, 25)
+        # 2. GDALWARP: Rasteriza GeoPDF vetorial (DPI nativo), reprojeta em EPSG:3857 e aplica cutline oficial DECEA
+        telemetry.log(f"Renderizando via GDAL ({DPI} DPI, EPSG:3857, Recorte da Moldura Oficial DECEA)...", chart_idx, 25)
         warp_cmd = [
             gdalwarp,
             "--config", "GDAL_PDF_DPI", str(DPI),
@@ -366,6 +366,12 @@ def process_chart_to_mbtiles(
         if code in OFFICIAL_POLYGONS and OFFICIAL_POLYGONS[code].get("coordinates"):
             poly_data = {
                 "type": "FeatureCollection",
+                "crs": {
+                    "type": "name",
+                    "properties": {
+                        "name": "urn:ogc:def:crs:OGC:1.3:CRS84"
+                    }
+                },
                 "features": [{
                     "type": "Feature",
                     "properties": {"code": code},
