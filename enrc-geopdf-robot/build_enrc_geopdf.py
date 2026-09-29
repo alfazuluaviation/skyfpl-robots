@@ -46,8 +46,16 @@ MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "enrc/staging").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "enrcl_hd_progress.json").strip()
 
-# 🛡️ Threshold Mandatório SkyFPL para ENRC (descarta oceanos e blocos transparentes nulos)
-ENRC_EMPTY_THRESHOLD = 1700
+# 🛡️ Threshold de Expugo SkyFPL:
+# Para WebP, um tile 100% transparente tem ~30-45 bytes; tiles de cantos/bordas úteis têm entre 150 e 1600 bytes.
+# Para PNG, um tile 100% transparente tem ~334 bytes.
+# (O limiar legado de 1700B era exclusivo para descartar PNGs falsos do GeoServer WMS,
+# e quando aplicado a WebP gerado via GDAL, expurgava acidentalmente os cantos e bordas da carta).
+def get_empty_tile_threshold(tile_format: str) -> int:
+    fmt = (tile_format or "").strip().lower()
+    return 100 if fmt == "webp" else 350
+
+ENRC_EMPTY_THRESHOLD = get_empty_tile_threshold(TILE_FORMAT)
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_ENDPOINT", "")
 R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("CLOUDFLARE_R2_ACCESS_KEY_ID", "")
