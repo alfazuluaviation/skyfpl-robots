@@ -46,5 +46,5 @@ jobs:
           echo "## 🚀 Relatório de Promoção — ENRC LOW GeoPDF HD" >> $GITHUB_STEP_SUMMARY
           echo "| Etapa | Status |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cartas HD Copiadas** | \`enrc/{codigo}.mbtiles\` e \`enrc/{codigo}.pmtiles\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas HD Transferidas** | `enrc/{codigo}.mbtiles` e `enrc/{codigo}.pmtiles` (Staging limpo) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY
