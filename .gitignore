@@ -56,3 +56,6 @@ Backups/
 *.tif
 *.tiff
 output/
+debug_tiles/
+enrc-geopdf-robot/debug_tiles/
+enrc-geopdf-robot/*.png
