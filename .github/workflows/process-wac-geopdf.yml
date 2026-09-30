@@ -28,9 +28,9 @@ on:
         required: false
         default: '5'
       max_zoom:
-        description: 'Zoom Máximo (padrão: 12)'
+        description: 'Zoom Máximo (padrão: 11)'
         required: false
-        default: '12'
+        default: '11'
       r2_prefix:
         description: '🛡️ Prefixo R2 Staging (ex: wac/staging)'
         required: false
@@ -88,7 +88,7 @@ jobs:
           TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
           WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
           MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
-          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '13' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
           R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'wac/staging' }}
           PROGRESS_KEY: 'wac_geopdf_progress.json'
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}

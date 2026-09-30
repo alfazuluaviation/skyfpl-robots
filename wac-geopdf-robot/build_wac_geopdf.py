@@ -39,7 +39,7 @@ RESAMPLING = os.environ.get("RESAMPLING", "cubic").strip().lower()
 TILE_FORMAT = os.environ.get("TILE_FORMAT", "webp").strip().lower()
 WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
-MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 12))
+MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "wac/staging").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "wac_geopdf_progress.json").strip()
 
@@ -120,8 +120,13 @@ def load_catalog() -> dict:
     catalog = {}
     try:
         url = "https://aisweb.decea.mil.br/?i=cartas&p=visuais"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SkyFPL/Robot-HD"}
-        r = requests.get(url, headers=headers, timeout=20)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "close"
+        }
+        r = requests.get(url, headers=headers, timeout=30)
         import re
         rows = re.findall(r"<tr[^>]*>(.*?)</tr>", r.text, re.DOTALL)
         for row in rows:
@@ -273,29 +278,46 @@ class TelemetryManager:
 
 # ─── Download Seguro do GeoPDF ────────────────────────────────────────────────
 
-def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 4) -> bool:
-    """Baixa o GeoPDF mestre com retries e verificação de integridade."""
+def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 5) -> bool:
+    """Baixa o GeoPDF mestre com retries, backoff progressivo para rate-limit e verificação de integridade."""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SkyFPL/Robot-HD",
-        "Accept": "application/pdf,application/octet-stream,*/*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "application/pdf,application/octet-stream,*/*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Connection": "close"
     }
+    # Delays progressivos: 5s, 15s, 30s, 60s, 90s (permite que o firewall do DECEA drene o rate-limit)
+    retry_delays = [5, 15, 30, 60, 90]
+
     for attempt in range(1, max_retries + 1):
         try:
             telemetry.log(f"Baixando GeoPDF mestre do AISWEB (tentativa {attempt}/{max_retries})...", chart_idx, 8)
-            r = requests.get(url, headers=headers, stream=True, timeout=60)
-            if r.status_code == 200:
-                with open(dest_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=128 * 1024):
-                        if chunk:
-                            f.write(chunk)
-                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-                telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
-                return True
-            else:
-                telemetry.log(f"HTTP {r.status_code} ao baixar {url}", chart_idx, 10, level="WARN")
+            with requests.get(url, headers=headers, stream=True, timeout=90) as r:
+                if r.status_code == 200:
+                    with open(dest_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=128 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                    
+                    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1000:
+                        with open(dest_path, "rb") as f:
+                            header = f.read(5)
+                        if not header.startswith(b"%PDF"):
+                            telemetry.log(f"Arquivo baixado não é um PDF válido (header={header}). Possível bloqueio HTML do AISWEB.", chart_idx, 10, level="WARN")
+                            continue
+                        size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+                        telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
+                        return True
+                    else:
+                        telemetry.log(f"Arquivo baixado vazio para {url}", chart_idx, 10, level="WARN")
+                else:
+                    telemetry.log(f"HTTP {r.status_code} ao baixar {url}", chart_idx, 10, level="WARN")
         except Exception as e:
-            telemetry.log(f"Erro na tentativa {attempt}: {e}", chart_idx, 10, level="WARN")
-        time.sleep(2 * attempt)
+            telemetry.log(f"Aviso/Instabilidade na tentativa {attempt}: {e}", chart_idx, 10, level="WARN")
+        
+        wait_s = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+        telemetry.log(f"Pausa de segurança ({wait_s}s) para liberação de conexão/rate-limit no AISWEB...", chart_idx, 9, level="WARN")
+        time.sleep(wait_s)
     return False
 
 # ─── Processamento GDAL: GeoPDF -> MBTiles HD ─────────────────────────────────
@@ -634,6 +656,9 @@ def main():
             if os.path.exists(local_pmtiles):
                 try: os.remove(local_pmtiles)
                 except Exception: pass
+
+            # Pausa de alívio preventiva (Rate Limit Breaker) entre cartas para evitar bloqueio do AISWEB
+            time.sleep(4)
 
     # 4. Finalização
     telemetry.current_chart = None
