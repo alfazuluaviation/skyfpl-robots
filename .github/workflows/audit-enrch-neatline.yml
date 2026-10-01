@@ -7,6 +7,9 @@ on:
         description: 'Carta ENRC H para auditar contra DECEA (ex: H1 ou H2)'
         required: true
         default: 'H1'
+  push:
+    paths:
+      - 'enrc-high-geopdf-robot/audit_trigger.txt'
 
 jobs:
   audit_neatline:
@@ -32,12 +35,23 @@ jobs:
 
       - name: 🔬 Executar Auditoria Comparativa do GeoTIFF DECEA
         run: |
-          python enrc-high-geopdf-robot/audit_enrch_neatline.py --chart "${{ inputs.chart_code }}"
+          CHART="H1"
+          if [ -f "enrc-high-geopdf-robot/audit_trigger.txt" ]; then
+            FILE_CHART=$(cat enrc-high-geopdf-robot/audit_trigger.txt | tr -d '[:space:]')
+            if [ -n "$FILE_CHART" ]; then
+              CHART="$FILE_CHART"
+            fi
+          fi
+          if [ -n "${{ inputs.chart_code }}" ]; then
+            CHART="${{ inputs.chart_code }}"
+          fi
+          echo "🎯 Auditando Carta: $CHART"
+          python enrc-high-geopdf-robot/audit_enrch_neatline.py --chart "$CHART"
 
       - name: 📤 Salvar Artefato de Auditoria
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: audit-result-${{ inputs.chart_code }}
+          name: audit-result
           path: enrc-high-geopdf-robot/audit_result_*.json
           retention-days: 7
