@@ -30,7 +30,10 @@ import sqlite3
 import tempfile
 import subprocess
 import requests
-import boto3
+try:
+    import boto3
+except ImportError:
+    boto3 = None
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -257,39 +260,51 @@ def find_gdal_tool(tool_name: str) -> str:
 
     return tool_name
 
-def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 4) -> bool:
-    """Baixa o GeoPDF mestre com retries e verificação de integridade."""
+def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 5) -> bool:
+    """Baixa o GeoPDF mestre com retries, backoff progressivo para rate-limit e verificação de integridade."""
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) SkyFPL/Robot-HD",
-        "Accept": "application/pdf,application/octet-stream,*/*"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Accept": "application/pdf,application/octet-stream,*/*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Connection": "close"
     }
+    retry_delays = [5, 15, 30, 60, 90]
+
     for attempt in range(1, max_retries + 1):
         try:
             telemetry.log(f"Baixando GeoPDF mestre do AISWEB (tentativa {attempt}/{max_retries})...", chart_idx, 8)
-            r = requests.get(url, headers=headers, stream=True, timeout=90)
-            if r.status_code == 200:
-                with open(dest_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=128 * 1024):
-                        if chunk:
-                            f.write(chunk)
-                with open(dest_path, "rb") as f:
-                    header = f.read(5)
-                if not header.startswith(b"%PDF"):
-                    telemetry.log(f"Arquivo baixado não é um PDF válido (header={header})", chart_idx, 10, level="WARN")
-                    continue
-                size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-                telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
-                return True
-            else:
-                telemetry.log(f"HTTP {r.status_code} ao baixar {url}", chart_idx, 10, level="WARN")
+            with requests.get(url, headers=headers, stream=True, timeout=90) as r:
+                if r.status_code == 200:
+                    with open(dest_path, "wb") as f:
+                        for chunk in r.iter_content(chunk_size=128 * 1024):
+                            if chunk:
+                                f.write(chunk)
+                    
+                    if os.path.exists(dest_path) and os.path.getsize(dest_path) > 1000:
+                        with open(dest_path, "rb") as f:
+                            header = f.read(5)
+                        if not header.startswith(b"%PDF"):
+                            telemetry.log(f"Arquivo baixado não é um PDF válido (header={header}). Possível bloqueio HTML do AISWEB.", chart_idx, 10, level="WARN")
+                            continue
+                        size_mb = os.path.getsize(dest_path) / (1024 * 1024)
+                        telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
+                        return True
+                    else:
+                        telemetry.log(f"Arquivo baixado vazio para {url}", chart_idx, 10, level="WARN")
+                else:
+                    telemetry.log(f"HTTP {r.status_code} ao baixar {url}", chart_idx, 10, level="WARN")
         except Exception as e:
-            telemetry.log(f"Erro na tentativa {attempt}: {e}", chart_idx, 10, level="WARN")
-        time.sleep(2 * attempt)
+            telemetry.log(f"Aviso/Instabilidade na tentativa {attempt}: {e}", chart_idx, 10, level="WARN")
+        
+        wait_s = retry_delays[min(attempt - 1, len(retry_delays) - 1)]
+        telemetry.log(f"Pausa de segurança ({wait_s}s) para liberação de conexão/rate-limit no AISWEB...", chart_idx, 9, level="WARN")
+        time.sleep(wait_s)
     return False
 
-def create_gdal_wms_xml(layer: str = WMS_LAYER) -> str:
+def create_gdal_wms_xml(layer: str = WMS_LAYER, code: str = "") -> str:
     """Fallback: Gera definição GDAL WMS Service XML caso seja solicitada a carta FULL."""
-    cache_dir = os.path.join(tempfile.gettempdir(), "gdalwmscache_enrc").replace("\\", "/")
+    suffix = f"_{code}" if code else ""
+    cache_dir = os.path.join(tempfile.gettempdir(), f"gdalwmscache_enrc{suffix}").replace("\\", "/")
     os.makedirs(cache_dir, exist_ok=True)
     return f"""<GDAL_WMS>
   <Service name="WMS">
@@ -318,6 +333,30 @@ def create_gdal_wms_xml(layer: str = WMS_LAYER) -> str:
   </Cache>
 </GDAL_WMS>"""
 
+def get_pdf_suppressed_layers(gdalinfo_bin: str, pdf_path: str) -> list:
+    """
+    Inspeciona o GeoPDF mestre do DECEA e detecta camadas OCG suprimidas/ocultas.
+    No GeoPDF oficial do DECEA, rotas descartadas, textos conflitantes e CTAs de regiões vizinhas
+    (ex: CTA RECIFE 9 e CTA CURITIBA 3 sobre a carta L2) são alocados em camadas do tipo
+    'Labels_SuppressedTexts' e mantidos desligados no leitor de PDF oficial.
+    Versões do GDAL (ex: GDAL 3.8 no Linux) podem renderizar todas as camadas OCG por padrão,
+    causando poluição visual severa. Esta função identifica essas camadas para desligá-las no gdalwarp.
+    """
+    try:
+        cmd = [gdalinfo_bin, "-mdd", "LAYERS", pdf_path]
+        res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+        if res.returncode == 0:
+            off_layers = []
+            for line in res.stdout.splitlines():
+                if "=" in line and ("suppressed" in line.lower() or "boundary_box" in line.lower()):
+                    val = line.split("=", 1)[1].strip()
+                    if val and val not in off_layers:
+                        off_layers.append(val)
+            return off_layers
+    except Exception as e:
+        print(f"[Aviso] Falha ao extrair camadas suprimidas do PDF ({e})")
+    return []
+
 def process_chart_to_mbtiles(
     code: str,
     chart_info: dict,
@@ -332,6 +371,7 @@ def process_chart_to_mbtiles(
 
     telemetry.log(f"Iniciando processamento em alta definição de {code} ({name})...", chart_idx, 5)
 
+    gdalinfo = find_gdal_tool("gdalinfo")
     gdalwarp = find_gdal_tool("gdalwarp")
     gdal_translate = find_gdal_tool("gdal_translate")
     gdaladdo = find_gdal_tool("gdaladdo")
@@ -351,7 +391,7 @@ def process_chart_to_mbtiles(
             layer = chart_info.get("layer", WMS_LAYER)
             wms_xml_path = os.path.join(tmpdir, f"wms_{code}.xml")
             with open(wms_xml_path, "w", encoding="utf-8") as f:
-                f.write(create_gdal_wms_xml(layer))
+                f.write(create_gdal_wms_xml(layer, code))
             input_file = wms_xml_path
             telemetry.log(f"Utilizando fonte WMS ({layer}) para {code}...", chart_idx, 18)
 
@@ -370,6 +410,13 @@ def process_chart_to_mbtiles(
             "-overwrite",
             "-q"
         ]
+
+        # 🛡️ Anti-Poluição OCG: Desliga camadas de textos/rotas suprimidas pelo DECEA
+        if input_file.lower().endswith(".pdf"):
+            off_layers = get_pdf_suppressed_layers(gdalinfo, input_file)
+            if off_layers:
+                warp_cmd.extend(["--config", "GDAL_PDF_LAYERS_OFF", ",".join(off_layers)])
+                telemetry.log(f"Filtro OCG ativo: {len(off_layers)} camadas suprimidas desligadas (anti-poluição)", chart_idx, 27)
 
         if code in OFFICIAL_POLYGONS and OFFICIAL_POLYGONS[code].get("coordinates"):
             poly_data = {
@@ -588,7 +635,7 @@ def main():
         sys.exit(1)
 
     s3_client = None
-    if R2_ENDPOINT and R2_ACCESS_KEY and R2_SECRET_KEY:
+    if boto3 and R2_ENDPOINT and R2_ACCESS_KEY and R2_SECRET_KEY:
         s3_client = boto3.client(
             "s3",
             endpoint_url=R2_ENDPOINT,
