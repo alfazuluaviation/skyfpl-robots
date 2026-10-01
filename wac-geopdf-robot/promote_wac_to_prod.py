@@ -84,8 +84,16 @@ def main():
     total_bytes = 0
     promoted_codes = []
 
+    target_env = os.environ.get("TARGET_CODES", "").strip()
+    if target_env and target_env.upper() != "ALL":
+        target_codes = [c.strip().upper() for c in target_env.split(",") if c.strip()]
+        print(f"  🎯 Modo Seleção Ativo: Promovendo apenas {len(target_codes)} carta(s): {', '.join(target_codes)}", flush=True)
+    else:
+        target_codes = ALL_WAC_CODES
+        print("  🌐 Modo Completo: Promovendo todas as cartas disponíveis em staging.", flush=True)
+
     print("\n📦 ETAPA 1: Transferindo cartas (Cópia Server-Side + Limpeza de Origem)...", flush=True)
-    for idx, code in enumerate(ALL_WAC_CODES, start=1):
+    for idx, code in enumerate(target_codes, start=1):
         candidates = [
             f"wac/staging/{code}_HD.mbtiles",
             f"wac/staging/{code}.mbtiles",
@@ -187,7 +195,7 @@ def main():
     # 3. Limpeza complementar de quarentena wac-test/ se existir
     print("\n🧹 ETAPA 3: Limpando resíduos legados de 'wac-test/'...", flush=True)
     delete_objects = []
-    for code in ALL_WAC_CODES:
+    for code in target_codes:
         delete_objects.append({"Key": f"wac-test/{code}_HD.mbtiles"})
     try:
         s3.delete_objects(
