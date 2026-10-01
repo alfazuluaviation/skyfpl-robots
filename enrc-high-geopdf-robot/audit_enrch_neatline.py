@@ -54,7 +54,9 @@ def extract_neatline_from_geotiff(tif_path: str, code: str) -> dict:
 
     b4 = ds.GetRasterBand(4)
 
-    mem_drv = ogr.GetDriverByName("MEM")
+    mem_drv = ogr.GetDriverByName("Memory") or ogr.GetDriverByName("MEM")
+    if not mem_drv:
+        mem_drv = gdal.GetDriverByName("Memory")
     mem_ds = mem_drv.CreateDataSource("mem_ds")
     layer = mem_ds.CreateLayer("neatline", None, ogr.wkbPolygon)
     layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger))
