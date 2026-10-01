@@ -10,6 +10,7 @@ on:
   push:
     paths:
       - 'enrc-high-geopdf-robot/audit_trigger.txt'
+      - '.github/workflows/audit-enrch-neatline.yml'
 
 jobs:
   audit_neatline:
