@@ -19,9 +19,10 @@ Objetivo:
 import os
 import sys
 import json
+import requests
 import boto3
 from botocore.exceptions import ClientError
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 ALL_ENRC_CODES = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "FULL"]
 
@@ -31,6 +32,155 @@ R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY") or os.environ.get("R2_SECRET_ACC
 R2_BUCKET = os.environ.get("R2_BUCKET") or os.environ.get("CLOUDFLARE_R2_BUCKET", "skyfpl-charts")
 PROGRESS_KEY = "enrcl_hd_progress.json"
 PROD_PROGRESS_KEY = "enrcl_progress.json"
+
+def get_airac_cycle_info() -> dict:
+    """
+    Carrega o calendário AIRAC oficial (calendar.json) e determina o ciclo vigente,
+    a data de efetivação e a data de publicação.
+    """
+    cal_file = os.path.join(os.path.dirname(__file__), "calendar.json")
+    master_cal = {}
+    if os.path.exists(cal_file):
+        try:
+            with open(cal_file, "r", encoding="utf-8") as f:
+                master_cal = json.load(f)
+        except Exception:
+            pass
+
+    now = datetime.now(timezone.utc)
+    all_cycles = []
+    for yr, cycles in master_cal.items():
+        for cid, dt_str in cycles.items():
+            p = [int(x) for x in dt_str.split("/")]
+            dt = datetime(p[2], p[1], p[0], tzinfo=timezone.utc)
+            all_cycles.append({
+                "cycle": cid,
+                "amdt": cid,
+                "effective_dt": dt,
+                "effective_date": dt_str,  # DD/MM/YYYY
+                "iso_effective_date": dt.strftime("%Y-%m-%d"),
+                "publication_date": (dt - timedelta(days=14)).strftime("%d/%m/%Y"),
+                "expiration_date": (dt + timedelta(days=28)).strftime("%d/%m/%Y"),
+            })
+
+    all_cycles.sort(key=lambda x: x["effective_dt"])
+
+    current = None
+    next_c = None
+    for i, c in enumerate(all_cycles):
+        if c["effective_dt"] <= now:
+            current = c
+            if i + 1 < len(all_cycles):
+                next_c = all_cycles[i + 1]
+
+    if not current and all_cycles:
+        current = all_cycles[0]
+
+    target = current
+    if next_c:
+        days = (next_c["effective_dt"] - now).days
+        if 0 <= days <= 14:
+            target = next_c
+
+    return target or {
+        "cycle": "2609",
+        "amdt": "2609",
+        "effective_date": "03/09/2026",
+        "publication_date": "20/08/2026",
+        "expiration_date": "01/10/2026"
+    }
+
+def send_telegram_notification(
+    title: str,
+    status: str,  # "SUCCESS", "PROMOTED", "FAILED"
+    cycle: str = "",
+    effective_date: str = "",
+    processed_items: list = None,
+    error_msg: str = None,
+    step: str = "",
+    recent_logs: list = None
+) -> bool:
+    """Dispara relatório de telemetria ou alerta de emergência diretamente via Telegram Bot API."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return False
+
+    processed_items = processed_items or []
+    recent_logs = recent_logs or []
+
+    if status == "FAILED":
+        lines = [
+            f"🚨 <b>ALERTA VERMELHO — {title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo / Alvo:</b> <code>{cycle or 'N/A'}</code>",
+        ]
+        if step:
+            lines.append(f"📍 <b>Etapa / Carta:</b> <code>{step}</code>")
+        if error_msg:
+            lines.append(f"⚠️ <b>Diagnóstico:</b> {error_msg}")
+        if recent_logs:
+            lines.append("")
+            lines.append("📋 <b>Últimos Logs:</b>")
+            for l in recent_logs[-4:]:
+                lines.append(f"• <code>{l}</code>")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("❌ <b>Status:</b> FAILED (Intervenção Necessária)")
+    elif status == "PROMOTED":
+        lines = [
+            f"🚀 <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo Oficial:</b> <code>{cycle}</code>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência DECEA:</b> <code>{effective_date}</code>")
+        lines.append(f"📦 <b>Cartas Promovidas ({len(processed_items)}):</b>")
+        for item in processed_items:
+            lines.append(f"  • {item}")
+        lines.append("🌐 <b>Destino:</b> Produção Oficial (R2)")
+        lines.append("🗑️ <b>Staging:</b> Quarentena Limpa")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% CONCLUÍDO & VIGENTE")
+    else:  # SUCCESS
+        lines = [
+            f"🗺️ <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo / Emenda:</b> <code>{cycle}</code>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência DECEA:</b> <code>{effective_date}</code>")
+        lines.append(f"📊 <b>Processamento Concluído ({len(processed_items)} cartas):</b>")
+        for item in processed_items[:12]:
+            lines.append(f"  • {item}")
+        if len(processed_items) > 12:
+            lines.append(f"  • ... e mais {len(processed_items) - 12} cartas.")
+        lines.append("🛡️ <b>Quarentena:</b> Staging no R2 (Aguardando Homologação)")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% SUCESSO (Zero Erros)")
+
+    msg = "\n".join(lines)
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }, timeout=15)
+        if resp.status_code == 200:
+            print("📱 [Telegram] Relatório despachado com sucesso!", flush=True)
+            try:
+                with open(".python_alert_sent", "w") as f:
+                    f.write("alert_sent")
+            except Exception:
+                pass
+            return True
+        else:
+            print(f"⚠️ [Telegram] Falha ao enviar: HTTP {resp.status_code} - {resp.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"⚠️ [Telegram] Erro ao despachar alerta: {e}", flush=True)
+        return False
 
 def main():
     print("=" * 70, flush=True)
@@ -77,6 +227,16 @@ def main():
     promoted_codes = []
     staging_metadata = progress_data.get("metadata", {})
     prod_metadata = prod_data.get("metadata", {})
+
+    catalog = {}
+    cat_path = os.path.join(os.path.dirname(__file__), "enrc_catalog.json")
+    if os.path.exists(cat_path):
+        try:
+            with open(cat_path, "r", encoding="utf-8") as f:
+                catalog = json.load(f)
+        except Exception:
+            pass
+    airac_info = get_airac_cycle_info()
 
     target_env = os.environ.get("TARGET_CODES", "").strip()
     if target_env and target_env.upper() != "ALL":
@@ -159,15 +319,25 @@ def main():
             print("➔ 🗑️ ORIGEM LIMPA", flush=True)
 
             # Atualizar metadados acumulativos da produção
+            chart_info = catalog.get(code, {})
             if code in staging_metadata:
                 prod_metadata[code] = staging_metadata[code]
                 prod_metadata[code]["promoted_at"] = datetime.now(timezone.utc).isoformat()
             else:
                 prod_metadata[code] = {
                     "size_bytes": size,
-                    "size_mb": f"{size / (1024*1024):.2f}",
+                    "size_mb": round(size / (1024 * 1024), 2),
                     "promoted_at": datetime.now(timezone.utc).isoformat()
                 }
+
+            if not prod_metadata[code].get("name"):
+                prod_metadata[code]["name"] = chart_info.get("name", code)
+            if not prod_metadata[code].get("cycle"):
+                prod_metadata[code]["cycle"] = airac_info.get("cycle", "2609")
+            if not prod_metadata[code].get("amdt"):
+                prod_metadata[code]["amdt"] = airac_info.get("cycle", "2609")
+            if not prod_metadata[code].get("effective_date"):
+                prod_metadata[code]["effective_date"] = airac_info.get("effective_date", "03/09/2026")
 
             promoted_codes.append(code)
             promoted_count += 1
@@ -179,11 +349,25 @@ def main():
     # 3. Atualizar o índice oficial de produção (enrcl_progress.json)
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
+        # Normaliza metadados de todas as cartas em produção para garantir schema canônico
+        for c_code, c_data in prod_metadata.items():
+            c_info = catalog.get(c_code, {})
+            if not c_data.get("name"):
+                c_data["name"] = c_info.get("name", c_code)
+            if not c_data.get("cycle"):
+                c_data["cycle"] = airac_info.get("cycle", "2609")
+            if not c_data.get("amdt"):
+                c_data["amdt"] = airac_info.get("cycle", "2609")
+            if not c_data.get("effective_date"):
+                c_data["effective_date"] = airac_info.get("effective_date", "03/09/2026")
+
         prod_meta = {
             "status": "completed",
             "last_promotion": now_iso,
             "charts_promoted": len(prod_metadata),
             "last_transferred_codes": promoted_codes,
+            "current_cycle": airac_info.get("cycle", "2609"),
+            "effective_date": airac_info.get("effective_date", "03/09/2026"),
             "engine": "SkyFPL ENRC HD Engine v2.0 (GeoPDF / GDAL)",
             "metadata": prod_metadata
         }
@@ -220,5 +404,28 @@ def main():
 
     print("\n🏁 Processo de promoção e transferência finalizado com sucesso.", flush=True)
 
+    # 📱 Disparo do Relatório de Promoção no Telegram
+    summary_items = [
+        f"<b>{c}</b> ({prod_metadata.get(c, {}).get('name', c)}): {prod_metadata.get(c, {}).get('size_mb', 0)} MB"
+        for c in promoted_codes
+    ]
+    send_telegram_notification(
+        title="Promoção ENRC LOW HD para Produção",
+        status="PROMOTED",
+        cycle=airac_info.get("cycle", "2609"),
+        effective_date=airac_info.get("effective_date", "03/09/2026"),
+        processed_items=summary_items
+    )
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as fatal_e:
+        err_str = str(fatal_e)
+        print(f"\n🚨 [FALHA CRÍTICA NA PROMOÇÃO] {err_str}", flush=True)
+        send_telegram_notification(
+            title="Promoção ENRC LOW HD",
+            status="FAILED",
+            error_msg=f"Falha fatal na promoção para produção: {err_str[:250]}"
+        )
+        raise fatal_e

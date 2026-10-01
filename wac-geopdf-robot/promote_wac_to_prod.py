@@ -16,6 +16,7 @@ Objetivo:
 import os
 import sys
 import json
+import requests
 import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone
@@ -37,6 +38,98 @@ R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY") or os.environ.get("R2_SECRET_ACC
 R2_BUCKET = os.environ.get("R2_BUCKET") or os.environ.get("CLOUDFLARE_R2_BUCKET", "skyfpl-charts")
 PROGRESS_KEY = "wac_geopdf_progress.json"
 PROD_PROGRESS_KEY = "wac_progress.json"
+
+def send_telegram_notification(
+    title: str,
+    status: str,  # "SUCCESS", "PROMOTED", "FAILED"
+    cycle: str = "",
+    effective_date: str = "",
+    processed_items: list = None,
+    error_msg: str = None,
+    step: str = "",
+    recent_logs: list = None
+) -> bool:
+    """Dispara relatório de telemetria ou alerta de emergência diretamente via Telegram Bot API."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return False
+
+    processed_items = processed_items or []
+    recent_logs = recent_logs or []
+
+    if status == "FAILED":
+        lines = [
+            f"🚨 <b>ALERTA VERMELHO — {title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Origem / Alvo:</b> <code>{cycle or 'AISWEB DECEA'}</code>",
+        ]
+        if step:
+            lines.append(f"📍 <b>Etapa / Carta:</b> <code>{step}</code>")
+        if error_msg:
+            lines.append(f"⚠️ <b>Diagnóstico:</b> {error_msg}")
+        if recent_logs:
+            lines.append("")
+            lines.append("📋 <b>Últimos Logs:</b>")
+            for l in recent_logs[-4:]:
+                lines.append(f"• <code>{l}</code>")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("❌ <b>Status:</b> FAILED (Intervenção Necessária)")
+    elif status == "PROMOTED":
+        lines = [
+            f"🚀 <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Emendas Oficiais DECEA</b>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência:</b> <code>{effective_date}</code>")
+        lines.append(f"📦 <b>Cartas Promovidas ({len(processed_items)}):</b>")
+        for item in processed_items:
+            lines.append(f"  • {item}")
+        lines.append("🌐 <b>Destino:</b> Produção Oficial (wac/)")
+        lines.append("🗑️ <b>Staging:</b> Quarentena Limpa")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% CONCLUÍDO & VIGENTE")
+    else:  # SUCCESS
+        lines = [
+            f"🗺️ <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Origem:</b> <code>{cycle or 'AISWEB DECEA'}</code>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência DECEA:</b> <code>{effective_date}</code>")
+        lines.append(f"📊 <b>Processamento Concluído ({len(processed_items)} cartas):</b>")
+        for item in processed_items[:12]:
+            lines.append(f"  • {item}")
+        if len(processed_items) > 12:
+            lines.append(f"  • ... e mais {len(processed_items) - 12} cartas.")
+        lines.append("🛡️ <b>Quarentena:</b> Staging no R2 (wac/staging/)")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% SUCESSO (Zero Erros)")
+
+    msg = "\n".join(lines)
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }, timeout=15)
+        if resp.status_code == 200:
+            print("📱 [Telegram] Relatório despachado com sucesso!", flush=True)
+            try:
+                with open(".python_alert_sent", "w") as f:
+                    f.write("alert_sent")
+            except Exception:
+                pass
+            return True
+        else:
+            print(f"⚠️ [Telegram] Falha ao enviar: HTTP {resp.status_code} - {resp.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"⚠️ [Telegram] Erro ao despachar alerta: {e}", flush=True)
+        return False
 
 def main():
     print("=" * 70, flush=True)
@@ -262,5 +355,27 @@ def main():
     print("  • Dashboard Admin sincronizado com seções de Quarentena Limpa e Produção Oficial!")
     print("=" * 70, flush=True)
 
+    # 📱 Disparo do Relatório de Promoção no Telegram
+    summary_items = [
+        f"<b>{c}</b> ({prod_metadata.get(c, {}).get('name', c)}): {prod_metadata.get(c, {}).get('size_mb', 0)} MB • AMDT {prod_metadata.get(c, {}).get('amdt', 'N/A')}"
+        for c in promoted_codes
+    ]
+    send_telegram_notification(
+        title="Promoção WAC HD para Produção",
+        status="PROMOTED",
+        cycle="AISWEB DECEA",
+        processed_items=summary_items
+    )
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as fatal_e:
+        err_str = str(fatal_e)
+        print(f"\n🚨 [FALHA CRÍTICA NA PROMOÇÃO WAC] {err_str}", flush=True)
+        send_telegram_notification(
+            title="Promoção WAC HD",
+            status="FAILED",
+            error_msg=f"Falha fatal na promoção WAC: {err_str[:250]}"
+        )
+        raise fatal_e

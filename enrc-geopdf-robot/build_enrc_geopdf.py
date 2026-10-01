@@ -34,7 +34,7 @@ try:
     import boto3
 except ImportError:
     boto3 = None
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import BytesIO
 
 # ─── Configurações Dinâmicas (Injetadas pelo Dashboard / GitHub Actions) ───────
@@ -183,12 +183,164 @@ def load_catalog() -> dict:
 
     return catalog
 
+def get_airac_cycle_info() -> dict:
+    """
+    Carrega o calendário AIRAC oficial (calendar.json) e determina o ciclo vigente,
+    a data de efetivação e a data de publicação.
+    """
+    cal_file = os.path.join(os.path.dirname(__file__), "calendar.json")
+    master_cal = {}
+    if os.path.exists(cal_file):
+        try:
+            with open(cal_file, "r", encoding="utf-8") as f:
+                master_cal = json.load(f)
+        except Exception as e:
+            print(f"[Aviso] Falha ao ler calendar.json: {e}")
+
+    now = datetime.now(timezone.utc)
+    all_cycles = []
+    for yr, cycles in master_cal.items():
+        for cid, dt_str in cycles.items():
+            p = [int(x) for x in dt_str.split("/")]
+            dt = datetime(p[2], p[1], p[0], tzinfo=timezone.utc)
+            all_cycles.append({
+                "cycle": cid,
+                "amdt": cid,
+                "effective_dt": dt,
+                "effective_date": dt_str,  # DD/MM/YYYY
+                "iso_effective_date": dt.strftime("%Y-%m-%d"),
+                "publication_date": (dt - timedelta(days=14)).strftime("%d/%m/%Y"),
+                "expiration_date": (dt + timedelta(days=28)).strftime("%d/%m/%Y"),
+            })
+
+    all_cycles.sort(key=lambda x: x["effective_dt"])
+
+    current = None
+    next_c = None
+    for i, c in enumerate(all_cycles):
+        if c["effective_dt"] <= now:
+            current = c
+            if i + 1 < len(all_cycles):
+                next_c = all_cycles[i + 1]
+
+    if not current and all_cycles:
+        current = all_cycles[0]
+
+    target = current
+    if next_c:
+        days = (next_c["effective_dt"] - now).days
+        if 0 <= days <= 14:
+            target = next_c
+
+    return target or {
+        "cycle": "2609",
+        "amdt": "2609",
+        "effective_date": "03/09/2026",
+        "publication_date": "20/08/2026",
+        "expiration_date": "01/10/2026"
+    }
+
+# ─── Notificações Táticas no Telegram ─────────────────────────────────────────
+
+def send_telegram_notification(
+    title: str,
+    status: str,  # "SUCCESS", "PROMOTED", "FAILED"
+    cycle: str = "",
+    effective_date: str = "",
+    processed_items: list = None,
+    error_msg: str = None,
+    step: str = "",
+    recent_logs: list = None
+) -> bool:
+    """Dispara relatório de telemetria ou alerta de emergência diretamente via Telegram Bot API."""
+    bot_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if not bot_token or not chat_id:
+        return False
+
+    processed_items = processed_items or []
+    recent_logs = recent_logs or []
+
+    if status == "FAILED":
+        lines = [
+            f"🚨 <b>ALERTA VERMELHO — {title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo / Alvo:</b> <code>{cycle or 'N/A'}</code>",
+        ]
+        if step:
+            lines.append(f"📍 <b>Etapa / Carta:</b> <code>{step}</code>")
+        if error_msg:
+            lines.append(f"⚠️ <b>Diagnóstico:</b> {error_msg}")
+        if recent_logs:
+            lines.append("")
+            lines.append("📋 <b>Últimos Logs:</b>")
+            for l in recent_logs[-4:]:
+                lines.append(f"• <code>{l}</code>")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("❌ <b>Status:</b> FAILED (Intervenção Necessária)")
+    elif status == "PROMOTED":
+        lines = [
+            f"🚀 <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo Oficial:</b> <code>{cycle}</code>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência DECEA:</b> <code>{effective_date}</code>")
+        lines.append(f"📦 <b>Cartas Promovidas ({len(processed_items)}):</b>")
+        for item in processed_items:
+            lines.append(f"  • {item}")
+        lines.append("🌐 <b>Destino:</b> Produção Oficial (R2)")
+        lines.append("🗑️ <b>Staging:</b> Quarentena Limpa")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% CONCLUÍDO & VIGENTE")
+    else:  # SUCCESS
+        lines = [
+            f"🗺️ <b>{title}</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"🛰️ <b>Ciclo / Emenda:</b> <code>{cycle}</code>",
+        ]
+        if effective_date:
+            lines.append(f"⏳ <b>Vigência DECEA:</b> <code>{effective_date}</code>")
+        lines.append(f"📊 <b>Processamento Concluído ({len(processed_items)} cartas):</b>")
+        for item in processed_items[:12]:
+            lines.append(f"  • {item}")
+        if len(processed_items) > 12:
+            lines.append(f"  • ... e mais {len(processed_items) - 12} cartas.")
+        lines.append("🛡️ <b>Quarentena:</b> Staging no R2 (Aguardando Homologação)")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        lines.append("✅ <b>Status:</b> 100% SUCESSO (Zero Erros)")
+
+    msg = "\n".join(lines)
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        resp = requests.post(url, json={
+            "chat_id": chat_id,
+            "text": msg,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True
+        }, timeout=15)
+        if resp.status_code == 200:
+            print("📱 [Telegram] Relatório despachado com sucesso!", flush=True)
+            try:
+                with open(".python_alert_sent", "w") as f:
+                    f.write("alert_sent")
+            except Exception:
+                pass
+            return True
+        else:
+            print(f"⚠️ [Telegram] Falha ao enviar: HTTP {resp.status_code} - {resp.text}", flush=True)
+            return False
+    except Exception as e:
+        print(f"⚠️ [Telegram] Erro ao despachar alerta: {e}", flush=True)
+        return False
+
 # ─── Gerenciador de Telemetria R2 em Tempo Real ───────────────────────────────
 
 class TelemetryManager:
-    def __init__(self, s3_client, target_codes: list):
+    def __init__(self, s3_client, target_codes: list, airac: dict = None):
         self.s3 = s3_client
         self.target_codes = target_codes
+        self.airac = airac or {}
         self.total = len(target_codes)
         self.logs = []
         self.metadata = {}
@@ -222,8 +374,14 @@ class TelemetryManager:
 
         self._save(current_code, overall_progress)
 
-    def chart_completed(self, code: str, size_bytes: int, pmtiles_size: int = 0, actual_min: int = 5, actual_max: int = 11, bounds: str = ""):
+    def chart_completed(self, code: str, size_bytes: int, pmtiles_size: int = 0, actual_min: int = 5, actual_max: int = 11, bounds: str = "", chart_info: dict = None):
+        chart_info = chart_info or {}
         self.metadata[code] = {
+            "name": chart_info.get("name", code),
+            "cycle": self.airac.get("cycle", "2609"),
+            "amdt": self.airac.get("amdt", self.airac.get("cycle", "2609")),
+            "effective_date": self.airac.get("effective_date", "03/09/2026"),
+            "publication_date": self.airac.get("publication_date", ""),
             "size_bytes": size_bytes,
             "size_mb": round(size_bytes / (1024 * 1024), 2),
             "pmtiles_size_bytes": pmtiles_size,
@@ -248,6 +406,8 @@ class TelemetryManager:
             "progress_percent": progress,
             "charts_total": self.total,
             "charts_processed": len([c for c in self.target_codes if c in self.metadata]),
+            "current_cycle": self.airac.get("cycle", "2609"),
+            "effective_date": self.airac.get("effective_date", "03/09/2026"),
             "started_at": self.start_time,
             "updated_at": datetime.now(timezone.utc).isoformat(),
             "dpi": DPI,
@@ -393,7 +553,8 @@ def process_chart_to_mbtiles(
     chart_info: dict,
     output_mbtiles: str,
     telemetry: TelemetryManager,
-    chart_idx: int
+    chart_idx: int,
+    airac: dict = None
 ) -> bool:
     """Rasteriza o GeoPDF vetorial oficial, aplica corte pela cutline dos 41 vértices e gera MBTiles WebP HD."""
     bbox = chart_info.get("bbox")
@@ -554,6 +715,7 @@ def process_chart_to_mbtiles(
         cur.execute("DELETE FROM metadata")
         cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_name ON metadata (name)")
 
+        airac = airac or {}
         bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else ""
         cur.execute("""
             INSERT OR REPLACE INTO metadata (name, value) VALUES
@@ -565,7 +727,11 @@ def process_chart_to_mbtiles(
             ('bounds', ?),
             ('minzoom', ?),
             ('maxzoom', ?),
-            ('chart_code', ?)
+            ('chart_code', ?),
+            ('amdt', ?),
+            ('cycle', ?),
+            ('effective_date', ?),
+            ('publication_date', ?)
         """, (
             f"SkyFPL ENRC LOW {code}",
             f"Carta de Rota Inferior {code} - {name} (SkyFPL HD GeoPDF Lanczos)",
@@ -573,7 +739,11 @@ def process_chart_to_mbtiles(
             bounds_str,
             str(actual_min),
             str(actual_max),
-            code
+            code,
+            airac.get("amdt", airac.get("cycle", "2609")),
+            airac.get("cycle", "2609"),
+            airac.get("effective_date", "03/09/2026"),
+            airac.get("publication_date", "")
         ))
 
         conn.commit()
@@ -672,8 +842,9 @@ def main():
     else:
         print("[AVISO] Credenciais R2 ausentes. Telemetria e uploads serão simulados localmente.", flush=True)
 
-    telemetry = TelemetryManager(s3_client, target_codes)
-    telemetry.log(f"Iniciando processamento de {len(target_codes)} carta(s): {', '.join(target_codes)}")
+    airac_info = get_airac_cycle_info()
+    telemetry = TelemetryManager(s3_client, target_codes, airac=airac_info)
+    telemetry.log(f"Iniciando processamento de {len(target_codes)} carta(s) [Ciclo AIRAC {airac_info.get('cycle')} - Vigência: {airac_info.get('effective_date')}]: {', '.join(target_codes)}")
 
     success_count = 0
     with tempfile.TemporaryDirectory() as workdir:
@@ -684,7 +855,7 @@ def main():
             out_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
             out_pmtiles = os.path.join(workdir, f"{code}.pmtiles")
 
-            ok = process_chart_to_mbtiles(code, chart_info, out_mbtiles, telemetry, idx)
+            ok = process_chart_to_mbtiles(code, chart_info, out_mbtiles, telemetry, idx, airac=airac_info)
             if not ok or not os.path.exists(out_mbtiles):
                 telemetry.log(f"Falha ao gerar MBTiles para {code}.", idx, 50, level="ERROR")
                 continue
@@ -721,7 +892,7 @@ def main():
 
             bbox = chart_info.get("bbox", [])
             bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else ""
-            telemetry.chart_completed(code, mbtiles_size, pmtiles_size, MIN_ZOOM, MAX_ZOOM, bounds_str)
+            telemetry.chart_completed(code, mbtiles_size, pmtiles_size, MIN_ZOOM, MAX_ZOOM, bounds_str, chart_info=chart_info)
             telemetry.log(f"✅ Carta {code} concluída com sucesso a partir do GeoPDF oficial!", idx, 100)
             success_count += 1
 
@@ -729,5 +900,41 @@ def main():
     telemetry.finish(final_status)
     print(f"\n[SUCESSO] {success_count}/{len(target_codes)} cartas ENRC processadas.", flush=True)
 
+    # 📱 Disparo do Relatório Operacional no Telegram
+    summary_items = []
+    for c in target_codes:
+        if c in telemetry.metadata:
+            meta = telemetry.metadata[c]
+            summary_items.append(f"<b>{c}</b> ({meta.get('name', c)}): {meta.get('size_mb', 0)} MB")
+
+    if success_count == len(target_codes):
+        send_telegram_notification(
+            title="Robô ENRC LOW GeoPDF HD",
+            status="SUCCESS",
+            cycle=airac_info.get("cycle", "2609"),
+            effective_date=airac_info.get("effective_date", "03/09/2026"),
+            processed_items=summary_items
+        )
+    else:
+        send_telegram_notification(
+            title="Robô ENRC LOW GeoPDF HD",
+            status="FAILED",
+            cycle=airac_info.get("cycle", "2609"),
+            effective_date=airac_info.get("effective_date", "03/09/2026"),
+            processed_items=summary_items,
+            error_msg=f"Apenas {success_count} de {len(target_codes)} cartas foram processadas com sucesso.",
+            recent_logs=telemetry.logs
+        )
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as fatal_e:
+        err_str = str(fatal_e)
+        print(f"\n🚨 [FALHA CRÍTICA] {err_str}", flush=True)
+        send_telegram_notification(
+            title="Robô ENRC LOW GeoPDF HD",
+            status="FAILED",
+            error_msg=f"Falha fatal no processador: {err_str[:250]}"
+        )
+        raise fatal_e

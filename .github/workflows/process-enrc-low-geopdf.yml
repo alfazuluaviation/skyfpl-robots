@@ -95,8 +95,28 @@ jobs:
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python build_enrc_geopdf.py
+
+      - name: 🚨 Notificar Falha Crítica no Telegram (Fallback de Infraestrutura)
+        if: cancelled() || failure()
+        working-directory: enrc-geopdf-robot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests
+          token = os.environ.get('TELEGRAM_BOT_TOKEN')
+          chat = os.environ.get('TELEGRAM_CHAT_ID')
+          if os.path.exists('.python_alert_sent'):
+              print('ℹ️ Alerta já despachado pelo script Python. Fallback silenciado.')
+          elif token and chat:
+              msg = '🚨 <b>ALERTA CRÍTICO DE INFRAESTRUTURA — ENRC LOW HD</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ O runner do GitHub Actions falhou ou foi cancelado abruptamente durante a compilação.\n❌ <b>Status:</b> RUNNER FAILED'
+              requests.post(f'https://api.telegram.org/bot{token}/sendMessage', json={'chat_id': chat, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
+          " || true
 
       - name: 🛡️ Atualizar Telemetria R2 em caso de Cancelamento ou Falha
         if: cancelled() || failure()

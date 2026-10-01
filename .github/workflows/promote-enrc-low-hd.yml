@@ -33,7 +33,7 @@ jobs:
         working-directory: enrc-geopdf-robot
         run: |
           python -m pip install --upgrade pip
-          pip install boto3
+          pip install boto3 requests
 
       - name: 🚀 Executar Promoção Server-Side no Cloudflare R2
         working-directory: enrc-geopdf-robot
@@ -43,8 +43,28 @@ jobs:
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
           TARGET_CODES: ${{ github.event.inputs.target_codes || 'ALL' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           python promote_enrc_to_prod.py
+
+      - name: 🚨 Notificar Falha no Telegram (Fallback de Infraestrutura)
+        if: cancelled() || failure()
+        working-directory: enrc-geopdf-robot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests
+          token = os.environ.get('TELEGRAM_BOT_TOKEN')
+          chat = os.environ.get('TELEGRAM_CHAT_ID')
+          if os.path.exists('.python_alert_sent'):
+              print('ℹ️ Alerta já despachado pelo script Python. Fallback silenciado.')
+          elif token and chat:
+              msg = '🚨 <b>ALERTA CRÍTICO DE INFRAESTRUTURA — PROMOÇÃO ENRC LOW HD</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ O runner do GitHub Actions falhou ou foi cancelado durante a transferência para produção.\n❌ <b>Status:</b> RUNNER FAILED'
+              requests.post(f'https://api.telegram.org/bot{token}/sendMessage', json={'chat_id': chat, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
+          " || true
 
       - name: 📊 Registrar Sumário da Execução
         if: always()
