@@ -352,19 +352,37 @@ def get_pdf_suppressed_layers(gdalinfo_bin: str, pdf_path: str) -> list:
     No GeoPDF oficial do DECEA, rotas descartadas, textos conflitantes e CTAs de regiões vizinhas
     (ex: CTA RECIFE 9 e CTA CURITIBA 3 sobre a carta L2) são alocados em camadas do tipo
     'Labels_SuppressedTexts' e mantidos desligados no leitor de PDF oficial.
-    Versões do GDAL (ex: GDAL 3.8 no Linux) podem renderizar todas as camadas OCG por padrão,
-    causando poluição visual severa. Esta função identifica essas camadas para desligá-las no gdalwarp.
+    Além disso, na carta L1 (Região Sul), espaços aéreos terminais como FIZ (ex: FIZ Joinville, FIZ Bacacheri),
+    ATZ (ex: ATZ Navegantes) e ARC (Área de Rotas de Circulação com molduras pretas) não pertencem a cartas
+    de rota enroute de baixa altitude e geram poluição visual severa quando renderizados indiscriminadamente
+    pelo GDAL. Esta função identifica e desativa essas camadas no gdalwarp.
     """
     try:
         cmd = [gdalinfo_bin, "-mdd", "LAYERS", pdf_path]
         res = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
         if res.returncode == 0:
+            unwanted_patterns = [
+                "suppressed",
+                "boundary_box",
+                ".airspace.fiz",
+                ".airspace.atz",
+                ".airspace.arc",
+                ".labels_texts.fiz",
+                ".labels_texts.atz",
+                ".labels_texts.arc",
+                ".labels_lines.fiz",
+                ".labels_lines.atz",
+                ".labels_areas.fiz",
+                ".labels_areas.atz",
+            ]
             off_layers = []
             for line in res.stdout.splitlines():
-                if "=" in line and ("suppressed" in line.lower() or "boundary_box" in line.lower()):
+                if "=" in line and "LAYER_" in line:
                     val = line.split("=", 1)[1].strip()
-                    if val and val not in off_layers:
-                        off_layers.append(val)
+                    val_lower = val.lower()
+                    if any(p in val_lower for p in unwanted_patterns):
+                        if val and val not in off_layers:
+                            off_layers.append(val)
             return off_layers
     except Exception as e:
         print(f"[Aviso] Falha ao extrair camadas suprimidas do PDF ({e})")
