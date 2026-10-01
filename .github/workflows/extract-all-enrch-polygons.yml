@@ -1,0 +1,50 @@
+name: 🗺️ Extração de Polígonos Oficiais ENRC HIGH (DECEA H1..H9)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/extract-all-enrch-polygons.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  extract_all_high:
+    name: Extrair Polígonos Oficiais DECEA (H1..H9)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🌍 Instalar GDAL Nativo e Python GDAL
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gdal-bin python3-gdal libgdal-dev
+          echo "=== Versão do GDAL ==="
+          gdalinfo --version
+          /usr/bin/python3 -c "from osgeo import gdal; print('✅ GDAL Python OK:', gdal.__version__)"
+
+      - name: 🔬 Executar Extração dos 9 GeoTIFFs Oficiais (H1 a H9)
+        run: |
+          /usr/bin/python3 enrc-high-geopdf-robot/extract_all_enrc_high_polygons.py
+
+      - name: 💾 Commit & Push dos Polígonos Canônicos no Repositório
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add enrc-high-geopdf-robot/enrc_high_official_polygons.json
+          git commit -m "chore(cartography): update official ENRC HIGH neatlines extracted from DECEA (H1..H9)" || echo "Nenhuma alteração detectada"
+          git push origin main
+
+      - name: 📤 Salvar Artefato dos Polígonos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: enrc-high-official-polygons
+          path: enrc-high-geopdf-robot/enrc_high_official_polygons.json
+          retention-days: 30
