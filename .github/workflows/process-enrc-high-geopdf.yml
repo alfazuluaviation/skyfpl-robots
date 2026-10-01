@@ -1,0 +1,133 @@
+name: 🗺️ ENRC HIGH GeoPDF HD Engine — Compilação Alta Resolução e Testes R2
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_codes:
+        description: '🗺️ Cartas ENRC HIGH (ex: H1 ou H1,H2 ou FULL ou ALL)'
+        required: true
+        default: 'ALL'
+      dpi:
+        description: '🎯 Resolução de Rasterização (254, 300 ou 600 DPI)'
+        required: false
+        default: '600'
+      resampling:
+        description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
+        required: false
+        default: 'cubic'
+      tile_format:
+        description: '📦 Formato dos Tiles (webp ou png)'
+        required: false
+        default: 'webp'
+      webp_quality:
+        description: '💎 Qualidade WebP (1-100)'
+        required: false
+        default: '85'
+      min_zoom:
+        description: 'Zoom Mínimo (padrão: 5)'
+        required: false
+        default: '5'
+      max_zoom:
+        description: 'Zoom Máximo (padrão: 11)'
+        required: false
+        default: '11'
+      r2_prefix:
+        description: '🛡️ Prefixo R2 Staging (ex: enrc_high/staging)'
+        required: false
+        default: 'enrc_high/staging'
+
+concurrency:
+  group: enrc-high-geopdf-hd-builder
+  cancel-in-progress: false
+
+jobs:
+  build_enrch_hd:
+    name: Compilar Cartas ENRC HIGH HD (GeoPDF)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: enrc-high-geopdf-robot/requirements.txt
+
+      - name: 🌍 Instalar GDAL Nativo & Utilitários de Sistema
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gdal-bin python3-gdal libgdal-dev
+          echo "=== GDAL Version ==="
+          gdalinfo --version
+          echo "=== Formatos Suportados (PDF / MBTILES / WEBP) ==="
+          gdal_translate --formats | grep -E "PDF|MBTILES|WEBP" || true
+
+      - name: 📦 Instalar Utilitário PMTiles (Protomaps CLI)
+        run: |
+          curl -sL https://github.com/protomaps/go-pmtiles/releases/download/v1.27.1/go-pmtiles_1.27.1_Linux_x86_64.tar.gz | sudo tar -xz -C /usr/local/bin pmtiles
+          sudo chmod +x /usr/local/bin/pmtiles
+          echo "=== PMTiles CLI Version ==="
+          pmtiles version
+
+      - name: 📦 Instalar Dependências Python
+        working-directory: enrc-high-geopdf-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🚀 Executar Motor ENRC HIGH GeoPDF HD
+        working-directory: enrc-high-geopdf-robot
+        env:
+          CHART_CODES: ${{ github.event.inputs.chart_codes }}
+          DPI: ${{ github.event.inputs.dpi || '600' }}
+          RESAMPLING: ${{ github.event.inputs.resampling || 'cubic' }}
+          TILE_FORMAT: ${{ github.event.inputs.tile_format || 'webp' }}
+          WEBP_QUALITY: ${{ github.event.inputs.webp_quality || '85' }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
+          R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'enrc_high/staging' }}
+          PROGRESS_KEY: 'enrch_hd_progress.json'
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python build_enrc_high_geopdf.py
+
+      - name: 🚨 Notificar Falha Crítica no Telegram (Fallback de Infraestrutura)
+        if: cancelled() || failure()
+        working-directory: enrc-high-geopdf-robot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python -c "
+          import os, requests
+          token = os.environ.get('TELEGRAM_BOT_TOKEN')
+          chat = os.environ.get('TELEGRAM_CHAT_ID')
+          if os.path.exists('.python_alert_sent'):
+              print('ℹ️ Alerta já despachado pelo script Python. Fallback silenciado.')
+          elif token and chat:
+              msg = '🚨 <b>ALERTA CRÍTICO DE INFRAESTRUTURA — ENRC HIGH HD</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━\n⚠️ O runner do GitHub Actions falhou ou foi cancelado abruptamente durante o processamento.\n❌ <b>Status:</b> RUNNER FAILED'
+              requests.post(f'https://api.telegram.org/bot{token}/sendMessage', json={'chat_id': chat, 'text': msg, 'parse_mode': 'HTML'}, timeout=10)
+          " || true
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🗺️ Relatório de Execução — ENRC HIGH GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas Solicitadas** | \`${{ github.event.inputs.chart_codes }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Resolução (DPI)** | \`${{ github.event.inputs.dpi || '600' }}\` DPI |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Interpolação** | \`${{ github.event.inputs.resampling || 'cubic' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Formato dos Tiles** | \`${{ github.event.inputs.tile_format || 'webp' }}\` (Q${{ github.event.inputs.webp_quality || '85' }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Faixa de Zooms** | Z${{ github.event.inputs.min_zoom || '5' }} a Z${{ github.event.inputs.max_zoom || '11' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Destino Staging** | \`${{ github.event.inputs.r2_prefix || 'enrc_high/staging' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY

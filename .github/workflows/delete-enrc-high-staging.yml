@@ -1,0 +1,55 @@
+name: 🗑️ ENRC HIGH GeoPDF HD — Excluir Cartas de Quarentena (enrc_high/staging/)
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_codes:
+        description: 'Cartas para exclusão em quarentena (ex: H1 ou H1,H2)'
+        required: true
+
+concurrency:
+  group: enrc-high-geopdf-hd-promoter
+  cancel-in-progress: false
+
+jobs:
+  delete_enrch_staging:
+    name: Excluir Cartas de enrc_high/staging/
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: enrc-high-geopdf-robot/requirements.txt
+
+      - name: 📦 Instalar Dependências Python
+        working-directory: enrc-high-geopdf-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install boto3
+
+      - name: 🗑️ Executar Exclusão Server-Side no Cloudflare R2
+        working-directory: enrc-high-geopdf-robot
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          TARGET_CODES: ${{ github.event.inputs.target_codes }}
+        run: |
+          python delete_enrc_high_staging.py
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🗑️ Relatório de Exclusão — ENRC HIGH GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas Excluídas** | \`${{ github.event.inputs.target_codes }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY
