@@ -65,9 +65,6 @@ R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY
 R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY") or os.environ.get("R2_SECRET_ACCESS_KEY") or os.environ.get("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET = os.environ.get("R2_BUCKET") or os.environ.get("CLOUDFLARE_R2_BUCKET", "skyfpl-charts")
 
-WMS_URL = "https://geoaisweb.decea.mil.br/geoserver/ICA/wms"
-WMS_LAYER = "ICA:ENRC_L"
-
 # ─── Catálogo Oficial e Polígonos das 9 Cartas ENRC L ─────────────────────────
 
 CATALOG_FILE = os.path.join(os.path.dirname(__file__), "enrc_catalog.json")
@@ -84,67 +81,107 @@ def load_official_polygons() -> dict:
 
 OFFICIAL_POLYGONS = load_official_polygons()
 
+def fetch_live_enrc_catalog() -> dict:
+    """
+    Consulta em tempo real o portal AISWEB (inc/cartas/enrc/index.cfm)
+    para extrair os links de download vigentes das cartas L1 a L9.
+    Garante que atualizações de ciclos AIRAC do DECEA sejam detectadas automaticamente.
+    """
+    live_urls = {}
+    try:
+        page_url = "https://aisweb.decea.mil.br/inc/cartas/enrc/index.cfm"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "close"
+        }
+        res = requests.get(page_url, headers=headers, timeout=25)
+        if res.status_code == 200:
+            import re
+            links = re.findall(r'href=["\']([^"\']*download/\?arquivo=[^"\']+)["\']', res.text)
+            for link in links:
+                clean_link = link.replace("&amp;", "&")
+                m_code = re.search(r'nome=ENRC(?:\+|%20|\s+)(L\d)', clean_link, re.IGNORECASE)
+                if m_code:
+                    code = m_code.group(1).upper()
+                    full_url = clean_link if clean_link.startswith("http") else f"https://aisweb.decea.mil.br/{clean_link.lstrip('../').lstrip('/')}"
+                    live_urls[code] = full_url
+            if live_urls:
+                print(f"[AISWEB] Descoberta dinâmica bem-sucedida! {len(live_urls)} cartas ENRC L encontradas no ciclo vigente.")
+    except Exception as e:
+        print(f"[Aviso] Falha ao consultar catálogo dinâmico do AISWEB: {e}")
+    return live_urls
+
 def load_catalog() -> dict:
+    catalog = {}
     if os.path.exists(CATALOG_FILE):
         try:
             with open(CATALOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                catalog = json.load(f)
         except Exception as e:
             print(f"[Aviso] Falha ao ler catálogo local ({e}). Usando fallback integrado...")
 
-    # Fallback canônico baseado nos downloads reais do AISWEB
-    return {
-        "L1": {
-            "code": "L1", "name": "Região Sul (Porto Alegre, Curitiba, Foz)",
-            "layer": "ICA:ENRC_L1", "bbox": [-59.1915, -35.1336, -40.7361, -23.6989],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=d04e19d6-4b3c-4f1d-a30cfe3871b062d3&nome=ENRC L1", "z_order": 2
-        },
-        "L2": {
-            "code": "L2", "name": "Sudeste/Centro (SP/RJ/BSB/BH)",
-            "layer": "ICA:ENRC_L2", "bbox": [-46.5628, -24.5372, -30.0679, -14.0602],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=ae612a1d-8dc2-4105-b5c735e98bcf69b3&nome=ENRC L2", "z_order": 3
-        },
-        "L3": {
-            "code": "L3", "name": "Nordeste Litoral (REC/SSA/FOR/NAT)",
-            "layer": "ICA:ENRC_L3", "bbox": [-45.2284, -14.6637, -29.7087, -4.2552],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6883fc34-17cb-4987-9b34dc86efbd1eeb&nome=ENRC L3", "z_order": 1
-        },
-        "L4": {
-            "code": "L4", "name": "Nordeste Oceânico (Atlântico / F. Noronha)",
-            "layer": "ICA:ENRC_L4", "bbox": [-42.0407, -4.8905, -26.8957, 5.9842],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=af9bc32e-bd64-4f46-b0656cbc3ad2cc37&nome=ENRC L4", "z_order": 6
-        },
-        "L5": {
-            "code": "L5", "name": "Centro-Oeste Sul (CGR/CGB/Rondonópolis)",
-            "layer": "ICA:ENRC_L5", "bbox": [-61.703, -25.4271, -45.139, -14.7391],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=5a6d26aa-156e-48f5-8c3a3236e1b2c6ee&nome=ENRC L5", "z_order": 4
-        },
-        "L6": {
-            "code": "L6", "name": "Centro/Norte Interior (Porto Nacional / Cachimbo)",
-            "layer": "ICA:ENRC_L6", "bbox": [-59.4753, -15.2618, -43.9354, -4.8545],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=b9e63d21-9d73-4c18-9142bf81227b5279&nome=ENRC L6", "z_order": 5
-        },
-        "L7": {
-            "code": "L7", "name": "Norte Oriental (Belém / Macapá / Santarém)",
-            "layer": "ICA:ENRC_L7", "bbox": [-56.2437, -5.4284, -41.1565, 4.9379],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6dec370f-aadc-457f-8cdae62d4554d559&nome=ENRC L7", "z_order": 7
-        },
-        "L8": {
-            "code": "L8", "name": "Norte Central (Boa Vista / Manaus)",
-            "layer": "ICA:ENRC_L8", "bbox": [-70.9413, -5.3416, -55.8549, 5.5722],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=3e560047-79d7-4313-abbeeb44b8619613&nome=ENRC L8", "z_order": 8
-        },
-        "L9": {
-            "code": "L9", "name": "Norte Ocidental (Rio Branco / Porto Velho)",
-            "layer": "ICA:ENRC_L9", "bbox": [-74.1917, -14.9904, -58.654, -4.0446],
-            "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=14bbdffc-0298-4c7d-b09be5c565e1af19&nome=ENRC L9", "z_order": 9
-        },
-        "FULL": {
-            "code": "FULL", "name": "Brasil Completo (Fusão L1 a L9)",
-            "layer": "ICA:ENRC_L", "bbox": [-74.1917, -35.1336, -26.8957, 5.9842],
-            "pdf_url": "", "z_order": 0
+    # Fallback canônico baseado nos downloads reais do AISWEB (Ciclo 01/10/2026)
+    if not catalog:
+        catalog = {
+            "L1": {
+                "code": "L1", "name": "Região Sul (Porto Alegre, Curitiba, Foz)",
+                "layer": "ICA:ENRC_L1", "bbox": [-59.1915, -35.1336, -40.7361, -23.6989],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=795fea1d-284a-4251-af8a1cb1f722d88c&nome=ENRC L1", "z_order": 2
+            },
+            "L2": {
+                "code": "L2", "name": "Sudeste/Centro (SP/RJ/BSB/BH)",
+                "layer": "ICA:ENRC_L2", "bbox": [-46.5628, -24.5372, -30.0679, -14.0602],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=63b3ad52-f1a4-4d5d-bb881464b7d77c44&nome=ENRC L2", "z_order": 3
+            },
+            "L3": {
+                "code": "L3", "name": "Nordeste Litoral (REC/SSA/FOR/NAT)",
+                "layer": "ICA:ENRC_L3", "bbox": [-45.2284, -14.6637, -29.7087, -4.2552],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6883fc34-17cb-4987-9b34dc86efbd1eeb&nome=ENRC L3", "z_order": 1
+            },
+            "L4": {
+                "code": "L4", "name": "Nordeste Oceânico (Atlântico / F. Noronha)",
+                "layer": "ICA:ENRC_L4", "bbox": [-42.0407, -4.8905, -26.8957, 5.9842],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=af9bc32e-bd64-4f46-b0656cbc3ad2cc37&nome=ENRC L4", "z_order": 6
+            },
+            "L5": {
+                "code": "L5", "name": "Centro-Oeste Sul (CGR/CGB/Rondonópolis)",
+                "layer": "ICA:ENRC_L5", "bbox": [-61.703, -25.4271, -45.139, -14.7391],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=e50c698a-d32b-4f66-a9e94cf40baeebeb&nome=ENRC L5", "z_order": 4
+            },
+            "L6": {
+                "code": "L6", "name": "Centro/Norte Interior (Porto Nacional / Cachimbo)",
+                "layer": "ICA:ENRC_L6", "bbox": [-59.4753, -15.2618, -43.9354, -4.8545],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=b9e63d21-9d73-4c18-9142bf81227b5279&nome=ENRC L6", "z_order": 5
+            },
+            "L7": {
+                "code": "L7", "name": "Norte Oriental (Belém / Macapá / Santarém)",
+                "layer": "ICA:ENRC_L7", "bbox": [-56.2437, -5.4284, -41.1565, 4.9379],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=6dec370f-aadc-457f-8cdae62d4554d559&nome=ENRC L7", "z_order": 7
+            },
+            "L8": {
+                "code": "L8", "name": "Norte Central (Boa Vista / Manaus)",
+                "layer": "ICA:ENRC_L8", "bbox": [-70.9413, -5.3416, -55.8549, 5.5722],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=3e560047-79d7-4313-abbeeb44b8619613&nome=ENRC L8", "z_order": 8
+            },
+            "L9": {
+                "code": "L9", "name": "Norte Ocidental (Rio Branco / Porto Velho)",
+                "layer": "ICA:ENRC_L9", "bbox": [-74.1917, -14.9904, -58.654, -4.0446],
+                "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=03d26d62-d5b4-4b29-a7ba7658036d1d14&nome=ENRC L9", "z_order": 9
+            }
         }
-    }
+
+    # Atualiza dinamicamente as URLs do catálogo com as URLs vigentes capturadas do portal AISWEB
+    live_urls = fetch_live_enrc_catalog()
+    for code, live_url in live_urls.items():
+        if code in catalog:
+            old_url = catalog[code].get("pdf_url")
+            if old_url != live_url:
+                print(f"[AISWEB] Atualizando URL da carta {code}: {live_url}")
+                catalog[code]["pdf_url"] = live_url
+
+    return catalog
 
 # ─── Gerenciador de Telemetria R2 em Tempo Real ───────────────────────────────
 
@@ -261,7 +298,7 @@ def find_gdal_tool(tool_name: str) -> str:
     return tool_name
 
 def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 5) -> bool:
-    """Baixa o GeoPDF mestre com retries, backoff progressivo para rate-limit e verificação de integridade."""
+    """Baixa o GeoPDF mestre com session, retries, backoff progressivo para rate-limit e verificação de integridade."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
         "Accept": "application/pdf,application/octet-stream,*/*",
@@ -270,10 +307,13 @@ def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart
     }
     retry_delays = [5, 15, 30, 60, 90]
 
+    session = requests.Session()
+    session.headers.update(headers)
+
     for attempt in range(1, max_retries + 1):
         try:
             telemetry.log(f"Baixando GeoPDF mestre do AISWEB (tentativa {attempt}/{max_retries})...", chart_idx, 8)
-            with requests.get(url, headers=headers, stream=True, timeout=90) as r:
+            with session.get(url, stream=True, timeout=90, allow_redirects=True) as r:
                 if r.status_code == 200:
                     with open(dest_path, "wb") as f:
                         for chunk in r.iter_content(chunk_size=128 * 1024):
@@ -284,10 +324,15 @@ def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart
                         with open(dest_path, "rb") as f:
                             header = f.read(5)
                         if not header.startswith(b"%PDF"):
-                            telemetry.log(f"Arquivo baixado não é um PDF válido (header={header}). Possível bloqueio HTML do AISWEB.", chart_idx, 10, level="WARN")
+                            try:
+                                with open(dest_path, "r", errors="ignore") as f_err:
+                                    msg = f_err.read(300).replace("\n", " ").strip()
+                            except Exception:
+                                msg = str(header)
+                            telemetry.log(f"Arquivo baixado não é PDF (header={header}). Resposta AISWEB: {msg}", chart_idx, 10, level="WARN")
                             continue
                         size_mb = os.path.getsize(dest_path) / (1024 * 1024)
-                        telemetry.log(f"Download concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
+                        telemetry.log(f"Download GeoPDF concluído com sucesso! Tamanho: {size_mb:.2f} MB", chart_idx, 15)
                         return True
                     else:
                         telemetry.log(f"Arquivo baixado vazio para {url}", chart_idx, 10, level="WARN")
@@ -300,38 +345,6 @@ def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart
         telemetry.log(f"Pausa de segurança ({wait_s}s) para liberação de conexão/rate-limit no AISWEB...", chart_idx, 9, level="WARN")
         time.sleep(wait_s)
     return False
-
-def create_gdal_wms_xml(layer: str = WMS_LAYER, code: str = "") -> str:
-    """Fallback: Gera definição GDAL WMS Service XML caso seja solicitada a carta FULL."""
-    suffix = f"_{code}" if code else ""
-    cache_dir = os.path.join(tempfile.gettempdir(), f"gdalwmscache_enrc{suffix}").replace("\\", "/")
-    os.makedirs(cache_dir, exist_ok=True)
-    return f"""<GDAL_WMS>
-  <Service name="WMS">
-    <Version>1.1.1</Version>
-    <ServerUrl>{WMS_URL}</ServerUrl>
-    <Layers>{layer}</Layers>
-    <Format>image/png</Format>
-    <SRS>EPSG:3857</SRS>
-  </Service>
-  <DataWindow>
-    <UpperLeftX>-20037508.34</UpperLeftX>
-    <UpperLeftY>20037508.34</UpperLeftY>
-    <LowerRightX>20037508.34</LowerRightX>
-    <LowerRightY>-20037508.34</LowerRightY>
-    <SizeX>1048576</SizeX>
-    <SizeY>1048576</SizeY>
-  </DataWindow>
-  <Projection>EPSG:3857</Projection>
-  <BandsCount>4</BandsCount>
-  <BlockSizeX>512</BlockSizeX>
-  <BlockSizeY>512</BlockSizeY>
-  <Cache>
-    <Path>{cache_dir}</Path>
-    <Depth>2</Depth>
-    <Extension>.png</Extension>
-  </Cache>
-</GDAL_WMS>"""
 
 def get_pdf_suppressed_layers(gdalinfo_bin: str, pdf_path: str) -> list:
     """
@@ -377,23 +390,18 @@ def process_chart_to_mbtiles(
     gdaladdo = find_gdal_tool("gdaladdo")
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        input_file = ""
-        # 1. Obter arquivo de entrada: GeoPDF mestre do AISWEB ou fallback WMS
-        if pdf_url and code != "FULL":
-            pdf_path = os.path.join(tmpdir, f"{code}.pdf")
-            ok_dl = download_geopdf(pdf_url, pdf_path, telemetry, chart_idx)
-            if ok_dl and os.path.exists(pdf_path):
-                input_file = pdf_path
-            else:
-                telemetry.log(f"Aviso: Falha ao baixar GeoPDF de {code}. Recorrendo a WMS...", chart_idx, 15, level="WARN")
+        # 1. Obter arquivo de entrada: GeoPDF mestre exclusivo do AISWEB (NUNCA WMS)
+        if not pdf_url:
+            telemetry.log(f"ERRO FATAL: Nenhuma URL de GeoPDF configurada para a carta {code}!", chart_idx, 15, level="ERROR")
+            return False
 
-        if not input_file:
-            layer = chart_info.get("layer", WMS_LAYER)
-            wms_xml_path = os.path.join(tmpdir, f"wms_{code}.xml")
-            with open(wms_xml_path, "w", encoding="utf-8") as f:
-                f.write(create_gdal_wms_xml(layer, code))
-            input_file = wms_xml_path
-            telemetry.log(f"Utilizando fonte WMS ({layer}) para {code}...", chart_idx, 18)
+        pdf_path = os.path.join(tmpdir, f"{code}.pdf")
+        ok_dl = download_geopdf(pdf_url, pdf_path, telemetry, chart_idx)
+        if not ok_dl or not os.path.exists(pdf_path):
+            telemetry.log(f"ERRO FATAL: Falha ao baixar GeoPDF vetorial oficial de {code}. Abortando processamento (WMS não permitido).", chart_idx, 15, level="ERROR")
+            return False
+
+        input_file = pdf_path
 
         warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
 

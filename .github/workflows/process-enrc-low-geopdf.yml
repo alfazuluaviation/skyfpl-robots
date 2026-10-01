@@ -98,6 +98,41 @@ jobs:
         run: |
           python build_enrc_geopdf.py
 
+      - name: 🛡️ Atualizar Telemetria R2 em caso de Cancelamento ou Falha
+        if: cancelled() || failure()
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+        run: |
+          python -c "
+          import os, json, datetime
+          try:
+              import boto3
+              endpoint = os.environ.get('R2_ENDPOINT')
+              ak = os.environ.get('R2_ACCESS_KEY')
+              sk = os.environ.get('R2_SECRET_KEY')
+              bucket = os.environ.get('R2_BUCKET', 'skyfpl-charts')
+              key = 'enrcl_hd_progress.json'
+              if endpoint and ak and sk:
+                  s3 = boto3.client('s3', endpoint_url=endpoint, aws_access_key_id=ak, aws_secret_access_key=sk)
+                  try:
+                      res = s3.get_object(Bucket=bucket, Key=key)
+                      data = json.loads(res['Body'].read().decode('utf-8'))
+                  except Exception:
+                      data = {}
+                  data['status'] = 'failed'
+                  data['updated_at'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+                  logs = data.get('logs', [])
+                  logs.append('[AVISO] Workflow interrompido ou cancelado no GitHub Actions.')
+                  data['logs'] = logs[-100:]
+                  s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(data, indent=2).encode('utf-8'), ContentType='application/json')
+                  print('[OK] Status atualizado para FAILED no R2 com sucesso.')
+          except Exception as e:
+              print(f'[WARN] Falha ao atualizar telemetria de cancelamento: {e}')
+          "
+
       - name: 📊 Registrar Sumário da Execução
         if: always()
         run: |

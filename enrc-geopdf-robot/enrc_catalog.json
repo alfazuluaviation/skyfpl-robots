@@ -5,7 +5,7 @@
     "region": "Sul",
     "layer": "ICA:ENRC_L1",
     "bbox": [-59.0699, -34.06158, -41.00386, -23.46398],
-    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=d04e19d6-4b3c-4f1d-a30cfe3871b062d3&nome=ENRC L1",
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=795fea1d-284a-4251-af8a1cb1f722d88c&nome=ENRC L1",
     "z_order": 2
   },
   "L2": {
@@ -14,7 +14,7 @@
     "region": "Sudeste e Centro",
     "layer": "ICA:ENRC_L2",
     "bbox": [-46.54487, -24.4608, -30.06263, -14.02166],
-    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=ae612a1d-8dc2-4105-b5c735e98bcf69b3&nome=ENRC L2",
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=63b3ad52-f1a4-4d5d-bb881464b7d77c44&nome=ENRC L2",
     "z_order": 3
   },
   "L3": {
@@ -41,7 +41,7 @@
     "region": "Centro-Oeste Sul",
     "layer": "ICA:ENRC_L5",
     "bbox": [-61.82458, -25.1697, -45.27287, -14.71895],
-    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=5a6d26aa-156e-48f5-8c3a3236e1b2c6ee&nome=ENRC L5",
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=e50c698a-d32b-4f66-a9e94cf40baeebeb&nome=ENRC L5",
     "z_order": 4
   },
   "L6": {
@@ -77,7 +77,7 @@
     "region": "Norte Ocidental",
     "layer": "ICA:ENRC_L9",
     "bbox": [-74.20132, -14.95273, -58.67145, -4.05079],
-    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=14bbdffc-0298-4c7d-b09be5c565e1af19&nome=ENRC L9",
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=03d26d62-d5b4-4b29-a7ba7658036d1d14&nome=ENRC L9",
     "z_order": 9
   },
   "FULL": {
