@@ -9,7 +9,7 @@ on:
         default: 'H1'
   push:
     paths:
-      - 'enrc-high-geopdf-robot/audit_trigger.txt'
+      - 'enrc-high-geopdf-robot/**'
       - '.github/workflows/audit-enrch-neatline.yml'
 
 jobs:
