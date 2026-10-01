@@ -1,0 +1,92 @@
+{
+  "H1": {
+    "code": "H1",
+    "name": "Região Sul (Porto Alegre, Curitiba)",
+    "layer": "ICA:ENRC_H1",
+    "bbox": [-59.1915, -35.1336, -40.7361, -23.6989],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=8f284a42-9b85-4820-8eb930dc8ee65e20&nome=ENRC H1",
+    "z_order": 2,
+    "amdt": "180",
+    "effective_date": "21/04/2022"
+  },
+  "H2": {
+    "code": "H2",
+    "name": "Sudeste/Centro (SP/RJ/BSB/BH)",
+    "layer": "ICA:ENRC_H2",
+    "bbox": [-46.5628, -24.5372, -30.0679, -14.0602],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=fc83fc32-a2a6-4d8c-8f2fe81e26d41d13&nome=ENRC H2",
+    "z_order": 3,
+    "amdt": "227",
+    "effective_date": "26/02/2026"
+  },
+  "H3": {
+    "code": "H3",
+    "name": "Nordeste Litoral (REC/SSA/FOR)",
+    "layer": "ICA:ENRC_H3",
+    "bbox": [-45.2284, -14.6637, -29.7087, -4.2552],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=2c86e8e0-365c-4430-b3b94760371e201c&nome=ENRC H3",
+    "z_order": 1,
+    "amdt": "206",
+    "effective_date": "22/01/2026"
+  },
+  "H4": {
+    "code": "H4",
+    "name": "Nordeste Oceânico (Atlântico)",
+    "layer": "ICA:ENRC_H4",
+    "bbox": [-42.0407, -4.8905, -26.8957, 5.9842],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=ce132182-a9a8-4e23-a94a5de718f80c62&nome=ENRC H4",
+    "z_order": 6,
+    "amdt": "194",
+    "effective_date": "22/01/2026"
+  },
+  "H5": {
+    "code": "H5",
+    "name": "Centro-Oeste Sul (CGR/CGB)",
+    "layer": "ICA:ENRC_H5",
+    "bbox": [-61.703, -25.4271, -45.139, -14.7391],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=f341530f-e165-4b46-a8a6819641efff4a&nome=ENRC H5",
+    "z_order": 4,
+    "amdt": "190",
+    "effective_date": "21/04/2022"
+  },
+  "H6": {
+    "code": "H6",
+    "name": "Centro/Norte Interior",
+    "layer": "ICA:ENRC_H6",
+    "bbox": [-59.4753, -15.2618, -43.9354, -4.8545],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=d3b6dfa7-fb7c-4fe3-805706b211e17bfc&nome=ENRC H6",
+    "z_order": 5,
+    "amdt": "187",
+    "effective_date": "22/01/2026"
+  },
+  "H7": {
+    "code": "H7",
+    "name": "Norte Oriental (Belém, Macapá)",
+    "layer": "ICA:ENRC_H7",
+    "bbox": [-56.2437, -5.4284, -41.1565, 4.9379],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=e39952d4-fbe0-469d-aa727b128ea1d64c&nome=ENRC H7",
+    "z_order": 7,
+    "amdt": "195",
+    "effective_date": "22/01/2026"
+  },
+  "H8": {
+    "code": "H8",
+    "name": "Norte Central (BVB/MAO)",
+    "layer": "ICA:ENRC_H8",
+    "bbox": [-70.9413, -5.3416, -55.8549, 5.5722],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=ee6a83fc-7123-4476-a5b79c70861b7d19&nome=ENRC H8",
+    "z_order": 8,
+    "amdt": "181",
+    "effective_date": "22/01/2026"
+  },
+  "H9": {
+    "code": "H9",
+    "name": "Norte Ocidental (RBR/PVH)",
+    "layer": "ICA:ENRC_H9",
+    "bbox": [-74.1917, -14.9904, -58.654, -4.0446],
+    "pdf_url": "https://aisweb.decea.mil.br/download/?arquivo=36579949-b510-4233-b2c940b6fc3cd6b9&nome=ENRC H9",
+    "z_order": 9,
+    "amdt": "182",
+    "effective_date": "22/01/2026"
+  }
+}

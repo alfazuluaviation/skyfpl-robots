@@ -1,0 +1,43 @@
+name: 🔬 Auditoria GDAL de Neatline ENRC H (DECEA Oficial vs. L)
+
+on:
+  workflow_dispatch:
+    inputs:
+      chart_code:
+        description: 'Carta ENRC H para auditar contra DECEA (ex: H1 ou H2)'
+        required: true
+        default: 'H1'
+
+jobs:
+  audit_neatline:
+    name: Auditar Geometria de Carta ENRC H
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 🌍 Instalar GDAL Nativo e Dependências
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y gdal-bin python3-gdal libgdal-dev
+          echo "=== Versão do GDAL ==="
+          gdalinfo --version
+
+      - name: 🔬 Executar Auditoria Comparativa do GeoTIFF DECEA
+        run: |
+          python enrc-high-geopdf-robot/audit_enrch_neatline.py --chart "${{ inputs.chart_code }}"
+
+      - name: 📤 Salvar Artefato de Auditoria
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-result-${{ inputs.chart_code }}
+          path: enrc-high-geopdf-robot/audit_result_*.json
+          retention-days: 7
