@@ -78,8 +78,16 @@ def main():
     staging_metadata = progress_data.get("metadata", {})
     prod_metadata = prod_data.get("metadata", {})
 
+    target_env = os.environ.get("TARGET_CODES", "").strip()
+    if target_env and target_env.upper() != "ALL":
+        target_codes = [c.strip().upper() for c in target_env.split(",") if c.strip()]
+        print(f"  🎯 Modo Seleção Ativo: Promovendo apenas {len(target_codes)} carta(s): {', '.join(target_codes)}", flush=True)
+    else:
+        target_codes = ALL_ENRC_CODES
+        print("  🌐 Modo Completo: Promovendo todas as cartas disponíveis em staging.", flush=True)
+
     print("\n📦 ETAPA 1: Transferindo cartas (Cópia Server-Side + Limpeza de Origem)...", flush=True)
-    for idx, code in enumerate(ALL_ENRC_CODES, start=1):
+    for idx, code in enumerate(target_codes, start=1):
         candidates = [
             f"enrc/staging/{code}_HD.mbtiles",
             f"enrc/staging/{code}.mbtiles",

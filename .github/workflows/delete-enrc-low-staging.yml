@@ -1,22 +1,21 @@
-name: 🚀 ENRC LOW GeoPDF HD — Promoção Oficial para Produção (enrc/)
+name: 🗑️ ENRC LOW GeoPDF HD — Excluir Cartas de Quarentena (enrc/staging/)
 
 on:
   workflow_dispatch:
     inputs:
       target_codes:
-        description: 'Cartas para promoção (ex: L1 ou L1,L2 ou ALL)'
-        required: false
-        default: 'ALL'
+        description: 'Cartas para exclusão em quarentena (ex: L1 ou L1,L2)'
+        required: true
 
 concurrency:
   group: enrc-low-geopdf-hd-promoter
   cancel-in-progress: false
 
 jobs:
-  promote_enrc:
-    name: Promover Cartas ENRC LOW HD para enrc/
+  delete_enrc_staging:
+    name: Excluir Cartas de enrc/staging/
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
 
     steps:
       - name: 📥 Checkout do Repositório
@@ -35,22 +34,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install boto3
 
-      - name: 🚀 Executar Promoção Server-Side no Cloudflare R2
+      - name: 🗑️ Executar Exclusão Server-Side no Cloudflare R2
         working-directory: enrc-geopdf-robot
         env:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
-          TARGET_CODES: ${{ github.event.inputs.target_codes || 'ALL' }}
+          TARGET_CODES: ${{ github.event.inputs.target_codes }}
         run: |
-          python promote_enrc_to_prod.py
+          python delete_enrc_staging.py
 
       - name: 📊 Registrar Sumário da Execução
         if: always()
         run: |
-          echo "## 🚀 Relatório de Promoção — ENRC LOW GeoPDF HD" >> $GITHUB_STEP_SUMMARY
-          echo "| Etapa | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "## 🗑️ Relatório de Exclusão — ENRC LOW GeoPDF HD" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor |" >> $GITHUB_STEP_SUMMARY
           echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Cartas HD Transferidas** | `enrc/{codigo}.mbtiles` e `enrc/{codigo}.pmtiles` (Staging limpo) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cartas Excluídas** | \`${{ github.event.inputs.target_codes }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY
