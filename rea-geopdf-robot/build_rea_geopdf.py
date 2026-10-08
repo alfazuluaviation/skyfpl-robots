@@ -255,6 +255,7 @@ class TelemetryManager:
         self.status = "processing"
         self.logs = []
         self.metadata = {}
+        self.done_codes = set()
         self.start_time = datetime.now(timezone.utc).isoformat()
         self._load_existing_metadata()
         self.sync_r2()
@@ -286,6 +287,7 @@ class TelemetryManager:
 
     def chart_completed(self, code: str, size_bytes: int, pmtiles_size: int = 0, actual_min: int = 8, actual_max: int = 11, bounds: str = "", chart_info: dict = None):
         chart_info = chart_info or {}
+        self.done_codes.add(code)
         self.metadata[code] = {
             "name": chart_info.get("name", code),
             "cycle": self.airac.get("cycle", "2609"),
@@ -310,12 +312,14 @@ class TelemetryManager:
         self._save("", 100)
 
     def _save(self, current_code: str, progress: int):
+        done_count = len(self.done_codes) if self.status == "processing" else self.total
         payload = {
             "status": self.status,
             "current_chart": current_code,
             "progress_percent": progress,
             "charts_total": self.total,
-            "charts_processed": len([c for c in self.target_codes if c in self.metadata]),
+            "charts_done": done_count,
+            "charts_processed": done_count,
             "current_cycle": self.airac.get("cycle", "2609"),
             "effective_date": self.airac.get("effective_date", "03/09/2026"),
             "started_at": self.start_time,

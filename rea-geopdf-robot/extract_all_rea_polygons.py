@@ -265,30 +265,72 @@ def main():
 
         tif_url = GEOTIFF_BASE_URL.format(filename=file_name)
         
+        # 1. Prioridade Absoluta: Extração Direta da Banda 4 (Alfa) do GeoTIFF Oficial DECEA
+        # (Mesma metodologia canônica validada do robô ENRC High: extract_all_enrc_high_polygons.py)
         extracted_coords = None
-        method = "FALLBACK_WMS"
+        method = "DECEA_GEOTIFF_BAND4_ALPHA"
         
-        # 2. Prioridade 1: Extrair NEATLINE oficial do GeoPDF do AISWEB
-        if pdf_url:
+        # Carregar do cache de extração se já processado via GDAL Polygonize
+        if os.path.exists(OUTPUT_POLYGONS):
             try:
-                cmd = [GDALINFO, "-json", f"/vsicurl/{pdf_url}"]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-                if res.returncode == 0:
-                    raw_out = res.stdout.lstrip('\ufeff')
-                    pdata = json.loads(raw_out)
-                    neat = pdata.get("metadata", {}).get("", {}).get("NEATLINE")
-                    wkt_srs = pdata.get("coordinateSystem", {}).get("wkt")
-                    if neat and wkt_srs:
-                        raw_coords = project_neatline_wkt_to_4326(neat, wkt_srs)
-                        if raw_coords:
-                            extracted_coords = apply_inset_buffer(raw_coords, inset_deg=0.0008)
-                            method = "GEOPDF_NEATLINE"
-                            success_neatline += 1
+                with open(OUTPUT_POLYGONS, "r", encoding="utf-8") as f_prev:
+                    prev_polys = json.load(f_prev)
+                    if code in prev_polys and prev_polys[code].get("method") == "DECEA_GEOTIFF_BAND4_ALPHA":
+                        extracted_coords = prev_polys[code]["coordinates"]
+                        method = "DECEA_GEOTIFF_BAND4_ALPHA"
+                        success_neatline += 1
             except Exception:
                 pass
 
-        # 3. Prioridade 2: wgs84Extent do GeoTIFF oficial da CDN do DECEA
         if not extracted_coords and tif_url:
+            # Extração dinâmica direta do GeoTIFF via GDAL
+            try:
+                from osgeo import gdal, ogr, osr
+                vsi_url = f"/vsicurl/{tif_url}"
+                ds = gdal.Open(vsi_url)
+                if ds and ds.RasterCount >= 4:
+                    proj_wkt = ds.GetProjectionRef()
+                    src_srs = osr.SpatialReference()
+                    src_srs.ImportFromWkt(proj_wkt)
+                    
+                    dst_srs = osr.SpatialReference()
+                    dst_srs.ImportFromEPSG(4326)
+                    dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                    tx = osr.CoordinateTransformation(src_srs, dst_srs)
+                    
+                    b4 = ds.GetRasterBand(4)
+                    mem_drv = ogr.GetDriverByName("MEM")
+                    mem_ds = mem_drv.CreateDataSource("mem_ds")
+                    ogr_layer = mem_ds.CreateLayer("neatline", srs=src_srs, geom_type=ogr.wkbPolygon)
+                    ogr_layer.CreateField(ogr.FieldDefn("val", ogr.OFTInteger))
+                    
+                    gdal.Polygonize(b4, b4, ogr_layer, 0, [])
+                    best_geom = None
+                    max_area = 0.0
+                    for feat in ogr_layer:
+                        if feat.GetField("val") == 255:
+                            geom = feat.GetGeometryRef()
+                            if geom and geom.GetArea() > max_area:
+                                max_area = geom.GetArea()
+                                best_geom = geom.Clone()
+                    if best_geom:
+                        inset_val = -80.0 if src_srs.IsProjected() else -0.0008
+                        buffered = best_geom.Buffer(inset_val)
+                        working_geom = buffered if (buffered and not buffered.IsEmpty()) else best_geom
+                        working_geom.Transform(tx)
+                        simp = working_geom.SimplifyPreserveTopology(0.0002)
+                        ring = simp.GetGeometryRef(0)
+                        pts = [[round(ring.GetX(i), 5), round(ring.GetY(i), 5)] for i in range(ring.GetPointCount())]
+                        if pts[0] != pts[-1]:
+                            pts.append(pts[0])
+                        extracted_coords = [pts]
+                        method = "DECEA_GEOTIFF_BAND4_ALPHA"
+                        success_neatline += 1
+            except Exception:
+                pass
+
+        if not extracted_coords:
+            # Fallback secundário: wgs84Extent do GeoTIFF
             try:
                 cmd = [GDALINFO, "-json", f"/vsicurl/{tif_url}"]
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
@@ -302,12 +344,17 @@ def main():
                         success_neatline += 1
             except Exception:
                 pass
-                
-        # 4. Fallback WMS se ambos falharem
+
         if not extracted_coords:
-            fallback_bbox = decea_wms_bboxes.get(clean_layer, [-47.89662, -24.50335, -44.39567, -22.2852])
+            wms_bbox = decea_wms_bboxes.get(clean_layer) or decea_wms_bboxes.get(code.replace("REA_", "CCV_REA_")) or decea_wms_bboxes.get(code)
+            if wms_bbox:
+                extracted_coords = bbox_to_polygon_coordinates(wms_bbox)
+                method = "DECEA_WMS_FALLBACK"
+
+        if not extracted_coords:
+            fallback_bbox = [-47.89662, -24.50335, -44.39567, -22.2852]
             extracted_coords = bbox_to_polygon_coordinates(fallback_bbox)
-            method = "FALLBACK_WMS"
+            method = "FALLBACK"
 
         ring = extracted_coords[0]
         lons = [p[0] for p in ring]
