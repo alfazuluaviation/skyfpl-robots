@@ -46,3 +46,19 @@ Este documento detalha o plano de engenharia para criar o **Robô Crawler Python
 
 ### 2. Aprovação do Usuário
 *   **Parar e aguardar** a sua aprovação explícita sobre este plano antes de gerar ou enviar qualquer código para o repositório oficial de robôs.
+
+---
+
+## 🚀 Fase 2: Neatline Oficial v2 e Corte Conforme (Outubro/2026)
+
+*   **Identificação do Problema:** Cartas REA originais são produzidas em projeção métrica UTM (ex: Zona 23S em SP). O uso anterior do BBOX WMS envolvente gerava "buracos" no mapa e corte com bordas de papel cinza/branco nos cantos.
+*   **Extrator Canônico v2 (`extract_all_rea_polygons.py`):**
+    *   Extrai a tag oficial `NEATLINE` do GeoPDF mestre (ArcGIS Pro DECEA).
+    *   Reprojeta os vértices de cada zona UTM para `EPSG:4326` preservando a rotação/inclinação correta.
+    *   Aplica **Inset Buffer de segurança** (~80 m / 0.0008°) para eliminar 100% da linha preta e da margem de papel.
+    *   Fallback automático para extensão do GeoTIFF DECEA.
+*   **Arquivos Atualizados:**
+    *   `rea_catalog.json`: Catálogo com novos BBOXes reais e links dinâmicos do AISWEB.
+    *   `rea_official_polygons.json`: GeoJSON canônico com os anéis poligonais do NEATLINE consumidos pelo robô `-cutline`.
+    *   `reaOfficialPolygons.ts`: Tipagem TypeScript para o Dashboard Admin desenhar o contorno exato no mapa sem sobras.
+
