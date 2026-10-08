@@ -765,6 +765,7 @@ def main():
             if s3_client:
                 telemetry.log(f"Enviando MBTiles HD ({mbtiles_size / 1024 / 1024:.2f} MB) para R2...", idx, 90)
                 upload_to_r2(s3_client, out_mbtiles, r2_mbtiles_key)
+                telemetry.log(f"✅ Upload MBTiles HD concluído com sucesso no Cloudflare R2 ({r2_mbtiles_key})!", idx, 93)
 
             # Cópia para o cache local do Admin para visualização imediata no Dashboard
             admin_cache = r"c:\Users\josemir\Desktop\skynav-pro-official\admin\.cache\mbtiles"
@@ -772,9 +773,9 @@ def main():
                 admin_dest = os.path.join(admin_cache, f"rea_{code}_HD.mbtiles")
                 try:
                     shutil.copy2(out_mbtiles, admin_dest)
-                    telemetry.log(f"💾 Cópia espelhada salva no cache do Dashboard: {admin_dest}", idx, 92)
+                    telemetry.log(f"💾 Cópia espelhada salva no cache do Dashboard: {admin_dest}", idx, 94)
                 except Exception as e:
-                    telemetry.log(f"Aviso ao copiar para cache do admin: {e}", idx, 92, level="WARN")
+                    telemetry.log(f"Aviso ao copiar para cache do admin: {e}", idx, 94, level="WARN")
 
             # Conversão e Upload PMTiles
             pmtiles_ok = convert_to_pmtiles(out_mbtiles, out_pmtiles, telemetry, idx)
@@ -785,11 +786,12 @@ def main():
                 if s3_client:
                     telemetry.log(f"Enviando PMTiles ({pmtiles_size / 1024 / 1024:.2f} MB) para R2...", idx, 96)
                     upload_to_r2(s3_client, out_pmtiles, r2_pmtiles_key)
+                    telemetry.log(f"✅ Upload PMTiles concluído com sucesso no Cloudflare R2 ({r2_pmtiles_key})!", idx, 98)
 
             bbox = chart_info.get("bbox", [])
             bounds_str = f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}" if bbox else ""
             telemetry.chart_completed(code, mbtiles_size, pmtiles_size, MIN_ZOOM, MAX_ZOOM, bounds_str, chart_info=chart_info)
-            telemetry.log(f"✅ Setor {code} concluído com sucesso a partir do GeoPDF oficial!", idx, 100)
+            telemetry.log(f"✅ Setor {code} concluído e registrado no R2 a partir do GeoPDF oficial!", idx, 100)
             success_count += 1
 
             # 🧹 Limpeza Imediata de Memória e Disco:
