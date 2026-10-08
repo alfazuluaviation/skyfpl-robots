@@ -1,0 +1,548 @@
+{
+  "REA_CURITIBA": {
+    "code": "REA_CURITIBA",
+    "name": "Curitiba (TMA-CT)",
+    "layer": "ICA:REA_CURITIBA",
+    "file": "REA_CURITIBA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REA_CURITIBA.tif",
+    "geotiff_size_mb": 73.72,
+    "bbox": [
+      -50.08362,
+      -27.00078,
+      -48.16639,
+      -24.68376
+    ],
+    "center": [
+      -49.125,
+      -25.84
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wt-curitiba_rea_20231228.pdf"
+  },
+  "REA_CY_CUIABA": {
+    "code": "REA_CY_CUIABA",
+    "name": "Cuiabá",
+    "layer": "ICA:CCV_REA_CY_CUIABA",
+    "file": "CCV_REA_CY_CUIABA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_CY_CUIABA.tif",
+    "geotiff_size_mb": 527.95,
+    "bbox": [
+      -56.57155,
+      -16.15953,
+      -55.67383,
+      -15.09157
+    ],
+    "center": [
+      -56.12,
+      -15.62
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wy-cuiaba_rea_20251002.pdf"
+  },
+  "REA_LONDRINA": {
+    "code": "REA_LONDRINA",
+    "name": "Londrina",
+    "layer": "ICA:REA_LONDRINA",
+    "file": "REA_LONDRINA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REA_LONDRINA.tif",
+    "geotiff_size_mb": 429.45,
+    "bbox": [
+      -52.83371,
+      -24.16693,
+      -50.16685,
+      -22.50042
+    ],
+    "center": [
+      -51.5,
+      -23.33
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/REA_LONDRINA_2015.pdf"
+  },
+  "REA_PI-PARINTINS": {
+    "code": "REA_PI-PARINTINS",
+    "name": "Parintins",
+    "layer": "ICA:CCV_REA_PI-PARINTINS",
+    "file": "CCV_REA_PI-PARINTINS.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_PI-PARINTINS.tif",
+    "geotiff_size_mb": 78.14,
+    "bbox": [
+      -57.38333,
+      -3.23333,
+      -56.09989,
+      -2.16658
+    ],
+    "center": [
+      -56.74,
+      -2.7
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-pi-parintins_rea_20240613.pdf"
+  },
+  "REA_RIBEIRAO_PRETO": {
+    "code": "REA_RIBEIRAO_PRETO",
+    "name": "Ribeirão Preto",
+    "layer": "ICA:REA_RIBEIRAO_PRETO",
+    "file": "REA_RIBEIRAO_PRETO.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REA_RIBEIRAO_PRETO.tif",
+    "geotiff_size_mb": 13.68,
+    "bbox": [
+      -48.09718,
+      -21.50944,
+      -47.48935,
+      -20.82422
+    ],
+    "center": [
+      -47.79,
+      -21.16
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/REA_Ribeirao_Preto_aic_13_20.pdf"
+  },
+  "REA_WA_TABATINGA": {
+    "code": "REA_WA_TABATINGA",
+    "name": "Tabatinga",
+    "layer": "ICA:CCV_REA_WA_TABATINGA",
+    "file": "CCV_REA_WA_TABATINGA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WA_TABATINGA.tif",
+    "geotiff_size_mb": 36.38,
+    "bbox": [
+      -70.28333,
+      -4.5,
+      -69.46664,
+      -3.91645
+    ],
+    "center": [
+      -69.87,
+      -4.2
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wa-tabatinga_rea_20231130.pdf"
+  },
+  "REA_WB_BELEM": {
+    "code": "REA_WB_BELEM",
+    "name": "Belém",
+    "layer": "ICA:CCV_REA_WB_BELEM",
+    "file": "CCV_REA_WB_BELEM.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WB_BELEM.tif",
+    "geotiff_size_mb": 24.71,
+    "bbox": [
+      -48.94516,
+      -1.82644,
+      -47.86112,
+      -0.92431
+    ],
+    "center": [
+      -48.4,
+      -1.37
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wb-belem_rea_20250904.pdf"
+  },
+  "REA_WF_RECIFE": {
+    "code": "REA_WF_RECIFE",
+    "name": "Recife",
+    "layer": "ICA:CCV_REA_WF_RECIFE",
+    "file": "CCV_REA_WF_RECIFE.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WF_RECIFE.tif",
+    "geotiff_size_mb": 98.13,
+    "bbox": [
+      -35.53357,
+      -8.66723,
+      -34.49995,
+      -7.41693
+    ],
+    "center": [
+      -35.01,
+      -8.04
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wf-recife_rea_20250320.pdf"
+  },
+  "REA_WG_CAMPO_GRANDE": {
+    "code": "REA_WG_CAMPO_GRANDE",
+    "name": "Campo Grande",
+    "layer": "ICA:CCV_REA_WG_CAMPO_GRANDE",
+    "file": "CCV_REA_WG_CAMPO_GRANDE.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WG_CAMPO_GRANDE.tif",
+    "geotiff_size_mb": 364.15,
+    "bbox": [
+      -55.73715,
+      -21.24926,
+      -53.5944,
+      -19.68197
+    ],
+    "center": [
+      -54.66,
+      -20.46
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wg-campo-grande_rea_20250220.pdf"
+  },
+  "REA_WH_BELO_HORIZONTE": {
+    "code": "REA_WH_BELO_HORIZONTE",
+    "name": "Belo Horizonte",
+    "layer": "ICA:CCV_REA_WH_BELO_HORIZONTE",
+    "file": "CCV_REA_WH_BELO_HORIZONTE.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WH_BELO_HORIZONTE.tif",
+    "geotiff_size_mb": 91.35,
+    "bbox": [
+      -44.86667,
+      -20.91667,
+      -42.86646,
+      -18.64994
+    ],
+    "center": [
+      -43.86,
+      -19.78
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wh-belo-horizonte_rea_20240905.pdf"
+  },
+  "REA_WJ1_RIO_DE_JANEIRO": {
+    "code": "REA_WJ1_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro",
+    "layer": "ICA:CCV_REA_WJ1_RIO_DE_JANEIRO",
+    "file": "CCV_REA_WJ1_RIO_DE_JANEIRO.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WJ1_RIO_DE_JANEIRO.tif",
+    "geotiff_size_mb": 21.96,
+    "bbox": [
+      -44.81333,
+      -24.00167,
+      -41.76018,
+      -21.8176
+    ],
+    "center": [
+      -43.28,
+      -22.91
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wj1-rio-de-janeiro_rea_20260319.pdf"
+  },
+  "REA_WK_PORTO_SEGURO": {
+    "code": "REA_WK_PORTO_SEGURO",
+    "name": "Porto Seguro",
+    "layer": "ICA:CCV_REA_WK_PORTO_SEGURO",
+    "file": "CCV_REA_WK_PORTO_SEGURO.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WK_PORTO_SEGURO.tif",
+    "geotiff_size_mb": 52.07,
+    "bbox": [
+      -39.5,
+      -16.83333,
+      -38.78321,
+      -16.29998
+    ],
+    "center": [
+      -39.14,
+      -16.56
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wk-porto-seguro_rea_20250123.pdf"
+  },
+  "REA_WN2_MANAUS": {
+    "code": "REA_WN2_MANAUS",
+    "name": "Manaus",
+    "layer": "ICA:CCV_REA_WN2_MANAUS",
+    "file": "CCV_REA_WN2_MANAUS.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WN2_MANAUS.tif",
+    "geotiff_size_mb": 59.3,
+    "bbox": [
+      -60.57283,
+      -3.515,
+      -59.60187,
+      -2.71951
+    ],
+    "center": [
+      -60.08,
+      -3.11
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wn2-manaus_rea_20250807.pdf"
+  },
+  "REA_WP_PORTO_ALEGRE": {
+    "code": "REA_WP_PORTO_ALEGRE",
+    "name": "Porto Alegre",
+    "layer": "ICA:CCV_REA_WP_PORTO_ALEGRE",
+    "file": "CCV_REA_WP_PORTO_ALEGRE.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WP_PORTO_ALEGRE.tif",
+    "geotiff_size_mb": 258.94,
+    "bbox": [
+      -51.96681,
+      -30.75025,
+      -50.25021,
+      -28.75022
+    ],
+    "center": [
+      -51.1,
+      -29.75
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wp-porto-alegre_rea_20250320.pdf"
+  },
+  "REA_WR_BRASILIA": {
+    "code": "REA_WR_BRASILIA",
+    "name": "Brasília",
+    "layer": "ICA:CCV_REA_WR_BRASILIA",
+    "file": "CCV_REA_WR_BRASILIA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WR_BRASILIA.tif",
+    "geotiff_size_mb": 102.67,
+    "bbox": [
+      -48.46667,
+      -16.25,
+      -47.36663,
+      -15.3833
+    ],
+    "center": [
+      -47.91,
+      -15.81
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wr-brasilia_rea_20240125.pdf"
+  },
+  "REA_WS_SAO_LUIS": {
+    "code": "REA_WS_SAO_LUIS",
+    "name": "São Luís",
+    "layer": "ICA:CCV_REA_WS_SAO_LUIS",
+    "file": "CCV_REA_WS_SAO_LUIS.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WS_SAO_LUIS.tif",
+    "geotiff_size_mb": 44.48,
+    "bbox": [
+      -44.6658,
+      -2.89996,
+      -43.83333,
+      -2.24989
+    ],
+    "center": [
+      -44.24,
+      -2.57
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-ws-sao-luis_rea_20250612.pdf"
+  },
+  "REA_WX_SANTAREM": {
+    "code": "REA_WX_SANTAREM",
+    "name": "Santarém",
+    "layer": "ICA:CCV_REA_WX_SANTAREM",
+    "file": "CCV_REA_WX_SANTAREM.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WX_SANTAREM.tif",
+    "geotiff_size_mb": 28.2,
+    "bbox": [
+      -55.16667,
+      -2.75,
+      -54.49998,
+      -2.24998
+    ],
+    "center": [
+      -54.83,
+      -2.5
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wx-santarem_rea_20241128.pdf"
+  },
+  "REA_WZ_FORTALEZA": {
+    "code": "REA_WZ_FORTALEZA",
+    "name": "Fortaleza",
+    "layer": "ICA:CCV_REA_WZ_FORTALEZA",
+    "file": "CCV_REA_WZ_FORTALEZA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_WZ_FORTALEZA.tif",
+    "geotiff_size_mb": 58.08,
+    "bbox": [
+      -39.0,
+      -4.24997,
+      -37.9331,
+      -3.36651
+    ],
+    "center": [
+      -38.46,
+      -3.8
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-wz-fortaleza_rea_20251127.pdf"
+  },
+  "REA_XF_FLORIANOPOLIS": {
+    "code": "REA_XF_FLORIANOPOLIS",
+    "name": "Florianópolis",
+    "layer": "ICA:CCV_REA_XF_FLORIANOPOLIS",
+    "file": "CCV_REA_XF_FLORIANOPOLIS.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XF_FLORIANOPOLIS.tif",
+    "geotiff_size_mb": 76.94,
+    "bbox": [
+      -49.73333,
+      -28.31667,
+      -48.01645,
+      -26.4999
+    ],
+    "center": [
+      -48.87,
+      -27.4
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xf-florianopolis_rea_20241003.pdf"
+  },
+  "REA_XK_MACAPA": {
+    "code": "REA_XK_MACAPA",
+    "name": "Macapá",
+    "layer": "ICA:CCV_REA_XK_MACAPA",
+    "file": "CCV_REA_XK_MACAPA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XK_MACAPA.tif",
+    "geotiff_size_mb": 39.74,
+    "bbox": [
+      -51.38333,
+      -0.23333,
+      -50.69988,
+      0.30002
+    ],
+    "center": [
+      -51.12,
+      0.05
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xk-macapa_rea_20240125.pdf"
+  },
+  "REA_XN-ANAPOLIS": {
+    "code": "REA_XN-ANAPOLIS",
+    "name": "Anápolis",
+    "layer": "ICA:CCV_REA_XN-ANAPOLIS",
+    "file": "CCV_REA_XN-ANAPOLIS.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XN-ANAPOLIS.tif",
+    "geotiff_size_mb": 28.99,
+    "bbox": [
+      -49.81667,
+      -17.0333,
+      -48.14994,
+      -15.76659
+    ],
+    "center": [
+      -49.0,
+      -16.33
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xn-anapolis_rea_20261001.pdf"
+  },
+  "REA_XP1_SAO_PAULO": {
+    "code": "REA_XP1_SAO_PAULO",
+    "name": "São Paulo 1 (RMSP)",
+    "layer": "ICA:CCV_REA_XP1_SAO_PAULO",
+    "file": "CCV_REA_XP1_SAO_PAULO.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XP1_SAO_PAULO.tif",
+    "geotiff_size_mb": 25.1,
+    "bbox": [
+      -47.89662,
+      -24.50335,
+      -44.39567,
+      -22.2852
+    ],
+    "center": [
+      -46.58,
+      -23.62
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xp1-sao-paulo_rea_20260319.pdf"
+  },
+  "REA_XP2_SAO_PAULO": {
+    "code": "REA_XP2_SAO_PAULO",
+    "name": "São Paulo 2",
+    "layer": "ICA:CCV_REA_XP2_SAO_PAULO",
+    "file": "CCV_REA_XP2_SAO_PAULO.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XP2_SAO_PAULO.tif",
+    "geotiff_size_mb": 8.7,
+    "bbox": [
+      -47.22845,
+      -23.93291,
+      -46.03175,
+      -23.09281
+    ],
+    "center": [
+      -46.58,
+      -23.62
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xp2-sao-paulo_rea_20260319.pdf"
+  },
+  "REA_XR_VITORIA": {
+    "code": "REA_XR_VITORIA",
+    "name": "Vitória",
+    "layer": "ICA:CCV_REA_XR_VITORIA",
+    "file": "CCV_REA_XR_VITORIA.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XR_VITORIA.tif",
+    "geotiff_size_mb": 59.72,
+    "bbox": [
+      -40.66667,
+      -20.58333,
+      -39.91648,
+      -19.79978
+    ],
+    "center": [
+      -40.29,
+      -20.25
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xr-vitoria_rea_20240808.pdf"
+  },
+  "REA_XS_SALVADOR": {
+    "code": "REA_XS_SALVADOR",
+    "name": "Salvador",
+    "layer": "ICA:CCV_REA_XS_SALVADOR",
+    "file": "CCV_REA_XS_SALVADOR.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XS_SALVADOR.tif",
+    "geotiff_size_mb": 79.71,
+    "bbox": [
+      -39.06676,
+      -13.46682,
+      -37.86655,
+      -12.49983
+    ],
+    "center": [
+      -38.33,
+      -12.83
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xs-salvador_rea_20241128.pdf"
+  },
+  "REA_XT_NATAL": {
+    "code": "REA_XT_NATAL",
+    "name": "Natal",
+    "layer": "ICA:CCV_REA_XT_NATAL",
+    "file": "CCV_REA_XT_NATAL.tif",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REA_XT_NATAL.tif",
+    "geotiff_size_mb": 95.77,
+    "bbox": [
+      -35.83333,
+      -6.41667,
+      -34.99997,
+      -5.3833
+    ],
+    "center": [
+      -35.29,
+      -5.7
+    ],
+    "zoom": 9,
+    "z_order": 1,
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/rea/ccv-rea-xt-natal_rea_20250320.pdf"
+  }
+}
