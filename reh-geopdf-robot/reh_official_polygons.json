@@ -1,0 +1,863 @@
+{
+  "CCV_REH_XP2_SAO_PAULO_1": {
+    "code": "REH_XP2_SAO_PAULO_1",
+    "ident": "CCV_REH_XP2_SAO_PAULO_1",
+    "name": "São Paulo 1 (RMSP Central)",
+    "bbox": [
+      -47.03032,
+      -23.8391,
+      -46.30835,
+      -23.30926
+    ],
+    "center": [
+      -46.67,
+      -23.57
+    ],
+    "zoom": 10.5,
+    "coordinates": [
+      [
+        [
+          -47.02231,
+          -23.30926
+        ],
+        [
+          -47.03032,
+          -23.83132
+        ],
+        [
+          -46.31354,
+          -23.8391
+        ],
+        [
+          -46.30835,
+          -23.31684
+        ],
+        [
+          -47.02231,
+          -23.30926
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_XP2_SAO_PAULO_1": {
+    "code": "REH_XP2_SAO_PAULO_1",
+    "ident": "CCV_REH_XP2_SAO_PAULO_1",
+    "name": "São Paulo 1 (RMSP Central)",
+    "bbox": [
+      -47.03032,
+      -23.8391,
+      -46.30835,
+      -23.30926
+    ],
+    "center": [
+      -46.67,
+      -23.57
+    ],
+    "zoom": 10.5,
+    "coordinates": [
+      [
+        [
+          -47.02231,
+          -23.30926
+        ],
+        [
+          -47.03032,
+          -23.83132
+        ],
+        [
+          -46.31354,
+          -23.8391
+        ],
+        [
+          -46.30835,
+          -23.31684
+        ],
+        [
+          -47.02231,
+          -23.30926
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_XP2_SAO_PAULO_2": {
+    "code": "REH_XP2_SAO_PAULO_2",
+    "ident": "CCV_REH_XP2_SAO_PAULO_2",
+    "name": "São Paulo 2 (RMSP Expandido)",
+    "bbox": [
+      -46.78313,
+      -23.68155,
+      -46.58929,
+      -23.47636
+    ],
+    "center": [
+      -46.68,
+      -23.58
+    ],
+    "zoom": 11.0,
+    "coordinates": [
+      [
+        [
+          -46.78038,
+          -23.47636
+        ],
+        [
+          -46.78313,
+          -23.67947
+        ],
+        [
+          -46.59174,
+          -23.68155
+        ],
+        [
+          -46.58929,
+          -23.47843
+        ],
+        [
+          -46.78038,
+          -23.47636
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_XP2_SAO_PAULO_2": {
+    "code": "REH_XP2_SAO_PAULO_2",
+    "ident": "CCV_REH_XP2_SAO_PAULO_2",
+    "name": "São Paulo 2 (RMSP Expandido)",
+    "bbox": [
+      -46.78313,
+      -23.68155,
+      -46.58929,
+      -23.47636
+    ],
+    "center": [
+      -46.68,
+      -23.58
+    ],
+    "zoom": 11.0,
+    "coordinates": [
+      [
+        [
+          -46.78038,
+          -23.47636
+        ],
+        [
+          -46.78313,
+          -23.67947
+        ],
+        [
+          -46.59174,
+          -23.68155
+        ],
+        [
+          -46.58929,
+          -23.47843
+        ],
+        [
+          -46.78038,
+          -23.47636
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_WJ2_RIO_DE_JANEIRO": {
+    "code": "REH_WJ2_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ2_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ2)",
+    "bbox": [
+      -43.93131,
+      -23.16674,
+      -42.97307,
+      -22.52755
+    ],
+    "center": [
+      -43.45,
+      -22.85
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -43.93131,
+          -22.53665
+        ],
+        [
+          -43.92638,
+          -23.16674
+        ],
+        [
+          -42.97307,
+          -23.15735
+        ],
+        [
+          -42.98239,
+          -22.52755
+        ],
+        [
+          -43.93131,
+          -22.53665
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_WJ2_RIO_DE_JANEIRO": {
+    "code": "REH_WJ2_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ2_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ2)",
+    "bbox": [
+      -43.93131,
+      -23.16674,
+      -42.97307,
+      -22.52755
+    ],
+    "center": [
+      -43.45,
+      -22.85
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -43.93131,
+          -22.53665
+        ],
+        [
+          -43.92638,
+          -23.16674
+        ],
+        [
+          -42.97307,
+          -23.15735
+        ],
+        [
+          -42.98239,
+          -22.52755
+        ],
+        [
+          -43.93131,
+          -22.53665
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_WJ3_RIO_DE_JANEIRO": {
+    "code": "REH_WJ3_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3)",
+    "bbox": [
+      -43.42876,
+      -23.04725,
+      -43.06993,
+      -22.80642
+    ],
+    "center": [
+      -43.25,
+      -22.92
+    ],
+    "zoom": 10.5,
+    "coordinates": [
+      [
+        [
+          -43.42876,
+          -22.81032
+        ],
+        [
+          -43.42603,
+          -23.04725
+        ],
+        [
+          -43.06993,
+          -23.0433
+        ],
+        [
+          -43.07328,
+          -22.80642
+        ],
+        [
+          -43.42876,
+          -22.81032
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_WJ3_RIO_DE_JANEIRO": {
+    "code": "REH_WJ3_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3)",
+    "bbox": [
+      -43.42876,
+      -23.04725,
+      -43.06993,
+      -22.80642
+    ],
+    "center": [
+      -43.25,
+      -22.92
+    ],
+    "zoom": 10.5,
+    "coordinates": [
+      [
+        [
+          -43.42876,
+          -22.81032
+        ],
+        [
+          -43.42603,
+          -23.04725
+        ],
+        [
+          -43.06993,
+          -23.0433
+        ],
+        [
+          -43.07328,
+          -22.80642
+        ],
+        [
+          -43.42876,
+          -22.81032
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_BACIA_DE_SANTOS": {
+    "code": "REH_BACIA_DE_SANTOS",
+    "ident": "REH_BACIA_DE_SANTOS",
+    "name": "Bacia de Santos Offshore",
+    "bbox": [
+      -43.83292,
+      -26.49935,
+      -41.50033,
+      -22.66705
+    ],
+    "center": [
+      -42.66,
+      -24.58
+    ],
+    "zoom": 8.5,
+    "coordinates": [
+      [
+        [
+          -43.83292,
+          -22.66705
+        ],
+        [
+          -43.83292,
+          -26.49935
+        ],
+        [
+          -41.50033,
+          -26.49935
+        ],
+        [
+          -41.50033,
+          -22.66705
+        ],
+        [
+          -43.83292,
+          -22.66705
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_WJ1_CABO_FRIO": {
+    "code": "REH_WJ1_CABO_FRIO",
+    "ident": "CCV_REH_WJ1_CABO_FRIO",
+    "name": "Cabo Frio (TMA-CF)",
+    "bbox": [
+      -43.02837,
+      -23.21121,
+      -41.88768,
+      -22.39212
+    ],
+    "center": [
+      -42.45,
+      -22.8
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -43.02837,
+          -22.40971
+        ],
+        [
+          -43.0168,
+          -23.21121
+        ],
+        [
+          -41.88768,
+          -23.19291
+        ],
+        [
+          -41.90583,
+          -22.39212
+        ],
+        [
+          -43.02837,
+          -22.40971
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_WJ1_CABO_FRIO": {
+    "code": "REH_WJ1_CABO_FRIO",
+    "ident": "CCV_REH_WJ1_CABO_FRIO",
+    "name": "Cabo Frio (TMA-CF)",
+    "bbox": [
+      -43.02837,
+      -23.21121,
+      -41.88768,
+      -22.39212
+    ],
+    "center": [
+      -42.45,
+      -22.8
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -43.02837,
+          -22.40971
+        ],
+        [
+          -43.0168,
+          -23.21121
+        ],
+        [
+          -41.88768,
+          -23.19291
+        ],
+        [
+          -41.90583,
+          -22.39212
+        ],
+        [
+          -43.02837,
+          -22.40971
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_XP2_CAMPINAS": {
+    "code": "REH_XP2_CAMPINAS",
+    "ident": "CCV_REH_XP2_CAMPINAS",
+    "name": "Campinas (TMA-CP)",
+    "bbox": [
+      -47.27547,
+      -23.43801,
+      -46.72199,
+      -22.75104
+    ],
+    "center": [
+      -47.0,
+      -23.09
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -47.26404,
+          -22.75104
+        ],
+        [
+          -47.27547,
+          -23.43101
+        ],
+        [
+          -46.73068,
+          -23.43801
+        ],
+        [
+          -46.72199,
+          -22.7578
+        ],
+        [
+          -47.26404,
+          -22.75104
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_XP2_CAMPINAS": {
+    "code": "REH_XP2_CAMPINAS",
+    "ident": "CCV_REH_XP2_CAMPINAS",
+    "name": "Campinas (TMA-CP)",
+    "bbox": [
+      -47.27547,
+      -23.43801,
+      -46.72199,
+      -22.75104
+    ],
+    "center": [
+      -47.0,
+      -23.09
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -47.26404,
+          -22.75104
+        ],
+        [
+          -47.27547,
+          -23.43101
+        ],
+        [
+          -46.73068,
+          -23.43801
+        ],
+        [
+          -46.72199,
+          -22.7578
+        ],
+        [
+          -47.26404,
+          -22.75104
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS": {
+    "code": "REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "ident": "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "name": "São José dos Campos",
+    "bbox": [
+      -46.36074,
+      -23.59069,
+      -45.81027,
+      -22.90342
+    ],
+    "center": [
+      -46.08,
+      -23.25
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -46.35382,
+          -22.90342
+        ],
+        [
+          -46.36074,
+          -23.58687
+        ],
+        [
+          -45.81441,
+          -23.59069
+        ],
+        [
+          -45.81027,
+          -22.90713
+        ],
+        [
+          -46.35382,
+          -22.90342
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_XP1_SAO_JOSE_DOS_CAMPOS": {
+    "code": "REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "ident": "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "name": "São José dos Campos",
+    "bbox": [
+      -46.36074,
+      -23.59069,
+      -45.81027,
+      -22.90342
+    ],
+    "center": [
+      -46.08,
+      -23.25
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -46.35382,
+          -22.90342
+        ],
+        [
+          -46.36074,
+          -23.58687
+        ],
+        [
+          -45.81441,
+          -23.59069
+        ],
+        [
+          -45.81027,
+          -22.90713
+        ],
+        [
+          -46.35382,
+          -22.90342
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_XP1_SOROCABA": {
+    "code": "REH_XP1_SOROCABA",
+    "ident": "CCV_REH_XP1_SOROCABA",
+    "name": "Sorocaba",
+    "bbox": [
+      -47.65896,
+      -23.78816,
+      -46.93567,
+      -23.25619
+    ],
+    "center": [
+      -47.3,
+      -23.52
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -47.64849,
+          -23.25619
+        ],
+        [
+          -47.65896,
+          -23.77749
+        ],
+        [
+          -46.94331,
+          -23.78816
+        ],
+        [
+          -46.93567,
+          -23.2666
+        ],
+        [
+          -47.64849,
+          -23.25619
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_XP1_SOROCABA": {
+    "code": "REH_XP1_SOROCABA",
+    "ident": "CCV_REH_XP1_SOROCABA",
+    "name": "Sorocaba",
+    "bbox": [
+      -47.65896,
+      -23.78816,
+      -46.93567,
+      -23.25619
+    ],
+    "center": [
+      -47.3,
+      -23.52
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -47.64849,
+          -23.25619
+        ],
+        [
+          -47.65896,
+          -23.77749
+        ],
+        [
+          -46.94331,
+          -23.78816
+        ],
+        [
+          -46.93567,
+          -23.2666
+        ],
+        [
+          -47.64849,
+          -23.25619
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "CCV_REH_WH_BELO_HORIZONTE": {
+    "code": "REH_WH_BELO_HORIZONTE",
+    "ident": "CCV_REH_WH_BELO_HORIZONTE",
+    "name": "Belo Horizonte (TMA-BH)",
+    "bbox": [
+      -44.28284,
+      -20.19937,
+      -43.63381,
+      -19.38393
+    ],
+    "center": [
+      -43.95,
+      -19.85
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -44.28284,
+          -19.38393
+        ],
+        [
+          -44.28284,
+          -20.19937
+        ],
+        [
+          -43.63381,
+          -20.19937
+        ],
+        [
+          -43.63381,
+          -19.38393
+        ],
+        [
+          -44.28284,
+          -19.38393
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_WH_BELO_HORIZONTE": {
+    "code": "REH_WH_BELO_HORIZONTE",
+    "ident": "CCV_REH_WH_BELO_HORIZONTE",
+    "name": "Belo Horizonte (TMA-BH)",
+    "bbox": [
+      -44.28284,
+      -20.19937,
+      -43.63381,
+      -19.38393
+    ],
+    "center": [
+      -43.95,
+      -19.85
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -44.28284,
+          -19.38393
+        ],
+        [
+          -44.28284,
+          -20.19937
+        ],
+        [
+          -43.63381,
+          -20.19937
+        ],
+        [
+          -43.63381,
+          -19.38393
+        ],
+        [
+          -44.28284,
+          -19.38393
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_CURITIBA": {
+    "code": "REH_CURITIBA",
+    "ident": "REH_CURITIBA",
+    "name": "Curitiba (TMA-CT)",
+    "bbox": [
+      -49.36614,
+      -25.68273,
+      -49.01714,
+      -25.28383
+    ],
+    "center": [
+      -49.19,
+      -25.48
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -49.36614,
+          -25.28383
+        ],
+        [
+          -49.36614,
+          -25.68273
+        ],
+        [
+          -49.01714,
+          -25.68273
+        ],
+        [
+          -49.01714,
+          -25.28383
+        ],
+        [
+          -49.36614,
+          -25.28383
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  },
+  "REH_VITORIA": {
+    "code": "REH_VITORIA",
+    "ident": "REH_VITORIA",
+    "name": "Vitória (TMA-VT)",
+    "bbox": [
+      -40.58269,
+      -20.58285,
+      -39.91725,
+      -20.08371
+    ],
+    "center": [
+      -40.25,
+      -20.33
+    ],
+    "zoom": 10.0,
+    "coordinates": [
+      [
+        [
+          -40.58269,
+          -20.08371
+        ],
+        [
+          -40.58269,
+          -20.58285
+        ],
+        [
+          -39.91725,
+          -20.58285
+        ],
+        [
+          -39.91725,
+          -20.08371
+        ],
+        [
+          -40.58269,
+          -20.08371
+        ]
+      ]
+    ],
+    "method": "GEOTIFF_EXTENT"
+  }
+}

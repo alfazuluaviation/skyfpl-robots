@@ -1,0 +1,254 @@
+{
+  "REH_XP2_SAO_PAULO_1": {
+    "code": "REH_XP2_SAO_PAULO_1",
+    "ident": "CCV_REH_XP2_SAO_PAULO_1",
+    "name": "São Paulo 1 (RMSP Central)",
+    "layer": "ICA:CCV_REH_XP2_SAO_PAULO_1",
+    "file": "CCV_REH_XP2_SAO_PAULO_1.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-xp2-sao-paulo-1_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_XP2_SAO_PAULO_1.tif",
+    "bbox": [
+      -47.03032,
+      -23.8391,
+      -46.30835,
+      -23.30926
+    ],
+    "center": [
+      -46.67,
+      -23.57
+    ],
+    "zoom": 10.5,
+    "z_order": 10
+  },
+  "REH_XP2_SAO_PAULO_2": {
+    "code": "REH_XP2_SAO_PAULO_2",
+    "ident": "CCV_REH_XP2_SAO_PAULO_2",
+    "name": "São Paulo 2 (RMSP Expandido)",
+    "layer": "ICA:CCV_REH_XP2_SAO_PAULO_2",
+    "file": "CCV_REH_XP2_SAO_PAULO_2.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-xp2-sao-paulo-1_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_XP2_SAO_PAULO_2.tif",
+    "bbox": [
+      -46.78313,
+      -23.68155,
+      -46.58929,
+      -23.47636
+    ],
+    "center": [
+      -46.68,
+      -23.58
+    ],
+    "zoom": 11.0,
+    "z_order": 10
+  },
+  "REH_WJ2_RIO_DE_JANEIRO": {
+    "code": "REH_WJ2_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ2_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ2)",
+    "layer": "ICA:CCV_REH_WJ2_RIO_DE_JANEIRO",
+    "file": "CCV_REH_WJ2_RIO_DE_JANEIRO.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-wj2-rio-de-janeiro_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_WJ2_RIO_DE_JANEIRO.tif",
+    "bbox": [
+      -43.93131,
+      -23.16674,
+      -42.97307,
+      -22.52755
+    ],
+    "center": [
+      -43.45,
+      -22.85
+    ],
+    "zoom": 10.0,
+    "z_order": 10
+  },
+  "REH_WJ3_RIO_DE_JANEIRO": {
+    "code": "REH_WJ3_RIO_DE_JANEIRO",
+    "ident": "CCV_REH_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3)",
+    "layer": "ICA:CCV_REH_WJ3_RIO_DE_JANEIRO",
+    "file": "CCV_REH_WJ3_RIO_DE_JANEIRO.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-wj3-rio-de-janeiro_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_WJ3_RIO_DE_JANEIRO.tif",
+    "bbox": [
+      -43.42876,
+      -23.04725,
+      -43.06993,
+      -22.80642
+    ],
+    "center": [
+      -43.25,
+      -22.92
+    ],
+    "zoom": 10.5,
+    "z_order": 10
+  },
+  "REH_BACIA_DE_SANTOS": {
+    "code": "REH_BACIA_DE_SANTOS",
+    "ident": "REH_BACIA_DE_SANTOS",
+    "name": "Bacia de Santos Offshore",
+    "layer": "ICA:REH_BACIA_DE_SANTOS",
+    "file": "REH_BACIA_DE_SANTOS.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/bacia-de-santos_reh_20241128.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REH_BACIA_DE_SANTOS.tif",
+    "bbox": [
+      -43.83292,
+      -26.49935,
+      -41.50033,
+      -22.66705
+    ],
+    "center": [
+      -42.66,
+      -24.58
+    ],
+    "zoom": 8.5,
+    "z_order": 9
+  },
+  "REH_WJ1_CABO_FRIO": {
+    "code": "REH_WJ1_CABO_FRIO",
+    "ident": "CCV_REH_WJ1_CABO_FRIO",
+    "name": "Cabo Frio (TMA-CF)",
+    "layer": "ICA:CCV_REH_WJ1_CABO_FRIO",
+    "file": "CCV_REH_WJ1_CABO_FRIO.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-wj1-cabo-frio_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_WJ1_CABO_FRIO.tif",
+    "bbox": [
+      -43.02837,
+      -23.21121,
+      -41.88768,
+      -22.39212
+    ],
+    "center": [
+      -42.45,
+      -22.8
+    ],
+    "zoom": 10.0,
+    "z_order": 9
+  },
+  "REH_XP2_CAMPINAS": {
+    "code": "REH_XP2_CAMPINAS",
+    "ident": "CCV_REH_XP2_CAMPINAS",
+    "name": "Campinas (TMA-CP)",
+    "layer": "ICA:CCV_REH_XP2_CAMPINAS",
+    "file": "CCV_REH_XP2_CAMPINAS.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-xp2-campinas_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_XP2_CAMPINAS.tif",
+    "bbox": [
+      -47.27547,
+      -23.43801,
+      -46.72199,
+      -22.75104
+    ],
+    "center": [
+      -47.0,
+      -23.09
+    ],
+    "zoom": 10.0,
+    "z_order": 8
+  },
+  "REH_XP1_SAO_JOSE_DOS_CAMPOS": {
+    "code": "REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "ident": "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "name": "São José dos Campos",
+    "layer": "ICA:CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "file": "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-xp1-sao-jose-dos-campos_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS.tif",
+    "bbox": [
+      -46.36074,
+      -23.59069,
+      -45.81027,
+      -22.90342
+    ],
+    "center": [
+      -46.08,
+      -23.25
+    ],
+    "zoom": 10.0,
+    "z_order": 8
+  },
+  "REH_XP1_SOROCABA": {
+    "code": "REH_XP1_SOROCABA",
+    "ident": "CCV_REH_XP1_SOROCABA",
+    "name": "Sorocaba",
+    "layer": "ICA:CCV_REH_XP1_SOROCABA",
+    "file": "CCV_REH_XP1_SOROCABA.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-xp1-sorocaba_reh_20260319.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_XP1_SOROCABA.tif",
+    "bbox": [
+      -47.65896,
+      -23.78816,
+      -46.93567,
+      -23.25619
+    ],
+    "center": [
+      -47.3,
+      -23.52
+    ],
+    "zoom": 10.0,
+    "z_order": 8
+  },
+  "REH_WH_BELO_HORIZONTE": {
+    "code": "REH_WH_BELO_HORIZONTE",
+    "ident": "CCV_REH_WH_BELO_HORIZONTE",
+    "name": "Belo Horizonte (TMA-BH)",
+    "layer": "ICA:CCV_REH_WH_BELO_HORIZONTE",
+    "file": "CCV_REH_WH_BELO_HORIZONTE.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-wh-belo-horizonte_reh_20240905.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REH_WH_BELO_HORIZONTE.tif",
+    "bbox": [
+      -44.28284,
+      -20.19937,
+      -43.63381,
+      -19.38393
+    ],
+    "center": [
+      -43.95,
+      -19.85
+    ],
+    "zoom": 10.0,
+    "z_order": 8
+  },
+  "REH_CURITIBA": {
+    "code": "REH_CURITIBA",
+    "ident": "REH_CURITIBA",
+    "name": "Curitiba (TMA-CT)",
+    "layer": "ICA:REH_CURITIBA",
+    "file": "REH_CURITIBA.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ccv-reh-wt-curitiba_reh_20231228.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REH_CURITIBA.tif",
+    "bbox": [
+      -49.36614,
+      -25.68273,
+      -49.01714,
+      -25.28383
+    ],
+    "center": [
+      -49.19,
+      -25.48
+    ],
+    "zoom": 10.0,
+    "z_order": 7
+  },
+  "REH_VITORIA": {
+    "code": "REH_VITORIA",
+    "ident": "REH_VITORIA",
+    "name": "Vitória (TMA-VT)",
+    "layer": "ICA:REH_VITORIA",
+    "file": "REH_VITORIA.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reh/ctr-vitoria_reh_20220616.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/REH_VITORIA.tif",
+    "bbox": [
+      -40.58269,
+      -20.58285,
+      -39.91725,
+      -20.08371
+    ],
+    "center": [
+      -40.25,
+      -20.33
+    ],
+    "zoom": 10.0,
+    "z_order": 7
+  }
+}
