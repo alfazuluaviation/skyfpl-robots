@@ -457,9 +457,13 @@ export const CANONICAL_REH_SECTORS: RehSectorInfo[] = {canonical_sectors_ts};
 export const ALL_REH_RASTER_LAYERS_STR = "{all_layers_str}";
 """
 
-    with open(OUTPUT_TS, "w", encoding="utf-8") as f:
-        f.write(ts_content)
-    print(f"📁 TypeScript exportado para o Dashboard: {OUTPUT_TS}")
+    try:
+        os.makedirs(os.path.dirname(OUTPUT_TS), exist_ok=True)
+        with open(OUTPUT_TS, "w", encoding="utf-8") as f:
+            f.write(ts_content)
+        print(f"📁 TypeScript exportado para o Dashboard: {OUTPUT_TS}")
+    except Exception as e:
+        print(f"ℹ️ Gravação de {OUTPUT_TS} ignorada no ambiente atual ({e})")
 
     print("\n" + "=" * 80)
     print("🎉 ATUALIZAÇÃO CONCLUÍDA COM SUCESSO!")
