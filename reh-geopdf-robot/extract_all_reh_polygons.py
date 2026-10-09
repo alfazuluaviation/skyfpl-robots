@@ -396,7 +396,17 @@ def main():
                 "coordinates": poly_data["coordinates"]
             }
 
-    canonical_sectors_ts = json.dumps(CANONICAL_SECTORS, indent=2, ensure_ascii=False)
+    # Enriquecer CANONICAL_SECTORS com o bbox oficial para compatibilidade do Dashboard
+    enriched_canonical = []
+    for s in CANONICAL_SECTORS:
+        clean_layer = s["layer"].replace("ICA:", "")
+        poly_data = polygons.get(clean_layer)
+        sec_obj = dict(s)
+        if poly_data and "bbox" in poly_data:
+            sec_obj["bbox"] = poly_data["bbox"]
+        enriched_canonical.append(sec_obj)
+
+    canonical_sectors_ts = json.dumps(enriched_canonical, indent=2, ensure_ascii=False)
     all_layers_str = ",".join(s["layer"] for s in CANONICAL_SECTORS)
 
     ts_content = f"""// ─── Polígonos e BBOXes Oficiais DECEA ICA das Cartas REH (Rotas Especiais de Helicópteros) ───
