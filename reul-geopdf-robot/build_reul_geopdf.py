@@ -590,6 +590,22 @@ def process_chart_to_mbtiles(
         conn = sqlite3.connect(output_mbtiles)
         cur = conn.cursor()
 
+        # Converte overviews PNG gerados pelo gdaladdo para WebP puro se TILE_FORMAT == 'webp'
+        if TILE_FORMAT.lower() == 'webp':
+            try:
+                from PIL import Image
+                import io
+                all_tiles = cur.execute("SELECT zoom_level, tile_column, tile_row, tile_data FROM tiles").fetchall()
+                for tz, tx, ty, tdata in all_tiles:
+                    if tdata and len(tdata) >= 4 and tdata[:4] == b'\x89PNG':
+                        img = Image.open(io.BytesIO(tdata))
+                        obuf = io.BytesIO()
+                        img.save(obuf, format='WEBP', quality=WEBP_QUALITY, method=6)
+                        cur.execute("UPDATE tiles SET tile_data = ? WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?", (obuf.getvalue(), tz, tx, ty))
+                conn.commit()
+            except Exception as pe:
+                telemetry.log(f"Aviso na conversão WebP de overviews: {pe}", chart_idx, 86, level="WARN")
+
         cur.execute("DELETE FROM tiles WHERE length(tile_data) < ?", (REUL_EMPTY_THRESHOLD,))
         purged = cur.rowcount
         if purged > 0:
