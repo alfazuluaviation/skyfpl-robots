@@ -603,6 +603,37 @@ def process_chart_to_mbtiles(
                         img.save(obuf, format='WEBP', quality=WEBP_QUALITY, method=6)
                         cur.execute("UPDATE tiles SET tile_data = ? WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?", (obuf.getvalue(), tz, tx, ty))
                 conn.commit()
+
+                # Síntese QuadTree de pirâmides para zooms inferiores (Z9 e Z8)
+                cur.execute("SELECT MIN(zoom_level) FROM tiles")
+                curr_min_row = cur.fetchone()
+                curr_min = curr_min_row[0] if (curr_min_row and curr_min_row[0] is not None) else 10
+                target_min = max(MIN_ZOOM, 8)
+                while curr_min > target_min:
+                    parent_z = curr_min - 1
+                    child_rows = cur.execute("SELECT tile_column, tile_row, tile_data FROM tiles WHERE zoom_level = ?", (curr_min,)).fetchall()
+                    parent_tiles = {}
+                    for tx, tms_y, data in child_rows:
+                        xyz_y = (1 << curr_min) - 1 - tms_y
+                        px = tx >> 1
+                        py = xyz_y >> 1
+                        qx = tx % 2
+                        qy = xyz_y % 2
+                        img = Image.open(io.BytesIO(data)).convert("RGBA")
+                        parent_tiles.setdefault((px, py), {})[(qx, qy)] = img
+
+                    for (px, py), quads in parent_tiles.items():
+                        canvas = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+                        for (qx, qy), child_img in quads.items():
+                            resized = child_img.resize((128, 128), Image.Resampling.LANCZOS)
+                            canvas.paste(resized, (qx * 128, qy * 128), resized)
+                        out_buf = io.BytesIO()
+                        canvas.save(out_buf, format="WEBP", quality=WEBP_QUALITY, method=6)
+                        parent_tms_y = (1 << parent_z) - 1 - py
+                        cur.execute("INSERT OR REPLACE INTO tiles (zoom_level, tile_column, tile_row, tile_data) VALUES (?, ?, ?, ?)",
+                                    (parent_z, px, parent_tms_y, out_buf.getvalue()))
+                    conn.commit()
+                    curr_min = parent_z
             except Exception as pe:
                 telemetry.log(f"Aviso na conversão WebP de overviews: {pe}", chart_idx, 86, level="WARN")
 
