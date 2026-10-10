@@ -1,0 +1,434 @@
+[
+  {
+    "code": "REH_XP2_SAO_PAULO_1",
+    "name": "São Paulo 1 (RMSP Central)",
+    "file": "CCV_REH_XP2_SAO_PAULO_1.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -47.03032,
+      -23.8391,
+      -46.30835,
+      -23.30926
+    ],
+    "tiff_bbox_raw": [
+      -47.03098,
+      -23.83958,
+      -46.3077,
+      -23.30878
+    ],
+    "tiff_bbox_buffered": [
+      -47.03032,
+      -23.8391,
+      -46.30835,
+      -23.30926
+    ],
+    "tiff_center": [
+      -46.66934,
+      -23.57418
+    ],
+    "wms_capabilities_bbox": [
+      -47.0306,
+      -23.83958,
+      -46.30766,
+      -23.30878
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_XP2_SAO_PAULO_2",
+    "name": "São Paulo 2 (RMSP Expandido)",
+    "file": "CCV_REH_XP2_SAO_PAULO_2.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -46.78313,
+      -23.68155,
+      -46.58929,
+      -23.47636
+    ],
+    "tiff_bbox_raw": [
+      -46.78368,
+      -23.68214,
+      -46.58874,
+      -23.47577
+    ],
+    "tiff_bbox_buffered": [
+      -46.78313,
+      -23.68155,
+      -46.58929,
+      -23.47636
+    ],
+    "tiff_center": [
+      -46.68621,
+      -23.57896
+    ],
+    "wms_capabilities_bbox": [
+      -46.78368,
+      -23.68214,
+      -46.58874,
+      -23.47577
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_WJ2_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ2)",
+    "file": "CCV_REH_WJ2_RIO_DE_JANEIRO.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -43.93131,
+      -23.16674,
+      -42.97307,
+      -22.52755
+    ],
+    "tiff_bbox_raw": [
+      -43.93198,
+      -23.16718,
+      -42.9724,
+      -22.5271
+    ],
+    "tiff_bbox_buffered": [
+      -43.93131,
+      -23.16674,
+      -42.97307,
+      -22.52755
+    ],
+    "tiff_center": [
+      -43.45219,
+      -22.84714
+    ],
+    "wms_capabilities_bbox": [
+      -43.93322,
+      -23.1676,
+      -42.97108,
+      -22.52656
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3)",
+    "file": "CCV_REH_WJ3_RIO_DE_JANEIRO.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -43.42878,
+      -23.04705,
+      -43.06992,
+      -22.80662
+    ],
+    "tiff_bbox_raw": [
+      -43.42944,
+      -23.0477,
+      -43.06926,
+      -22.80597
+    ],
+    "tiff_bbox_buffered": [
+      -43.42876,
+      -23.04725,
+      -43.06993,
+      -22.80642
+    ],
+    "tiff_center": [
+      -43.24935,
+      -22.92683
+    ],
+    "wms_capabilities_bbox": [
+      -43.42944,
+      -23.0477,
+      -43.06926,
+      -22.80597
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_BACIA_DE_SANTOS",
+    "name": "Bacia de Santos Offshore",
+    "file": "REH_BACIA_DE_SANTOS.tif",
+    "crs": "WGS84 (Geográfico)",
+    "status": "LEVE_AJUSTE",
+    "catalog_bbox": [
+      -43.83333,
+      -26.50003,
+      -41.49992,
+      -22.66637
+    ],
+    "tiff_bbox_raw": [
+      -43.83333,
+      -26.50003,
+      -41.49992,
+      -22.66637
+    ],
+    "tiff_bbox_buffered": [
+      -43.83292,
+      -26.49935,
+      -41.50033,
+      -22.66705
+    ],
+    "tiff_center": [
+      -42.66662,
+      -24.5832
+    ],
+    "wms_capabilities_bbox": [
+      -43.83333,
+      -26.50003,
+      -41.49992,
+      -22.66637
+    ],
+    "notes": "Ajuste fino de 0.00068° (~75 m)"
+  },
+  {
+    "code": "REH_WJ1_CABO_FRIO",
+    "name": "Cabo Frio (TMA-CF)",
+    "file": "CCV_REH_WJ1_CABO_FRIO.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -43.02842,
+      -23.21096,
+      -41.88762,
+      -22.39236
+    ],
+    "tiff_bbox_raw": [
+      -43.02902,
+      -23.21168,
+      -41.88702,
+      -22.39164
+    ],
+    "tiff_bbox_buffered": [
+      -43.02837,
+      -23.21121,
+      -41.88768,
+      -22.39212
+    ],
+    "tiff_center": [
+      -42.45802,
+      -22.80166
+    ],
+    "wms_capabilities_bbox": [
+      -43.02902,
+      -23.21168,
+      -41.88702,
+      -22.39164
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_XP2_CAMPINAS",
+    "name": "Campinas (TMA-CP)",
+    "file": "CCV_REH_XP2_CAMPINAS.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -47.27538,
+      -23.43792,
+      -46.72208,
+      -22.75112
+    ],
+    "tiff_bbox_raw": [
+      -47.27598,
+      -23.43864,
+      -46.72148,
+      -22.7504
+    ],
+    "tiff_bbox_buffered": [
+      -47.27547,
+      -23.43801,
+      -46.72199,
+      -22.75104
+    ],
+    "tiff_center": [
+      -46.99873,
+      -23.09452
+    ],
+    "wms_capabilities_bbox": [
+      -47.27598,
+      -23.43864,
+      -46.72148,
+      -22.7504
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_XP1_SAO_JOSE_DOS_CAMPOS",
+    "name": "São José dos Campos",
+    "file": "CCV_REH_XP1_SAO_JOSE_DOS_CAMPOS.tif",
+    "crs": "UTM (Projetado)",
+    "status": "ALINHADO",
+    "catalog_bbox": [
+      -46.36064,
+      -23.5906,
+      -45.81037,
+      -22.90351
+    ],
+    "tiff_bbox_raw": [
+      -46.36124,
+      -23.59132,
+      -45.80977,
+      -22.90279
+    ],
+    "tiff_bbox_buffered": [
+      -46.36074,
+      -23.59069,
+      -45.81027,
+      -22.90342
+    ],
+    "tiff_center": [
+      -46.08551,
+      -23.24706
+    ],
+    "wms_capabilities_bbox": [
+      -46.36124,
+      -23.59132,
+      -45.80977,
+      -22.90279
+    ],
+    "notes": "Alinhamento perfeito (delta < 30m)"
+  },
+  {
+    "code": "REH_XP1_SOROCABA",
+    "name": "Sorocaba",
+    "file": "CCV_REH_XP1_SOROCABA.tif",
+    "crs": "UTM (Projetado)",
+    "status": "LEVE_AJUSTE",
+    "catalog_bbox": [
+      -47.65949,
+      -23.78841,
+      -46.93508,
+      -23.25583
+    ],
+    "tiff_bbox_raw": [
+      -47.65961,
+      -23.78864,
+      -46.93502,
+      -23.25571
+    ],
+    "tiff_bbox_buffered": [
+      -47.65896,
+      -23.78816,
+      -46.93567,
+      -23.25619
+    ],
+    "tiff_center": [
+      -47.29731,
+      -23.52217
+    ],
+    "wms_capabilities_bbox": [
+      -47.66009,
+      -23.78913,
+      -46.93448,
+      -23.25511
+    ],
+    "notes": "Ajuste fino de 0.00059° (~65 m)"
+  },
+  {
+    "code": "REH_WH_BELO_HORIZONTE",
+    "name": "Belo Horizonte (TMA-BH)",
+    "file": "CCV_REH_WH_BELO_HORIZONTE.tif",
+    "crs": "WGS84 (Geográfico)",
+    "status": "LEVE_AJUSTE",
+    "catalog_bbox": [
+      -44.28333,
+      -20.2,
+      -43.63331,
+      -19.3833
+    ],
+    "tiff_bbox_raw": [
+      -44.28333,
+      -20.2,
+      -43.63331,
+      -19.3833
+    ],
+    "tiff_bbox_buffered": [
+      -44.28284,
+      -20.19937,
+      -43.63381,
+      -19.38393
+    ],
+    "tiff_center": [
+      -43.95832,
+      -19.79165
+    ],
+    "wms_capabilities_bbox": [
+      -44.28333,
+      -20.2,
+      -43.63331,
+      -19.3833
+    ],
+    "notes": "Ajuste fino de 0.00063° (~70 m)"
+  },
+  {
+    "code": "REH_CURITIBA",
+    "name": "Curitiba (TMA-CT)",
+    "file": "REH_CURITIBA.tif",
+    "crs": "WGS84 (Geográfico)",
+    "status": "LEVE_AJUSTE",
+    "catalog_bbox": [
+      -49.36667,
+      -25.68333,
+      -49.01662,
+      -25.28323
+    ],
+    "tiff_bbox_raw": [
+      -49.36667,
+      -25.68333,
+      -49.01662,
+      -25.28323
+    ],
+    "tiff_bbox_buffered": [
+      -49.36614,
+      -25.68273,
+      -49.01714,
+      -25.28383
+    ],
+    "tiff_center": [
+      -49.19164,
+      -25.48328
+    ],
+    "wms_capabilities_bbox": [
+      -49.36667,
+      -25.68333,
+      -49.01662,
+      -25.28323
+    ],
+    "notes": "Ajuste fino de 0.00060° (~67 m)"
+  },
+  {
+    "code": "REH_VITORIA",
+    "name": "Vitória (TMA-VT)",
+    "file": "REH_VITORIA.tif",
+    "crs": "WGS84 (Geográfico)",
+    "status": "LEVE_AJUSTE",
+    "catalog_bbox": [
+      -40.58333,
+      -20.58333,
+      -39.91661,
+      -20.08323
+    ],
+    "tiff_bbox_raw": [
+      -40.58333,
+      -20.58333,
+      -39.91661,
+      -20.08323
+    ],
+    "tiff_bbox_buffered": [
+      -40.58269,
+      -20.58285,
+      -39.91725,
+      -20.08371
+    ],
+    "tiff_center": [
+      -40.24997,
+      -20.33328
+    ],
+    "wms_capabilities_bbox": [
+      -40.58333,
+      -20.58333,
+      -39.91661,
+      -20.08323
+    ],
+    "notes": "Ajuste fino de 0.00064° (~71 m)"
+  }
+]

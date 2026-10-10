@@ -307,20 +307,20 @@ def main():
                 method = "DECEA_WMS_FALLBACK"
 
         if not extracted_coords:
-            # BBOX estático de segurança do catálogo oficial DECEA
+            # BBOX estático de segurança do catálogo oficial DECEA (com Inset Buffer de ~80m)
             fallback_bboxes = {
-                "REH_XP2_SAO_PAULO_1": [-47.03060, -23.83958, -46.30766, -23.30878],
-                "REH_XP2_SAO_PAULO_2": [-46.78368, -23.68214, -46.58874, -23.47577],
-                "REH_WJ2_RIO_DE_JANEIRO": [-43.93322, -23.16760, -42.97108, -22.52656],
-                "REH_WJ3_RIO_DE_JANEIRO": [-43.42944, -23.04770, -43.06926, -22.80597],
-                "REH_BACIA_DE_SANTOS": [-43.83333, -26.50003, -41.49992, -22.66637],
-                "REH_WJ1_CABO_FRIO": [-43.02902, -23.21168, -41.88702, -22.39164],
-                "REH_XP2_CAMPINAS": [-47.27598, -23.43864, -46.72148, -22.75040],
-                "REH_XP1_SAO_JOSE_DOS_CAMPOS": [-46.36124, -23.59132, -45.80977, -22.90279],
-                "REH_XP1_SOROCABA": [-47.66009, -23.78913, -46.93448, -23.25511],
-                "REH_WH_BELO_HORIZONTE": [-44.28333, -20.20000, -43.63331, -19.38330],
-                "REH_CURITIBA": [-49.36667, -25.68333, -49.01662, -25.28323],
-                "REH_VITORIA": [-40.58333, -20.58333, -39.91661, -20.08323]
+                "REH_XP2_SAO_PAULO_1": [-47.03032, -23.83910, -46.30835, -23.30926],
+                "REH_XP2_SAO_PAULO_2": [-46.78313, -23.68155, -46.58929, -23.47636],
+                "REH_WJ2_RIO_DE_JANEIRO": [-43.93131, -23.16674, -42.97307, -22.52755],
+                "REH_WJ3_RIO_DE_JANEIRO": [-43.42876, -23.04725, -43.06993, -22.80642],
+                "REH_BACIA_DE_SANTOS": [-43.83292, -26.49935, -41.50033, -22.66705],
+                "REH_WJ1_CABO_FRIO": [-43.02837, -23.21121, -41.88768, -22.39212],
+                "REH_XP2_CAMPINAS": [-47.27547, -23.43801, -46.72199, -22.75104],
+                "REH_XP1_SAO_JOSE_DOS_CAMPOS": [-46.36074, -23.59069, -45.81027, -22.90342],
+                "REH_XP1_SOROCABA": [-47.65896, -23.78816, -46.93567, -23.25619],
+                "REH_WH_BELO_HORIZONTE": [-44.28284, -20.19937, -43.63381, -19.38393],
+                "REH_CURITIBA": [-49.36614, -25.68273, -49.01714, -25.28383],
+                "REH_VITORIA": [-40.58269, -20.58285, -39.91725, -20.08371]
             }
             fb = fallback_bboxes.get(code, [-47.03, -23.83, -46.30, -23.30])
             extracted_coords = bbox_to_polygon_coordinates(fb)

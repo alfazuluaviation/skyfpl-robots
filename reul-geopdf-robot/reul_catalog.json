@@ -1,0 +1,23 @@
+{
+  "REUL_WJ3_RIO_DE_JANEIRO": {
+    "code": "REUL_WJ3_RIO_DE_JANEIRO",
+    "ident": "CCV_REUL_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3 - Jacarepaguá / Maricá / Saquarema)",
+    "layer": "ICA:CCV_REUL_WJ3_RIO_DE_JANEIRO",
+    "file": "CCV_REUL_WJ3_RIO_DE_JANEIRO.tif",
+    "pdf_url": "https://aisweb.decea.mil.br/cartas/visuais/reul/ccv-reul-wj3-rio-de-janeiro_reul_20250807.pdf",
+    "geotiff_url": "https://geoaisweb.decea.mil.br/src/geotiffs/CCV_REUL_WJ3_RIO_DE_JANEIRO.tif",
+    "bbox": [
+      -43.63269,
+      -23.13293,
+      -43.33407,
+      -22.93381
+    ],
+    "center": [
+      -43.48338,
+      -23.03337
+    ],
+    "zoom": 10.5,
+    "z_order": 10
+  }
+}

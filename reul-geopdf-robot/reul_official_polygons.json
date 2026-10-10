@@ -1,0 +1,60 @@
+{
+  "REUL_WJ3_RIO_DE_JANEIRO": {
+    "code": "REUL_WJ3_RIO_DE_JANEIRO",
+    "ident": "CCV_REUL_WJ3_RIO_DE_JANEIRO",
+    "name": "Rio de Janeiro (WJ3 - Jacarepaguá / Maricá / Saquarema)",
+    "layer": "ICA:CCV_REUL_WJ3_RIO_DE_JANEIRO",
+    "file": "CCV_REUL_WJ3_RIO_DE_JANEIRO.tif",
+    "bbox_raw": [
+      -43.63336,
+      -23.13337,
+      -43.3334,
+      -22.93337
+    ],
+    "bbox_buffered": [
+      -43.63269,
+      -23.13293,
+      -43.33407,
+      -22.93381
+    ],
+    "center": [
+      -43.48338,
+      -23.03337
+    ],
+    "zoom": 10.5,
+    "coordinates": [
+      [
+        [
+          -43.63269,
+          -22.93381
+        ],
+        [
+          -43.63269,
+          -23.13293
+        ],
+        [
+          -43.33407,
+          -23.13293
+        ],
+        [
+          -43.33407,
+          -22.93381
+        ],
+        [
+          -43.63269,
+          -22.93381
+        ]
+      ]
+    ],
+    "wms_capabilities_bbox": [
+      -43.63336,
+      -23.13337,
+      -43.3334,
+      -22.93337
+    ],
+    "pdf_info": {
+      "url": "https://aisweb.decea.mil.br/cartas/visuais/reul/ccv-reul-wj3-rio-de-janeiro_reul_20250807.pdf",
+      "info": "REUL AIC N32/25 CCV REUL WJ3-RIO DE JANEIRO 2508A1 03/07/2025 07/08/2025"
+    }
+  }
+}
