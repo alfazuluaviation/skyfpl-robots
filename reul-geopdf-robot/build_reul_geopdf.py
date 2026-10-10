@@ -519,7 +519,9 @@ def process_chart_to_mbtiles(
             warp_cmd.extend(["-te", str(bbox[0]), str(bbox[1]), str(bbox[2]), str(bbox[3]), "-te_srs", "EPSG:4326"])
 
         # Resolução Web Mercator em metros por pixel conforme MAX_ZOOM:
-        if MAX_ZOOM >= 12:
+        if MAX_ZOOM >= 13:
+            warp_cmd.extend(["-tr", "19.10925948", "19.10925948"])
+        elif MAX_ZOOM == 12:
             warp_cmd.extend(["-tr", "38.21851897", "38.21851897"])
         elif MAX_ZOOM == 11:
             warp_cmd.extend(["-tr", "76.43703794", "76.43703794"])

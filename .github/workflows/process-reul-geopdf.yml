@@ -24,13 +24,13 @@ on:
         required: false
         default: '85'
       min_zoom:
-        description: 'Zoom Mínimo (padrão: 6)'
+        description: 'Zoom Mínimo (padrão: 8)'
         required: false
-        default: '6'
+        default: '8'
       max_zoom:
-        description: 'Zoom Máximo (padrão: 11)'
+        description: 'Zoom Máximo (padrão: 12)'
         required: false
-        default: '11'
+        default: '12'
       r2_prefix:
         description: '🛡️ Prefixo R2 Staging (ex: reul/staging)'
         required: false
