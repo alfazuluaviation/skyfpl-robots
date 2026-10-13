@@ -49,6 +49,13 @@ MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "enrc_high/staging").strip().rstrip("/")
 GENERATE_FULL_MOSAIC = os.environ.get("GENERATE_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
 ONLY_FULL_MOSAIC = os.environ.get("ONLY_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+
+# 🇧🇷 Se a Carta Full Brasil foi selecionada diretamente, ativa o modo exclusivo nacional:
+# As 9 cartas serão recortadas apenas no disco temporário e NENHUMA folha individual será enviada ao R2!
+if CHART_CODES_ENV.upper() in ("FULL", "ENRCH_BRASIL_FULL", "BRASIL_FULL"):
+    ONLY_FULL_MOSAIC = True
+    GENERATE_FULL_MOSAIC = True
+
 if ONLY_FULL_MOSAIC:
     GENERATE_FULL_MOSAIC = True
 
@@ -997,13 +1004,19 @@ def main():
         print("[ERRO FATAL] Não foi possível carregar o catálogo de cartas ENRC HIGH.", flush=True)
         sys.exit(1)
 
-    if CHART_CODES_ENV.upper() == "ALL":
+    if ONLY_FULL_MOSAIC:
+        target_codes = ENRC_HIGH_RENDER_ORDER
+        should_build_mosaic = True
+    elif CHART_CODES_ENV.upper() == "ALL":
         target_codes = [c for c in catalog.keys() if c != "FULL"]
-    elif CHART_CODES_ENV.upper() == "FULL":
-        target_codes = ["FULL"]
+        should_build_mosaic = GENERATE_FULL_MOSAIC
+    elif CHART_CODES_ENV.upper() in ("FULL", "ENRCH_BRASIL_FULL", "BRASIL_FULL"):
+        target_codes = ENRC_HIGH_RENDER_ORDER
+        should_build_mosaic = True
     else:
         requested = [c.strip().upper() for c in CHART_CODES_ENV.split(",") if c.strip()]
         target_codes = [c for c in requested if c in catalog]
+        should_build_mosaic = False
 
     if not target_codes:
         print(f"[ERRO] Nenhum código ENRC HIGH válido encontrado em CHART_CODES='{CHART_CODES_ENV}'.", flush=True)
@@ -1022,10 +1035,6 @@ def main():
         print("[AVISO] Credenciais R2 ausentes. Telemetria e uploads serão simulados localmente.", flush=True)
 
     airac_info = get_airac_cycle_info()
-    should_build_mosaic = GENERATE_FULL_MOSAIC and set(ENRC_HIGH_RENDER_ORDER).issubset(set(target_codes))
-    if ONLY_FULL_MOSAIC:
-        target_codes = ENRC_HIGH_RENDER_ORDER
-        should_build_mosaic = True
 
     telemetry_targets = ["ENRCH_BRASIL_FULL"] if ONLY_FULL_MOSAIC else target_codes
     telemetry = TelemetryManager(s3_client, telemetry_targets, airac=airac_info)
