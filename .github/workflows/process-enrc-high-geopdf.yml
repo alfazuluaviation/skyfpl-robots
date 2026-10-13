@@ -35,6 +35,11 @@ on:
         description: '🛡️ Prefixo R2 Staging (ex: enrc_high/staging)'
         required: false
         default: 'enrc_high/staging'
+      generate_full_mosaic:
+        description: '🇧🇷 Gerar Camada Única HD (Brasil Full) para o Web'
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: enrc-high-geopdf-hd-builder
@@ -90,6 +95,7 @@ jobs:
           MIN_ZOOM: ${{ github.event.inputs.min_zoom || '5' }}
           MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
           R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'enrc_high/staging' }}
+          GENERATE_FULL_MOSAIC: ${{ github.event.inputs.generate_full_mosaic || 'false' }}
           PROGRESS_KEY: 'enrch_hd_progress.json'
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
@@ -130,4 +136,5 @@ jobs:
           echo "| **Formato dos Tiles** | \`${{ github.event.inputs.tile_format || 'webp' }}\` (Q${{ github.event.inputs.webp_quality || '85' }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Faixa de Zooms** | Z${{ github.event.inputs.min_zoom || '5' }} a Z${{ github.event.inputs.max_zoom || '11' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Destino Staging** | \`${{ github.event.inputs.r2_prefix || 'enrc_high/staging' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Camada Única (Brasil Full)** | \`${{ github.event.inputs.generate_full_mosaic || 'false' }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Status da Execução** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY

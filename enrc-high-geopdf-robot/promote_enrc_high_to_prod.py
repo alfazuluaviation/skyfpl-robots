@@ -24,7 +24,7 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone, timedelta
 
-ALL_ENRC_HIGH_CODES = ["H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "FULL"]
+ALL_ENRC_HIGH_CODES = ["H1", "H2", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "FULL", "ENRCH_BRASIL_FULL"]
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_ENDPOINT", "")
 R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("CLOUDFLARE_R2_ACCESS_KEY_ID", "")

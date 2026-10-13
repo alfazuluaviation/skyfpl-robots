@@ -48,6 +48,10 @@ MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
 MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "enrc_high/staging").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "enrch_hd_progress.json").strip()
+GENERATE_FULL_MOSAIC = os.environ.get("GENERATE_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+
+# 🎨 Ordem Rigorosa de Sobreposição Cartográfica (Z-Order Oficial: fundo H9 -> topo H2)
+ENRC_HIGH_RENDER_ORDER = ["H9", "H8", "H7", "H6", "H5", "H4", "H3", "H1", "H2"]
 
 def get_empty_tile_threshold(tile_format: str) -> int:
     fmt = (tile_format or "").strip().lower()
@@ -524,7 +528,8 @@ def process_chart_to_mbtiles(
     output_mbtiles: str,
     telemetry: TelemetryManager,
     chart_idx: int,
-    airac: dict = None
+    airac: dict = None,
+    warped_tif_dest: str = None
 ) -> bool:
     name = chart_info.get("name", code)
     pdf_url = chart_info.get("pdf_url", "")
@@ -537,7 +542,7 @@ def process_chart_to_mbtiles(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         input_pdf = os.path.join(tmpdir, f"{code}_master.pdf")
-        warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
+        warped_tif = warped_tif_dest if warped_tif_dest else os.path.join(tmpdir, f"{code}_warped.tif")
 
         # 1. Download do GeoPDF
         ok = download_geopdf(pdf_url, input_pdf, telemetry, chart_idx)
@@ -758,6 +763,213 @@ def upload_to_r2(s3_client, local_path: str, r2_key: str) -> int:
         )
     return size_bytes
 
+# ─── 🇧🇷 Consolidação da Camada Única HD (Mosaico Nacional para Web) ────────────
+
+def build_and_upload_full_mosaic(
+    workdir: str,
+    warped_files: dict,
+    s3_client,
+    telemetry: TelemetryManager,
+    airac_info: dict
+) -> bool:
+    """
+    Constrói e envia a Camada Única Consolidada em HD (Brasil Full) para o SkyFPL Web,
+    utilizando a composição virtual GDAL (VRT) dos TIFFs intermediários recortados cirurgicamente
+    pelos polígonos oficiais Lambert de cada folha, respeitando a sobreposição cartográfica de Z-Order.
+    """
+    gdalbuildvrt = find_gdal_tool("gdalbuildvrt")
+    gdal_translate = find_gdal_tool("gdal_translate")
+    gdaladdo = find_gdal_tool("gdaladdo")
+
+    telemetry.log("🇧🇷 Iniciando consolidação da Camada Única HD (Brasil Full) para o Web...")
+
+    # Verifica se todas as 9 folhas do Z-Order estão presentes e recortadas
+    missing = [c for c in ENRC_HIGH_RENDER_ORDER if c not in warped_files or not os.path.exists(warped_files[c])]
+    if missing:
+        telemetry.log(f"Aviso Mosaico: Folhas ausentes ({', '.join(missing)}). Mosaico abortado.", level="WARN")
+        return False
+
+    ordered_tifs = [warped_files[c] for c in ENRC_HIGH_RENDER_ORDER]
+    vrt_path = os.path.join(workdir, "ENRCH_BRASIL_FULL.vrt")
+    out_full_mbtiles = os.path.join(workdir, "ENRCH_BRASIL_FULL_HD.mbtiles")
+    out_full_pmtiles = os.path.join(workdir, "ENRCH_BRASIL_FULL.pmtiles")
+
+    # 1. GDALBUILDVRT: Fusão virtual das 9 folhas recortadas sem emendas
+    telemetry.log("Construindo mosaico virtual GDAL (VRT) com fusão das 9 folhas recortadas...")
+    cmd_vrt = [
+        gdalbuildvrt,
+        "-srcnodata", "0",
+        "-vrtnodata", "0",
+        "-overwrite",
+        vrt_path,
+        *ordered_tifs
+    ]
+    t0 = time.time()
+    res_vrt = subprocess.run(cmd_vrt, capture_output=True, text=True)
+    if res_vrt.returncode != 0:
+        telemetry.log(f"ERRO GDALBUILDVRT: {res_vrt.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Mosaico VRT estruturado com sucesso em {time.time()-t0:.1f}s!")
+
+    # 2. GDAL_TRANSLATE: Converte para MBTiles WebP HD
+    tile_fmt_upper = TILE_FORMAT.upper()
+    telemetry.log(f"Fatiando Camada Única MBTiles {tile_fmt_upper} (Qualidade: {WEBP_QUALITY})...")
+    translate_cmd = [
+        gdal_translate,
+        "-of", "MBTILES",
+        "-co", f"TILE_FORMAT={tile_fmt_upper}",
+    ]
+    if tile_fmt_upper == "WEBP":
+        translate_cmd.extend(["-co", f"QUALITY={WEBP_QUALITY}"])
+
+    translate_cmd.extend([vrt_path, out_full_mbtiles])
+    t1 = time.time()
+    res_tr = subprocess.run(translate_cmd, capture_output=True, text=True)
+    if res_tr.returncode != 0:
+        telemetry.log(f"ERRO GDAL_TRANSLATE Full Mosaic: {res_tr.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Base MBTiles Camada Única gerada em {time.time()-t1:.1f}s!")
+
+    # Formato no metadata antes do gdaladdo
+    try:
+        conn = sqlite3.connect(out_full_mbtiles)
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO metadata (name, value) VALUES ('format', ?)", (TILE_FORMAT.lower(),))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # 3. GDALADDO: Pirâmides Lanczos completas
+    telemetry.log(f"Gerando overviews Lanczos da Camada Única (Z{MIN_ZOOM} a Z{MAX_ZOOM})...")
+    if MAX_ZOOM >= 12 or DPI >= 600:
+        overviews = ["2", "4", "8", "16", "32", "64", "128"]
+    else:
+        overviews = ["2", "4", "8", "16", "32", "64"]
+    addo_cmd = [
+        gdaladdo,
+        "-r", RESAMPLING,
+        out_full_mbtiles,
+        *overviews
+    ]
+    t2 = time.time()
+    res_addo = subprocess.run(addo_cmd, capture_output=True, text=True)
+    if res_addo.returncode != 0:
+        telemetry.log(f"ERRO GDALADDO Full Mosaic: {res_addo.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Pirâmides da Camada Única concluídas em {time.time()-t2:.1f}s!")
+
+    # 4. Limpeza de tiles vazios no SQLite e Metadados Nacionais
+    telemetry.log("Expurgando tiles nulos e gravando metadados nacionais...")
+    try:
+        conn = sqlite3.connect(out_full_mbtiles)
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tiles WHERE length(tile_data) < ?", (ENRC_EMPTY_THRESHOLD,))
+        purged = cur.rowcount
+        if purged > 0:
+            telemetry.log(f"🛡️ {purged} tiles oceânicos/vazios expurgados da Camada Única!")
+
+        cur.execute("SELECT MIN(zoom_level), MAX(zoom_level), count(*) FROM tiles")
+        row = cur.fetchone()
+        actual_min, actual_max, total_tiles = row[0] or MIN_ZOOM, row[1] or MAX_ZOOM, row[2] or 0
+
+        cur.execute("DELETE FROM metadata")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_name ON metadata (name)")
+
+        airac = airac_info or {}
+        # BBOX Nacional unificada (cobre todo o território e águas jurisdicionais brasileiras)
+        national_bounds = "-74.19515,-34.33251,-26.95346,5.96674"
+
+        cur.execute("""
+            INSERT OR REPLACE INTO metadata (name, value) VALUES
+            ('name', ?),
+            ('type', 'overlay'),
+            ('version', '2.2-HD-FULL'),
+            ('description', ?),
+            ('format', ?),
+            ('bounds', ?),
+            ('minzoom', ?),
+            ('maxzoom', ?),
+            ('chart_code', 'BRASIL_FULL'),
+            ('amdt', ?),
+            ('cycle', ?),
+            ('effective_date', ?),
+            ('publication_date', ?)
+        """, (
+            "SkyFPL ENRC HIGH Brasil Full HD",
+            "Mosaico Contínuo Nacional das Cartas de Rota Superior (SkyFPL HD GeoPDF)",
+            TILE_FORMAT.lower(),
+            national_bounds,
+            str(actual_min),
+            str(actual_max),
+            airac.get("cycle", "2609"),
+            airac.get("cycle", "2609"),
+            airac.get("effective_date", "03/09/2026"),
+            airac.get("effective_date", "")
+        ))
+
+        conn.commit()
+        cur.execute("VACUUM")
+        conn.close()
+        telemetry.log(f"Metadados da Camada Única gravados: {total_tiles} tiles (Z{actual_min}-Z{actual_max}).")
+    except Exception as e:
+        telemetry.log(f"Erro metadados Camada Única: {e}", level="ERROR")
+        return False
+
+    # 5. Upload MBTiles para R2
+    mbtiles_key = f"{R2_PREFIX}/ENRCH_BRASIL_FULL_HD.mbtiles"
+    telemetry.log(f"Enviando MBTiles Camada Única para R2 ({mbtiles_key})...")
+    size_bytes = 0
+    if s3_client:
+        try:
+            size_bytes = upload_to_r2(s3_client, out_full_mbtiles, mbtiles_key)
+            telemetry.log(f"Upload MBTiles Camada Única concluído! {(size_bytes/1024/1024):.2f} MB no R2.")
+        except Exception as e:
+            telemetry.log(f"Erro upload MBTiles Camada Única no R2: {e}", level="ERROR")
+    else:
+        size_bytes = os.path.getsize(out_full_mbtiles)
+
+    # 6. Conversão para PMTiles e Upload
+    has_pmtiles = convert_to_pmtiles(out_full_mbtiles, out_full_pmtiles, telemetry, chart_idx=99)
+    pmtiles_size_mb = None
+    pmtiles_key = None
+    if has_pmtiles and os.path.exists(out_full_pmtiles):
+        pmtiles_key = f"{R2_PREFIX}/ENRCH_BRASIL_FULL.pmtiles"
+        telemetry.log(f"Enviando PMTiles Camada Única para R2 ({pmtiles_key})...")
+        if s3_client:
+            try:
+                pm_size = upload_to_r2(s3_client, out_full_pmtiles, pmtiles_key)
+                pmtiles_size_mb = f"{(pm_size/1024/1024):.2f}"
+                telemetry.log(f"Upload PMTiles Camada Única concluído! {pmtiles_size_mb} MB no R2.")
+            except Exception as e:
+                telemetry.log(f"Aviso upload PMTiles Camada Única: {e}", level="WARN")
+
+    # 7. Registro na Telemetria do Dashboard
+    full_meta = {
+        "name": "SkyFPL ENRC HIGH Brasil Full HD",
+        "description": "Mosaico Contínuo Nacional das Cartas de Rota Superior",
+        "size_bytes": size_bytes,
+        "size_mb": f"{(size_bytes/1024/1024):.2f}",
+        "r2_url_mbtiles": f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{mbtiles_key}",
+        "r2_key": mbtiles_key,
+        "pmtiles_url": f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{pmtiles_key}" if pmtiles_key else None,
+        "pmtiles_key": pmtiles_key,
+        "pmtiles_size_mb": pmtiles_size_mb,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "dpi": DPI,
+        "resampling": RESAMPLING,
+        "tile_format": TILE_FORMAT,
+        "min_zoom": MIN_ZOOM,
+        "max_zoom": MAX_ZOOM,
+        "amdt": airac_info.get("cycle", "2609"),
+        "cycle": airac_info.get("cycle", "2609"),
+        "effective_date": airac_info.get("effective_date", "03/09/2026"),
+        "publication_date": airac_info.get("effective_date", "")
+    }
+    telemetry.register_chart("ENRCH_BRASIL_FULL", full_meta)
+    telemetry.log("🎉 Camada Única ENRC HIGH HD publicada com sucesso no Staging!")
+    return True
+
 # ─── Execução Principal ───────────────────────────────────────────────────────
 
 def main():
@@ -807,6 +1019,9 @@ def main():
     telemetry.log(f"Iniciando processamento de {len(target_codes)} carta(s) [Ciclo AIRAC {airac_info.get('cycle')} - Vigência: {airac_info.get('effective_date')}]: {', '.join(target_codes)}")
 
     success_count = 0
+    warped_files_map = {}
+    should_build_mosaic = GENERATE_FULL_MOSAIC and set(ENRC_HIGH_RENDER_ORDER).issubset(set(target_codes))
+
     with tempfile.TemporaryDirectory() as workdir:
         for idx, code in enumerate(target_codes):
             chart_info = catalog[code]
@@ -814,11 +1029,15 @@ def main():
 
             out_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
             out_pmtiles = os.path.join(workdir, f"{code}.pmtiles")
+            warped_tif_dest = os.path.join(workdir, f"{code}_warped.tif") if should_build_mosaic else None
 
-            ok = process_chart_to_mbtiles(code, chart_info, out_mbtiles, telemetry, idx, airac=airac_info)
+            ok = process_chart_to_mbtiles(code, chart_info, out_mbtiles, telemetry, idx, airac=airac_info, warped_tif_dest=warped_tif_dest)
             if not ok or not os.path.exists(out_mbtiles):
                 telemetry.log(f"Falha ao gerar MBTiles para {code}.", idx, 50, level="ERROR")
                 continue
+
+            if should_build_mosaic and warped_tif_dest and os.path.exists(warped_tif_dest):
+                warped_files_map[code] = warped_tif_dest
 
             # Upload MBTiles para R2
             mbtiles_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
@@ -873,6 +1092,11 @@ def main():
             telemetry.register_chart(code, chart_meta)
             success_count += 1
             telemetry.log(f"✅ Carta {code} finalizada com sucesso! MBTiles: {chart_meta['size_mb']} MB" + (f" | PMTiles: {pmtiles_size_mb} MB" if pmtiles_size_mb else ""), idx, 100)
+
+        # 🇧🇷 Montagem da Camada Única HD se todas as 9 cartas foram compiladas com sucesso
+        if should_build_mosaic and success_count == len(target_codes):
+            telemetry.log("🧩 Todas as 9 folhas individuais HD foram concluídas. Iniciando fusão da Camada Única...")
+            build_and_upload_full_mosaic(workdir, warped_files_map, s3_client, telemetry, airac_info)
 
     is_ok = (success_count == len(target_codes))
     telemetry.finish(is_ok)
