@@ -47,6 +47,7 @@ WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
 MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "enrc_high/staging").strip().rstrip("/")
+PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "enrch_hd_progress.json").strip()
 GENERATE_FULL_MOSAIC = os.environ.get("GENERATE_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
 ONLY_FULL_MOSAIC = os.environ.get("ONLY_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
 
