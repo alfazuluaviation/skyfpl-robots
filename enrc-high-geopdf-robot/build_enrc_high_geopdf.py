@@ -47,8 +47,10 @@ WEBP_QUALITY = int(os.environ.get("WEBP_QUALITY", 85))
 MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
 MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "enrc_high/staging").strip().rstrip("/")
-PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "enrch_hd_progress.json").strip()
 GENERATE_FULL_MOSAIC = os.environ.get("GENERATE_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+ONLY_FULL_MOSAIC = os.environ.get("ONLY_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+if ONLY_FULL_MOSAIC:
+    GENERATE_FULL_MOSAIC = True
 
 # 🎨 Ordem Rigorosa de Sobreposição Cartográfica (Z-Order Oficial: fundo H9 -> topo H2)
 ENRC_HIGH_RENDER_ORDER = ["H9", "H8", "H7", "H6", "H5", "H4", "H3", "H1", "H2"]
@@ -529,7 +531,8 @@ def process_chart_to_mbtiles(
     telemetry: TelemetryManager,
     chart_idx: int,
     airac: dict = None,
-    warped_tif_dest: str = None
+    warped_tif_dest: str = None,
+    only_warp: bool = False
 ) -> bool:
     name = chart_info.get("name", code)
     pdf_url = chart_info.get("pdf_url", "")
@@ -615,6 +618,10 @@ def process_chart_to_mbtiles(
             telemetry.log(f"ERRO GDALWARP em {code}: {res1.stderr[:200]}", chart_idx, 30, level="ERROR")
             return False
         telemetry.log(f"Rasterização vetorial e recorte concluídos em {time.time()-t0:.1f}s!", chart_idx, 48)
+
+        if only_warp:
+            telemetry.log(f"✂️ Folha {code} recortada no disco temporário para a Camada Única!", chart_idx, 95)
+            return True
 
         # 3. GDAL_TRANSLATE: Converte para MBTiles com compressão WebP
         tile_fmt_upper = TILE_FORMAT.upper()
@@ -1015,29 +1022,48 @@ def main():
         print("[AVISO] Credenciais R2 ausentes. Telemetria e uploads serão simulados localmente.", flush=True)
 
     airac_info = get_airac_cycle_info()
-    telemetry = TelemetryManager(s3_client, target_codes, airac=airac_info)
-    telemetry.log(f"Iniciando processamento de {len(target_codes)} carta(s) [Ciclo AIRAC {airac_info.get('cycle')} - Vigência: {airac_info.get('effective_date')}]: {', '.join(target_codes)}")
+    should_build_mosaic = GENERATE_FULL_MOSAIC and set(ENRC_HIGH_RENDER_ORDER).issubset(set(target_codes))
+    if ONLY_FULL_MOSAIC:
+        target_codes = ENRC_HIGH_RENDER_ORDER
+        should_build_mosaic = True
+
+    telemetry_targets = ["ENRCH_BRASIL_FULL"] if ONLY_FULL_MOSAIC else target_codes
+    telemetry = TelemetryManager(s3_client, telemetry_targets, airac=airac_info)
+
+    if ONLY_FULL_MOSAIC:
+        telemetry.log(f"🇧🇷 Modo Exclusivo Camada Única HD ativado! Recortando 9 folhas localmente para fusão nacional [Ciclo AIRAC {airac_info.get('cycle')} - Vigência: {airac_info.get('effective_date')}].", 0, 2)
+    else:
+        telemetry.log(f"Iniciando processamento de {len(target_codes)} carta(s) [Ciclo AIRAC {airac_info.get('cycle')} - Vigência: {airac_info.get('effective_date')}]: {', '.join(target_codes)}")
 
     success_count = 0
     warped_files_map = {}
-    should_build_mosaic = GENERATE_FULL_MOSAIC and set(ENRC_HIGH_RENDER_ORDER).issubset(set(target_codes))
 
     with tempfile.TemporaryDirectory() as workdir:
         for idx, code in enumerate(target_codes):
             chart_info = catalog[code]
-            telemetry.log(f"--- Processando [{idx+1}/{len(target_codes)}]: {code} ({chart_info['name']}) ---", idx, 5)
+            telemetry_idx = 0 if ONLY_FULL_MOSAIC else idx
+            telemetry.log(f"--- Processando folha [{idx+1}/{len(target_codes)}]: {code} ({chart_info['name']}) ---", telemetry_idx, int((idx / len(target_codes)) * 75))
 
             out_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
             out_pmtiles = os.path.join(workdir, f"{code}.pmtiles")
             warped_tif_dest = os.path.join(workdir, f"{code}_warped.tif") if should_build_mosaic else None
 
-            ok = process_chart_to_mbtiles(code, chart_info, out_mbtiles, telemetry, idx, airac=airac_info, warped_tif_dest=warped_tif_dest)
-            if not ok or not os.path.exists(out_mbtiles):
-                telemetry.log(f"Falha ao gerar MBTiles para {code}.", idx, 50, level="ERROR")
+            ok = process_chart_to_mbtiles(
+                code, chart_info, out_mbtiles, telemetry, telemetry_idx,
+                airac=airac_info, warped_tif_dest=warped_tif_dest,
+                only_warp=ONLY_FULL_MOSAIC
+            )
+            if not ok or (not ONLY_FULL_MOSAIC and not os.path.exists(out_mbtiles)):
+                telemetry.log(f"Falha ao gerar {code}.", telemetry_idx, 50, level="ERROR")
                 continue
 
             if should_build_mosaic and warped_tif_dest and os.path.exists(warped_tif_dest):
                 warped_files_map[code] = warped_tif_dest
+
+            if ONLY_FULL_MOSAIC:
+                success_count += 1
+                telemetry.log(f"✂️ Folha {code} pronta para fusão ({success_count}/9)!", telemetry_idx, int((success_count / len(target_codes)) * 75))
+                continue
 
             # Upload MBTiles para R2
             mbtiles_key = f"{R2_PREFIX}/{code}_HD.mbtiles"

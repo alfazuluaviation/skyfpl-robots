@@ -40,6 +40,11 @@ on:
         required: false
         default: 'false'
         type: boolean
+      only_full_mosaic:
+        description: '🛡️ Modo Exclusivo Carta Full (enviar apenas o Brasil Full para o R2, sem cartas avulsas)'
+        required: false
+        default: 'false'
+        type: boolean
 
 concurrency:
   group: enrc-high-geopdf-hd-builder
@@ -96,6 +101,7 @@ jobs:
           MAX_ZOOM: ${{ github.event.inputs.max_zoom || '11' }}
           R2_PREFIX: ${{ github.event.inputs.r2_prefix || 'enrc_high/staging' }}
           GENERATE_FULL_MOSAIC: ${{ github.event.inputs.generate_full_mosaic || 'false' }}
+          ONLY_FULL_MOSAIC: ${{ github.event.inputs.only_full_mosaic || 'false' }}
           PROGRESS_KEY: 'enrch_hd_progress.json'
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
