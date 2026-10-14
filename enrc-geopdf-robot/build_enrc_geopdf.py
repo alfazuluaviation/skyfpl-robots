@@ -408,6 +408,10 @@ class TelemetryManager:
             "processed_at": datetime.now(timezone.utc).isoformat()
         }
 
+    def register_chart(self, code: str, meta: dict):
+        self.metadata[code] = meta
+        self._save(code, int(((self.target_codes.index(code) + 1) / self.total * 100)) if (code in self.target_codes and self.total > 0) else 100)
+
     def finish(self, status: str = "completed"):
         self.status = status
         self.log(f"Processamento finalizado com status: {status.upper()}!", self.total, 100)
