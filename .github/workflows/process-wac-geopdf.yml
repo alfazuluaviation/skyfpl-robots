@@ -14,7 +14,7 @@ on:
       resampling:
         description: '✨ Algoritmo de Interpolação (lanczos, cubic, bilinear)'
         required: false
-        default: 'cubic'
+        default: 'lanczos'
       tile_format:
         description: '📦 Formato dos Tiles (webp ou png)'
         required: false
