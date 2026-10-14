@@ -42,11 +42,21 @@ MIN_ZOOM = int(os.environ.get("MIN_ZOOM", 5))
 MAX_ZOOM = int(os.environ.get("MAX_ZOOM", 11))
 R2_PREFIX = os.environ.get("R2_PREFIX", "wac/staging").strip().rstrip("/")
 PROGRESS_KEY = os.environ.get("PROGRESS_KEY", "wac_geopdf_progress.json").strip()
+GENERATE_FULL_MOSAIC = os.environ.get("GENERATE_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+ONLY_FULL_MOSAIC = os.environ.get("ONLY_FULL_MOSAIC", "false").strip().lower() in ("true", "1", "yes")
+
+# 🇧🇷 Se a Carta Full Brasil foi selecionada diretamente, ativa o modo exclusivo nacional:
+# As 46 cartas serão recortadas apenas no disco temporário e NENHUMA folha individual será enviada ao R2!
+if CHART_CODES_ENV.upper() in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL"):
+    ONLY_FULL_MOSAIC = True
+    GENERATE_FULL_MOSAIC = True
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_ENDPOINT", "")
 R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("CLOUDFLARE_R2_ACCESS_KEY_ID", "")
 R2_SECRET_KEY = os.environ.get("R2_SECRET_KEY") or os.environ.get("R2_SECRET_ACCESS_KEY") or os.environ.get("CLOUDFLARE_R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET = os.environ.get("R2_BUCKET") or os.environ.get("CLOUDFLARE_R2_BUCKET", "skyfpl-charts")
+
+WAC_NATIONAL_BOUNDS = "-76.0,-36.0,-30.0,8.0"
 
 # ─── Bounding Boxes Oficiais das 46 Folhas WAC do Brasil ──────────────────────
 # Formato: (minLon, minLat, maxLon, maxLat) em coordenadas geográficas WGS84 (EPSG:4326)
@@ -370,6 +380,13 @@ class TelemetryManager:
         except Exception as e:
             print(f"  [Aviso Telemetria]: {e}", flush=True)
 
+    def register_chart(self, code: str, meta: dict):
+        """Registra metadados de uma carta especial (ex: WAC_BRASIL_FULL) e sincroniza imediatamente com o R2."""
+        self.metadata[code] = meta
+        if code not in self.charts_done:
+            self.charts_done.append(code)
+        self.sync_r2(status="completed" if len(self.charts_done) >= len(self.target_codes) else "processing")
+
 # ─── Download Seguro do GeoPDF ────────────────────────────────────────────────
 
 def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart_idx: int, max_retries: int = 5) -> bool:
@@ -416,7 +433,16 @@ def download_geopdf(url: str, dest_path: str, telemetry: TelemetryManager, chart
 
 # ─── Processamento GDAL: GeoPDF -> MBTiles HD ─────────────────────────────────
 
-def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, chart_meta: dict, telemetry: TelemetryManager, chart_idx: int) -> bool:
+def process_chart_to_mbtiles(
+    code: str,
+    pdf_path: str,
+    output_mbtiles: str,
+    chart_meta: dict,
+    telemetry: TelemetryManager,
+    chart_idx: int,
+    warped_tif_dest: str = None,
+    only_warp: bool = False
+) -> bool:
     """Executa a transformação de alta fidelidade: GeoPDF -> EPSG:3857 -> MBTiles WebP/PNG."""
     gdalwarp = find_gdal_tool("gdalwarp")
     gdal_translate = find_gdal_tool("gdal_translate")
@@ -425,7 +451,7 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
     bbox = chart_meta.get("bbox") or WAC_BBOXES.get(code)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        warped_tif = os.path.join(tmpdir, f"{code}_warped.tif")
+        warped_tif = warped_tif_dest if warped_tif_dest else os.path.join(tmpdir, f"{code}_warped.tif")
 
         # 1. GDALWARP: Rasteriza GeoPDF, aplica recorte geográfico exato da folha e projeta em Web Mercator
         telemetry.log(f"Reprojetando GeoPDF para EPSG:3857 ({DPI} DPI, {RESAMPLING.upper()}, Recorte Exato)...", chart_idx, 20)
@@ -464,6 +490,10 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
             telemetry.log(f"ERRO GDALWARP: {res1.stderr[:200]}", chart_idx, 30, level="ERROR")
             return False
         telemetry.log(f"Rasterização e recorte concluídos em {time.time()-t0:.1f}s!", chart_idx, 48)
+
+        if only_warp:
+            telemetry.log(f"Recorte de {code} preparado com sucesso para o Mosaico Nacional Contínuo!", chart_idx, 90)
+            return True
 
         # 2. GDAL_TRANSLATE: Converte o GeoTIFF para MBTiles com compressão moderna (WEBP ou PNG)
         tile_fmt_upper = TILE_FORMAT.upper()
@@ -576,6 +606,195 @@ def process_chart_to_mbtiles(code: str, pdf_path: str, output_mbtiles: str, char
 
     return True
 
+# ─── Construção da Camada Única HD (Mosaico Nacional Contínuo Brasil Full) ────
+
+def build_full_brasil_mosaic(
+    warped_files: dict,
+    workdir: str,
+    telemetry: TelemetryManager,
+    s3_client = None
+) -> bool:
+    """
+    Constrói e envia a Camada Única Consolidada em HD (Brasil Full) para as Cartas WAC no SkyFPL Web,
+    utilizando a composição virtual GDAL (VRT) dos TIFFs intermediários recortados cirurgicamente
+    pela BBOX oficial de cada uma das 46 folhas.
+    """
+    gdalbuildvrt = find_gdal_tool("gdalbuildvrt")
+    gdal_translate = find_gdal_tool("gdal_translate")
+    gdaladdo = find_gdal_tool("gdaladdo")
+
+    telemetry.log("🇧🇷 Iniciando consolidação da Camada Única WAC HD (Brasil Full) para o Web...")
+
+    ordered_codes = list(WAC_BBOXES.keys())
+    present_codes = [c for c in ordered_codes if c in warped_files and os.path.exists(warped_files[c])]
+    if not present_codes:
+        telemetry.log("Aviso Mosaico: Nenhuma folha recortada encontrada. Mosaico WAC abortado.", level="WARN")
+        return False
+
+    telemetry.log(f"Compondo mosaico nacional contínuo com {len(present_codes)} folhas WAC recortadas...")
+    ordered_tifs = [warped_files[c] for c in present_codes]
+    vrt_path = os.path.join(workdir, "WAC_BRASIL_FULL.vrt")
+    out_full_mbtiles = os.path.join(workdir, "WAC_BRASIL_FULL_HD.mbtiles")
+    out_full_pmtiles = os.path.join(workdir, "WAC_BRASIL_FULL.pmtiles")
+
+    # 1. GDALBUILDVRT: Fusão virtual das folhas recortadas sem emendas
+    telemetry.log("Construindo mosaico virtual GDAL (VRT) com fusão das folhas recortadas...")
+    cmd_vrt = [
+        gdalbuildvrt,
+        "-addalpha",
+        "-overwrite",
+        vrt_path,
+        *ordered_tifs
+    ]
+    t0 = time.time()
+    res_vrt = subprocess.run(cmd_vrt, capture_output=True, text=True)
+    if res_vrt.returncode != 0:
+        telemetry.log(f"ERRO GDALBUILDVRT WAC: {res_vrt.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Mosaico VRT WAC estruturado com sucesso em {time.time()-t0:.1f}s!")
+
+    # 2. GDAL_TRANSLATE: Converte para MBTiles WebP HD
+    tile_fmt_upper = TILE_FORMAT.upper()
+    telemetry.log(f"Fatiando Camada Única WAC MBTiles {tile_fmt_upper} (Qualidade: {WEBP_QUALITY})...")
+    translate_cmd = [
+        gdal_translate,
+        "-of", "MBTILES",
+        "-co", f"TILE_FORMAT={tile_fmt_upper}",
+    ]
+    if tile_fmt_upper == "WEBP":
+        translate_cmd.extend(["-co", f"QUALITY={WEBP_QUALITY}"])
+
+    translate_cmd.extend([vrt_path, out_full_mbtiles])
+    t1 = time.time()
+    res_tr = subprocess.run(translate_cmd, capture_output=True, text=True)
+    if res_tr.returncode != 0:
+        telemetry.log(f"ERRO GDAL_TRANSLATE WAC Full Mosaic: {res_tr.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Base MBTiles Camada Única WAC gerada em {time.time()-t1:.1f}s!")
+
+    # 2.1 Formato no metadata antes do gdaladdo
+    try:
+        conn = sqlite3.connect(out_full_mbtiles)
+        cur = conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO metadata (name, value) VALUES ('format', ?)", (TILE_FORMAT.lower(),))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+    # 3. GDALADDO: Pirâmides Lanczos completas
+    telemetry.log(f"Gerando overviews Lanczos da Camada Única WAC (Z{MIN_ZOOM} a Z{MAX_ZOOM})...")
+    if MAX_ZOOM >= 12:
+        overviews = ["2", "4", "8", "16", "32", "64", "128"]
+    else:
+        overviews = ["2", "4", "8", "16", "32", "64"]
+
+    addo_cmd = [
+        gdaladdo,
+        "-r", RESAMPLING,
+        out_full_mbtiles,
+        *overviews
+    ]
+    t2 = time.time()
+    res_addo = subprocess.run(addo_cmd, capture_output=True, text=True)
+    if res_addo.returncode != 0:
+        telemetry.log(f"ERRO GDALADDO WAC Full Mosaic: {res_addo.stderr[:200]}", level="ERROR")
+        return False
+    telemetry.log(f"Pirâmides da Camada Única WAC concluídas em {time.time()-t2:.1f}s!")
+
+    # 4. Metadados Nacionais
+    telemetry.log("Gravando metadados nacionais WAC no SQLite...")
+    try:
+        conn = sqlite3.connect(out_full_mbtiles)
+        cur = conn.cursor()
+        cur.execute("SELECT MIN(zoom_level), MAX(zoom_level), count(*) FROM tiles")
+        row = cur.fetchone()
+        actual_min, actual_max, total_tiles = row[0] or MIN_ZOOM, row[1] or MAX_ZOOM, row[2] or 0
+
+        cur.execute("DELETE FROM metadata")
+        cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_metadata_name ON metadata (name)")
+
+        national_bounds = "-76.0,-36.0,-30.0,8.0"
+
+        cur.execute("""
+            INSERT OR REPLACE INTO metadata (name, value) VALUES
+            ('name', ?),
+            ('type', 'overlay'),
+            ('version', '2.2-HD-FULL'),
+            ('description', ?),
+            ('format', ?),
+            ('bounds', ?),
+            ('minzoom', ?),
+            ('maxzoom', ?),
+            ('chart_code', 'WAC_BRASIL_FULL'),
+            ('generator', 'SkyFPL WAC GeoPDF HD Engine v2.2')
+        """, (
+            "SkyFPL WAC Brasil Full HD",
+            "Mosaico Contínuo Nacional das Cartas WAC 1:1.000.000 (SkyFPL HD GeoPDF)",
+            TILE_FORMAT.lower(),
+            national_bounds,
+            str(actual_min),
+            str(actual_max)
+        ))
+
+        conn.commit()
+        cur.execute("VACUUM")
+        conn.close()
+        telemetry.log(f"Metadados gravados: {total_tiles} tiles (Z{actual_min}-Z{actual_max}).")
+    except Exception as e:
+        telemetry.log(f"Erro metadados Camada Única WAC: {e}", level="ERROR")
+        return False
+
+    # 5. Upload MBTiles para R2
+    mbtiles_key = f"{R2_PREFIX}/WAC_BRASIL_FULL_HD.mbtiles"
+    telemetry.log(f"Enviando MBTiles Camada Única WAC para R2 ({mbtiles_key})...")
+    size_bytes = 0
+    if s3_client:
+        try:
+            size_bytes = upload_to_r2(s3_client, out_full_mbtiles, mbtiles_key)
+            telemetry.log(f"Upload MBTiles Camada Única WAC concluído! {(size_bytes/1024/1024):.2f} MB no R2.")
+        except Exception as e:
+            telemetry.log(f"Erro upload MBTiles Camada Única WAC no R2: {e}", level="ERROR")
+    else:
+        size_bytes = os.path.getsize(out_full_mbtiles)
+
+    # 6. Conversão para PMTiles e Upload
+    has_pmtiles = convert_to_pmtiles(out_full_mbtiles, out_full_pmtiles, telemetry, chart_idx=99)
+    pmtiles_size_mb = None
+    pmtiles_key = None
+    if has_pmtiles and os.path.exists(out_full_pmtiles):
+        pmtiles_key = f"{R2_PREFIX}/WAC_BRASIL_FULL.pmtiles"
+        telemetry.log(f"Enviando PMTiles Camada Única WAC para R2 ({pmtiles_key})...")
+        if s3_client:
+            try:
+                pm_size = upload_to_r2(s3_client, out_full_pmtiles, pmtiles_key)
+                pmtiles_size_mb = f"{(pm_size/1024/1024):.2f}"
+                telemetry.log(f"Upload PMTiles Camada Única WAC concluído! {pmtiles_size_mb} MB no R2.")
+            except Exception as e:
+                telemetry.log(f"Aviso upload PMTiles Camada Única WAC: {e}", level="WARN")
+
+    # 7. Registro na Telemetria do Dashboard
+    full_meta = {
+        "name": "SkyFPL WAC Brasil Full HD",
+        "description": "Mosaico Contínuo Nacional das Cartas WAC 1:1.000.000",
+        "size_bytes": size_bytes,
+        "size_mb": f"{(size_bytes/1024/1024):.2f}",
+        "r2_url_mbtiles": f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{mbtiles_key}",
+        "r2_key": mbtiles_key,
+        "pmtiles_url": f"https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/{pmtiles_key}" if pmtiles_key else None,
+        "pmtiles_key": pmtiles_key,
+        "pmtiles_size_mb": pmtiles_size_mb,
+        "processed_at": datetime.now(timezone.utc).isoformat(),
+        "dpi": DPI,
+        "resampling": RESAMPLING,
+        "tile_format": TILE_FORMAT,
+        "min_zoom": MIN_ZOOM,
+        "max_zoom": MAX_ZOOM
+    }
+    telemetry.register_chart("WAC_BRASIL_FULL", full_meta)
+    telemetry.log("🎉 Camada Única WAC Brasil Full HD publicada com sucesso no Staging!")
+    return True
+
 # ─── Conversão PMTiles ────────────────────────────────────────────────────────
 
 def convert_to_pmtiles(local_mbtiles: str, local_pmtiles: str, telemetry, chart_idx: int) -> bool:
@@ -627,7 +846,7 @@ def upload_to_r2(s3_client, local_path: str, r2_key: str) -> int:
 
 def main():
     print("=" * 70, flush=True)
-    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.1", flush=True)
+    print("✈️  SkyFPL WAC High-Definition Engine (GeoPDF / GDAL) v2.2", flush=True)
     print("=" * 70, flush=True)
     print(f"  DPI de Rasterização: {DPI}", flush=True)
     print(f"  Zoom Alvo: Z{MIN_ZOOM} a Z{MAX_ZOOM}", flush=True)
@@ -635,6 +854,8 @@ def main():
     print(f"  Formato dos Tiles: {TILE_FORMAT.upper()} (Qualidade: {WEBP_QUALITY})", flush=True)
     print(f"  Prefixo de Destino R2: {R2_PREFIX}/", flush=True)
     print(f"  Arquivo de Progresso: {PROGRESS_KEY}", flush=True)
+    print(f"  Gerar Camada Única (Mosaico Full): {GENERATE_FULL_MOSAIC}", flush=True)
+    print(f"  Modo Exclusivo Carta Full: {ONLY_FULL_MOSAIC}", flush=True)
     print("=" * 70, flush=True)
 
     # 1. Carregar catálogo oficial
@@ -644,11 +865,17 @@ def main():
         sys.exit(1)
 
     # 2. Determinar cartas a processar
+    should_build_mosaic = GENERATE_FULL_MOSAIC
     if CHART_CODES_ENV.upper() == "ALL":
         target_codes = list(catalog.keys())
+        should_build_mosaic = GENERATE_FULL_MOSAIC
+    elif CHART_CODES_ENV.upper() in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL"):
+        target_codes = list(WAC_BBOXES.keys())
+        should_build_mosaic = True
     else:
         requested = [c.strip().upper() for c in CHART_CODES_ENV.split(",") if c.strip()]
         target_codes = [c for c in requested if c in catalog]
+        should_build_mosaic = GENERATE_FULL_MOSAIC
 
     if not target_codes:
         print(f"[ERRO] Nenhum código WAC válido encontrado em CHART_CODES='{CHART_CODES_ENV}'.", flush=True)
@@ -668,12 +895,21 @@ def main():
         print("[Aviso] Credenciais do Cloudflare R2 não detectadas no ambiente. Uploads serão ignorados (Modo Local).", flush=True)
 
     # Inicializar Telemetria
-    telemetry = TelemetryManager(s3, target_codes)
-    telemetry.log(f"Motor GeoPDF HD iniciado. {len(target_codes)} cartas selecionadas: {', '.join(target_codes)}", 1, 0)
+    telemetry_targets = ["WAC_BRASIL_FULL"] if ONLY_FULL_MOSAIC else target_codes
+    telemetry = TelemetryManager(s3, telemetry_targets)
+    if ONLY_FULL_MOSAIC:
+        telemetry.log(f"🇧🇷 Modo Exclusivo Nacional WAC Ativo. Recortando {len(target_codes)} folhas para Mosaico Brasil Full HD...", 1, 0)
+    else:
+        telemetry.log(f"Motor GeoPDF HD iniciado. {len(target_codes)} cartas selecionadas: {', '.join(target_codes)}", 1, 0)
+
+    warped_files = {}
 
     with tempfile.TemporaryDirectory() as workdir:
         for idx, code in enumerate(target_codes, 1):
-            chart_info = catalog[code]
+            chart_info = catalog.get(code, {
+                "name": code,
+                "bbox": WAC_BBOXES.get(code)
+            })
             telemetry.current_chart = code
             telemetry.log(f"[{idx}/{len(target_codes)}] Iniciando processamento: {code} — {chart_info.get('name', '')}", idx, 2)
 
@@ -685,6 +921,7 @@ def main():
             local_pdf = os.path.join(workdir, f"{code}.pdf")
             local_mbtiles = os.path.join(workdir, f"{code}_HD.mbtiles")
             local_pmtiles = os.path.join(workdir, f"{code}.pmtiles")
+            warped_tif = os.path.join(workdir, f"{code}_warped.tif")
 
             # A. Download do GeoPDF
             download_ok = download_geopdf(pdf_url, local_pdf, telemetry, idx)
@@ -693,56 +930,69 @@ def main():
                 continue
 
             # B. Processamento GDAL de alta fidelidade
-            process_ok = process_chart_to_mbtiles(code, local_pdf, local_mbtiles, chart_info, telemetry, idx)
-            if not process_ok or not os.path.exists(local_mbtiles):
+            process_ok = process_chart_to_mbtiles(
+                code, local_pdf, local_mbtiles, chart_info, telemetry, idx,
+                warped_tif_dest=warped_tif if should_build_mosaic else None,
+                only_warp=ONLY_FULL_MOSAIC
+            )
+            if not process_ok:
                 telemetry.log(f"Falha no pipeline GDAL para {code}.", idx, 100, level="ERROR")
                 continue
 
-            size_bytes = os.path.getsize(local_mbtiles)
-            size_mb = size_bytes / (1024 * 1024)
+            if should_build_mosaic and os.path.exists(warped_tif):
+                warped_files[code] = warped_tif
 
-            # C. Conversão para PMTiles (para consumo direto pelo Web via Range Requests)
-            pmtiles_ok = convert_to_pmtiles(local_mbtiles, local_pmtiles, telemetry, idx)
-            pmtiles_size_bytes = os.path.getsize(local_pmtiles) if (pmtiles_ok and os.path.exists(local_pmtiles)) else 0
-            pmtiles_size_mb = pmtiles_size_bytes / (1024 * 1024)
+            if not ONLY_FULL_MOSAIC and os.path.exists(local_mbtiles):
+                size_bytes = os.path.getsize(local_mbtiles)
+                size_mb = size_bytes / (1024 * 1024)
 
-            # D. Upload para Cloudflare R2 (Híbrido: MBTiles para Mobile / PMTiles para Web)
-            r2_mbtiles_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
-            r2_pmtiles_key = f"{R2_PREFIX}/{code}.pmtiles"
+                # C. Conversão para PMTiles (para consumo direto pelo Web via Range Requests)
+                pmtiles_ok = convert_to_pmtiles(local_mbtiles, local_pmtiles, telemetry, idx)
+                pmtiles_size_bytes = os.path.getsize(local_pmtiles) if (pmtiles_ok and os.path.exists(local_pmtiles)) else 0
+                pmtiles_size_mb = pmtiles_size_bytes / (1024 * 1024)
 
-            if s3:
-                telemetry.log(f"Enviando {code}_HD.mbtiles ({size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_mbtiles_key})...", idx, 95)
-                upload_to_r2(s3, local_mbtiles, r2_mbtiles_key)
+                # D. Upload para Cloudflare R2 (Híbrido: MBTiles para Mobile / PMTiles para Web)
+                r2_mbtiles_key = f"{R2_PREFIX}/{code}_HD.mbtiles"
+                r2_pmtiles_key = f"{R2_PREFIX}/{code}.pmtiles"
 
-                if pmtiles_ok and os.path.exists(local_pmtiles):
-                    telemetry.log(f"Enviando {code}.pmtiles ({pmtiles_size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_pmtiles_key})...", idx, 98)
-                    upload_to_r2(s3, local_pmtiles, r2_pmtiles_key)
+                if s3:
+                    telemetry.log(f"Enviando {code}_HD.mbtiles ({size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_mbtiles_key})...", idx, 95)
+                    upload_to_r2(s3, local_mbtiles, r2_mbtiles_key)
 
-                telemetry.log(f"Upload duplo ({code}_HD.mbtiles + {code}.pmtiles) concluído com sucesso!", idx, 100, level="SUCCESS")
+                    if pmtiles_ok and os.path.exists(local_pmtiles):
+                        telemetry.log(f"Enviando {code}.pmtiles ({pmtiles_size_mb:.2f} MB) para Cloudflare R2 ({R2_BUCKET}/{r2_pmtiles_key})...", idx, 98)
+                        upload_to_r2(s3, local_pmtiles, r2_pmtiles_key)
 
-            telemetry.charts_done.append(code)
-            telemetry.metadata[code] = {
-                "name": chart_info.get("name", ""),
-                "amdt": chart_info.get("amdt", ""),
-                "publication_date": chart_info.get("publication_date", ""),
-                "effective_date": chart_info.get("effective_date", ""),
-                "size_bytes": size_bytes,
-                "size_mb": round(size_mb, 2),
-                "pmtiles_size_bytes": pmtiles_size_bytes,
-                "pmtiles_size_mb": round(pmtiles_size_mb, 2),
-                "r2_key": r2_mbtiles_key,
-                "r2_pmtiles_key": r2_pmtiles_key if pmtiles_ok else None,
-                "dpi": DPI,
-                "minzoom": MIN_ZOOM,
-                "maxzoom": MAX_ZOOM,
-                "tile_format": TILE_FORMAT,
-                "resampling": RESAMPLING,
-                "processed_at": datetime.now(timezone.utc).isoformat()
-            }
+                    telemetry.log(f"Upload duplo ({code}_HD.mbtiles + {code}.pmtiles) concluído com sucesso!", idx, 100, level="SUCCESS")
+
+                telemetry.charts_done.append(code)
+                telemetry.metadata[code] = {
+                    "name": chart_info.get("name", ""),
+                    "amdt": chart_info.get("amdt", ""),
+                    "publication_date": chart_info.get("publication_date", ""),
+                    "effective_date": chart_info.get("effective_date", ""),
+                    "size_bytes": size_bytes,
+                    "size_mb": round(size_mb, 2),
+                    "pmtiles_size_bytes": pmtiles_size_bytes,
+                    "pmtiles_size_mb": round(pmtiles_size_mb, 2),
+                    "r2_key": r2_mbtiles_key,
+                    "r2_pmtiles_key": r2_pmtiles_key if pmtiles_ok else None,
+                    "dpi": DPI,
+                    "minzoom": MIN_ZOOM,
+                    "maxzoom": MAX_ZOOM,
+                    "tile_format": TILE_FORMAT,
+                    "resampling": RESAMPLING,
+                    "processed_at": datetime.now(timezone.utc).isoformat()
+                }
+            elif ONLY_FULL_MOSAIC:
+                telemetry.log(f"[{idx}/{len(target_codes)}] Folha {code} recortada. Upload individual pulado (Modo Exclusivo).", idx, 95)
 
             # Limpar arquivos temporários da folha
             if os.path.exists(local_pdf):
                 try: os.remove(local_pdf)
+                except Exception: pass
+            if not should_build_mosaic and os.path.exists(warped_tif):
+                try: os.remove(warped_tif)
                 except Exception: pass
             if os.path.exists(local_mbtiles):
                 try: os.remove(local_mbtiles)
@@ -752,15 +1002,26 @@ def main():
                 except Exception: pass
 
             # Pausa de alívio preventiva (Rate Limit Breaker) entre cartas para evitar bloqueio do AISWEB
-            time.sleep(4)
+            time.sleep(3)
+
+        # 3.1. Consolidação da Camada Única Nacional (Mosaico Contínuo Web)
+        if should_build_mosaic:
+            telemetry.log("🇧🇷 Montando e processando Mosaico Nacional Contínuo WAC Brasil Full HD...", 0, 95)
+            mosaic_ok = build_full_brasil_mosaic(warped_files, workdir, telemetry, s3_client=s3)
+            if mosaic_ok:
+                telemetry.log("🏆 Mosaico Nacional Contínuo WAC Brasil Full HD concluído e enviado com sucesso!", 0, 100)
+                if ONLY_FULL_MOSAIC:
+                    target_codes = ["WAC_BRASIL_FULL"]
+            else:
+                telemetry.log("⚠️ Falha na geração do Mosaico Nacional Contínuo WAC.", 0, 80, level="WARN")
 
     # 4. Finalização
     telemetry.current_chart = None
-    telemetry.current_phase = "Todas as cartas processadas com sucesso!"
-    telemetry.log(f"🏁 Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD geradas e publicadas.", len(target_codes), 100, level="SUCCESS")
+    telemetry.current_phase = "Processamento concluído com sucesso!"
+    telemetry.log(f"🏁 Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD processadas.", len(target_codes), 100, level="SUCCESS")
     telemetry.sync_r2(status="completed")
     print("\n" + "=" * 70, flush=True)
-    print(f"🏁 Processamento Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD geradas com sucesso.", flush=True)
+    print(f"🏁 Processamento Concluído! {len(telemetry.charts_done)}/{len(target_codes)} cartas WAC HD processadas com sucesso.", flush=True)
     print("=" * 70, flush=True)
 
     # 📱 Disparo do Relatório Operacional no Telegram
@@ -770,7 +1031,7 @@ def main():
             meta = telemetry.metadata[c]
             summary_items.append(f"<b>{c}</b> ({meta.get('name', c)}): {meta.get('size_mb', 0)} MB • AMDT {meta.get('amdt', 'N/A')}")
 
-    if len(telemetry.charts_done) == len(target_codes):
+    if len(telemetry.charts_done) >= len(target_codes):
         send_telegram_notification(
             title="Robô WAC GeoPDF HD",
             status="SUCCESS",

@@ -56,7 +56,11 @@ def main():
 
     deleted_count = 0
     for code in target_codes:
+        staging_code = "WAC_BRASIL_FULL" if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else code
         keys_to_delete = [
+            f"wac/staging/{staging_code}_HD.mbtiles",
+            f"wac/staging/{staging_code}.mbtiles",
+            f"wac/staging/{staging_code}.pmtiles",
             f"wac/staging/{code}_HD.mbtiles",
             f"wac/staging/{code}.mbtiles",
             f"wac/staging/{code}.pmtiles",
@@ -85,6 +89,8 @@ def main():
         staging_metadata = progress_data.get("metadata", {})
         
         for code in target_codes:
+            staging_code = "WAC_BRASIL_FULL" if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else code
+            staging_metadata.pop(staging_code, None)
             staging_metadata.pop(code, None)
 
         progress_data["metadata"] = staging_metadata

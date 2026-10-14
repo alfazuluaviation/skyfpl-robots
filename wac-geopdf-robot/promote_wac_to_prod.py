@@ -21,7 +21,7 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone
 
-# 46 Códigos Oficiais das Cartas WAC do Brasil
+# 46 Códigos Oficiais das Cartas WAC do Brasil + Camada Única Nacional Web
 ALL_WAC_CODES = [
     "WAC2825", "WAC2826", "WAC2827", "WAC2892", "WAC2893", "WAC2894", "WAC2895",
     "WAC2944", "WAC2945", "WAC2946", "WAC2947", "WAC2948", "WAC2949", "WAC3012",
@@ -29,7 +29,7 @@ ALL_WAC_CODES = [
     "WAC3066", "WAC3067", "WAC3068", "WAC3069", "WAC3070", "WAC3071", "WAC3072",
     "WAC3137", "WAC3138", "WAC3139", "WAC3140", "WAC3141", "WAC3189", "WAC3190",
     "WAC3191", "WAC3192", "WAC3260", "WAC3261", "WAC3262", "WAC3263", "WAC3313",
-    "WAC3314", "WAC3383", "WAC3384", "WAC3434"
+    "WAC3314", "WAC3383", "WAC3384", "WAC3434", "WAC_BRASIL_FULL"
 ]
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_ENDPOINT", "")
@@ -187,7 +187,10 @@ def main():
 
     print("\n📦 ETAPA 1: Transferindo cartas (Cópia Server-Side + Limpeza de Origem)...", flush=True)
     for idx, code in enumerate(target_codes, start=1):
+        staging_code = "WAC_BRASIL_FULL" if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else code
         candidates = [
+            f"wac/staging/{staging_code}_HD.mbtiles",
+            f"wac/staging/{staging_code}.mbtiles",
             f"wac/staging/{code}_HD.mbtiles",
             f"wac/staging/{code}.mbtiles",
             f"wac-test/{code}_HD.mbtiles"
@@ -204,20 +207,20 @@ def main():
             except ClientError:
                 continue
 
-        dst_key = f"wac/{code}.mbtiles"
+        dst_key = f"wac/{staging_code}.mbtiles" if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else f"wac/{code}.mbtiles"
 
         if not src_key:
             # Se não há novo arquivo em staging, verifica se já existe na produção
             try:
                 s3.head_object(Bucket=R2_BUCKET, Key=dst_key)
-                print(f"  [{idx:02d}/46] ℹ️ Carta {code} já está ativa em produção (sem novos arquivos em staging).", flush=True)
+                print(f"  [{idx:02d}/{len(target_codes)}] ℹ️ Carta {code} já está ativa em produção (sem novos arquivos em staging).", flush=True)
             except ClientError:
-                print(f"  [{idx:02d}/46] ⚠️ Carta {code} não encontrada em staging nem em produção.", flush=True)
+                print(f"  [{idx:02d}/{len(target_codes)}] ⚠️ Carta {code} não encontrada em staging nem em produção.", flush=True)
             continue
 
         try:
             total_bytes += size
-            print(f"  [{idx:02d}/46] 🔄 Transferindo {code} ({size / (1024*1024):.2f} MB)...", end=" ", flush=True)
+            print(f"  [{idx:02d}/{len(target_codes)}] 🔄 Transferindo {code} ({size / (1024*1024):.2f} MB)...", end=" ", flush=True)
 
             # A. Copiar MBTiles para produção
             copy_source = {"Bucket": R2_BUCKET, "Key": src_key}
@@ -231,7 +234,8 @@ def main():
             print("✓ MBTILES", end=" ", flush=True)
 
             # B. Copiar PMTiles para produção (se existir em staging)
-            pmtiles_src = f"wac/staging/{code}.pmtiles"
+            pmtiles_src = f"wac/staging/{staging_code}.pmtiles"
+            dst_pmtiles_key = f"wac/{staging_code}.pmtiles" if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else f"wac/{code}.pmtiles"
             has_pmtiles = False
             pmtiles_size_mb = 0
             try:
@@ -240,7 +244,7 @@ def main():
                 s3.copy_object(
                     Bucket=R2_BUCKET,
                     CopySource={"Bucket": R2_BUCKET, "Key": pmtiles_src},
-                    Key=f"wac/{code}.pmtiles",
+                    Key=dst_pmtiles_key,
                     ContentType="application/x-pmtiles",
                     MetadataDirective="COPY"
                 )
@@ -261,20 +265,23 @@ def main():
             print("➔ 🗑️ ORIGEM LIMPA", flush=True)
 
             # D. Atualiza metadados acumulativos da produção oficial
-            if code in staging_metadata:
-                prod_metadata[code] = staging_metadata[code]
+            target_meta_code = staging_code if code in ("FULL", "WAC_BRASIL_FULL", "BRASIL_FULL") else code
+            if target_meta_code in staging_metadata:
+                prod_metadata[target_meta_code] = staging_metadata[target_meta_code]
+            elif code in staging_metadata:
+                prod_metadata[target_meta_code] = staging_metadata[code]
             else:
-                prod_metadata[code] = {}
+                prod_metadata[target_meta_code] = {}
 
-            prod_metadata[code]["r2_key"] = dst_key
-            prod_metadata[code]["r2_pmtiles_key"] = f"wac/{code}.pmtiles" if has_pmtiles else None
+            prod_metadata[target_meta_code]["r2_key"] = dst_key
+            prod_metadata[target_meta_code]["r2_pmtiles_key"] = dst_pmtiles_key if has_pmtiles else None
             if has_pmtiles:
-                prod_metadata[code]["pmtiles_size_mb"] = pmtiles_size_mb
-            prod_metadata[code]["size_bytes"] = size
-            prod_metadata[code]["size_mb"] = round(size / (1024 * 1024), 2)
-            prod_metadata[code]["promoted_at"] = datetime.now(timezone.utc).isoformat()
+                prod_metadata[target_meta_code]["pmtiles_size_mb"] = pmtiles_size_mb
+            prod_metadata[target_meta_code]["size_bytes"] = size
+            prod_metadata[target_meta_code]["size_mb"] = round(size / (1024 * 1024), 2)
+            prod_metadata[target_meta_code]["promoted_at"] = datetime.now(timezone.utc).isoformat()
 
-            promoted_codes.append(code)
+            promoted_codes.append(target_meta_code)
             promoted_count += 1
 
         except ClientError as e:
@@ -282,8 +289,73 @@ def main():
 
     print(f"\n✨ Total de cartas transferidas: {promoted_count} ({total_bytes / 1024 / 1024:.2f} MB)", flush=True)
 
-    # 2. Preservar o arquivo WAC_BRASIL_FULL.mbtiles conforme solicitado
-    print("\n🛡️ ETAPA 2: Preservando 'wac/WAC_BRASIL_FULL.mbtiles' intacto na produção.", flush=True)
+    # 2. Garantir promoção da Camada Única WAC_BRASIL_FULL se presente em staging
+    print("\n🛡️ ETAPA 2: Verificando status da Camada Única 'WAC_BRASIL_FULL'...", flush=True)
+    full_src = "wac/staging/WAC_BRASIL_FULL_HD.mbtiles"
+    full_pmtiles_src = "wac/staging/WAC_BRASIL_FULL.pmtiles"
+    has_full_staging = False
+    try:
+        fhead = s3.head_object(Bucket=R2_BUCKET, Key=full_src)
+        has_full_staging = True
+    except ClientError:
+        pass
+
+    if has_full_staging:
+        try:
+            print("  🔄 Promovendo Camada Única WAC_BRASIL_FULL para produção...", end=" ", flush=True)
+            s3.copy_object(
+                Bucket=R2_BUCKET,
+                CopySource={"Bucket": R2_BUCKET, "Key": full_src},
+                Key="wac/WAC_BRASIL_FULL_HD.mbtiles",
+                ContentType="application/vnd.sqlite3",
+                MetadataDirective="COPY"
+            )
+            s3.copy_object(
+                Bucket=R2_BUCKET,
+                CopySource={"Bucket": R2_BUCKET, "Key": full_src},
+                Key="wac/WAC_BRASIL_FULL.mbtiles",
+                ContentType="application/vnd.sqlite3",
+                MetadataDirective="COPY"
+            )
+            print("✓ MBTILES", end=" ", flush=True)
+
+            has_pm = False
+            pm_size_mb = 0
+            try:
+                pm_head = s3.head_object(Bucket=R2_BUCKET, Key=full_pmtiles_src)
+                pm_size_mb = round(pm_head.get("ContentLength", 0) / (1024 * 1024), 2)
+                s3.copy_object(
+                    Bucket=R2_BUCKET,
+                    CopySource={"Bucket": R2_BUCKET, "Key": full_pmtiles_src},
+                    Key="wac/WAC_BRASIL_FULL.pmtiles",
+                    ContentType="application/x-pmtiles",
+                    MetadataDirective="COPY"
+                )
+                has_pm = True
+                print("+ PMTILES", end=" ", flush=True)
+            except ClientError:
+                pass
+
+            # Expurgo do staging
+            del_keys = [{"Key": full_src}]
+            if has_pm:
+                del_keys.append({"Key": full_pmtiles_src})
+            s3.delete_objects(Bucket=R2_BUCKET, Delete={"Objects": del_keys})
+            print("➔ 🗑️ ORIGEM LIMPA", flush=True)
+
+            # Atualiza metadados
+            full_meta = staging_metadata.get("WAC_BRASIL_FULL", {})
+            full_meta["r2_key"] = "wac/WAC_BRASIL_FULL.mbtiles"
+            full_meta["r2_pmtiles_key"] = "wac/WAC_BRASIL_FULL.pmtiles" if has_pm else None
+            if has_pm:
+                full_meta["pmtiles_size_mb"] = pm_size_mb
+            full_meta["promoted_at"] = datetime.now(timezone.utc).isoformat()
+            prod_metadata["WAC_BRASIL_FULL"] = full_meta
+            if "WAC_BRASIL_FULL" not in promoted_codes:
+                promoted_codes.append("WAC_BRASIL_FULL")
+                promoted_count += 1
+        except Exception as e:
+            print(f"❌ Erro ao promover WAC_BRASIL_FULL: {e}", flush=True)
 
     # 3. Limpeza complementar de quarentena wac-test/ se existir
     print("\n🧹 ETAPA 3: Limpando resíduos legados de 'wac-test/'...", flush=True)
