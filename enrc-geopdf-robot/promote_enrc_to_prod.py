@@ -24,7 +24,7 @@ import boto3
 from botocore.exceptions import ClientError
 from datetime import datetime, timezone, timedelta
 
-ALL_ENRC_CODES = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "FULL"]
+ALL_ENRC_CODES = ["L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "FULL", "ENRCL_BRASIL_FULL"]
 
 R2_ENDPOINT = os.environ.get("R2_ENDPOINT") or os.environ.get("CLOUDFLARE_R2_ENDPOINT", "")
 R2_ACCESS_KEY = os.environ.get("R2_ACCESS_KEY") or os.environ.get("R2_ACCESS_KEY_ID") or os.environ.get("CLOUDFLARE_R2_ACCESS_KEY_ID", "")
@@ -248,7 +248,10 @@ def main():
 
     print("\n📦 ETAPA 1: Transferindo cartas (Cópia Server-Side + Limpeza de Origem)...", flush=True)
     for idx, code in enumerate(target_codes, start=1):
+        staging_code = "ENRCL_BRASIL_FULL" if code in ("FULL", "ENRCL_BRASIL_FULL") else code
         candidates = [
+            f"enrc/staging/{staging_code}_HD.mbtiles",
+            f"enrc/staging/{staging_code}.mbtiles",
             f"enrc/staging/{code}_HD.mbtiles",
             f"enrc/staging/{code}.mbtiles",
             f"enrc-l-test/{code}_HD.mbtiles"
@@ -265,7 +268,7 @@ def main():
             except ClientError:
                 continue
 
-        dst_key = f"enrc/{code}.mbtiles"
+        dst_key = f"enrc/{staging_code}.mbtiles" if code in ("FULL", "ENRCL_BRASIL_FULL") else f"enrc/{code}.mbtiles"
 
         if not src_key:
             # Se não existe em staging, verifica se já está na produção
@@ -291,14 +294,15 @@ def main():
             print("✓ MBTILES", end=" ", flush=True)
 
             # B. Copiar PMTiles para produção (se existir em staging)
-            pmtiles_src = f"enrc/staging/{code}.pmtiles"
+            pmtiles_src = f"enrc/staging/{staging_code}.pmtiles"
+            dst_pmtiles_key = f"enrc/{staging_code}.pmtiles" if code in ("FULL", "ENRCL_BRASIL_FULL") else f"enrc/{code}.pmtiles"
             has_pmtiles = False
             try:
                 s3.head_object(Bucket=R2_BUCKET, Key=pmtiles_src)
                 s3.copy_object(
                     Bucket=R2_BUCKET,
                     CopySource={"Bucket": R2_BUCKET, "Key": pmtiles_src},
-                    Key=f"enrc/{code}.pmtiles",
+                    Key=dst_pmtiles_key,
                     ContentType="application/x-pmtiles",
                     MetadataDirective="COPY"
                 )
