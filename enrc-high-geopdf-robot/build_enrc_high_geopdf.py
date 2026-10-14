@@ -813,8 +813,7 @@ def build_and_upload_full_mosaic(
     telemetry.log("Construindo mosaico virtual GDAL (VRT) com fusão das 9 folhas recortadas...")
     cmd_vrt = [
         gdalbuildvrt,
-        "-srcnodata", "0",
-        "-vrtnodata", "0",
+        "-addalpha",
         "-overwrite",
         vrt_path,
         *ordered_tifs
