@@ -268,14 +268,6 @@ def main():
                     ContentType="application/vnd.sqlite3",
                     MetadataDirective="COPY"
                 )
-                if staging_code == "WAC_BRASIL_FULL":
-                    s3.copy_object(
-                        Bucket=R2_BUCKET,
-                        CopySource={"Bucket": R2_BUCKET, "Key": src_mbtiles_key},
-                        Key="wac/WAC_BRASIL_FULL_HD.mbtiles",
-                        ContentType="application/vnd.sqlite3",
-                        MetadataDirective="COPY"
-                    )
                 keys_to_delete.append({"Key": src_mbtiles_key})
                 has_mbtiles = True
                 print("✓ MBTILES", end=" ", flush=True)

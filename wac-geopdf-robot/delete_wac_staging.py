@@ -67,6 +67,13 @@ def main():
             f"wac-test/{code}_HD.mbtiles"
         ]
         
+        # Expurgar também os MBTiles monolíticos obsoletos de produção se a Camada Única for alvo
+        if staging_code == "WAC_BRASIL_FULL":
+            keys_to_delete.extend([
+                "wac/WAC_BRASIL_FULL_HD.mbtiles",
+                "wac/WAC_BRASIL_FULL.mbtiles"
+            ])
+        
         existing_to_delete = []
         for k in keys_to_delete:
             try:
