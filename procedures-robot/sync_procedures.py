@@ -68,7 +68,7 @@ R2_BUCKET = os.environ.get('R2_BUCKET_NAME') or 'skyfpl-charts'
 R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID') or os.environ.get('CLOUDFLARE_R2_ACCESS_KEY_ID')
 R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY') or os.environ.get('CLOUDFLARE_R2_SECRET_ACCESS_KEY')
 R2_ENDPOINT = os.environ.get('R2_ENDPOINT') or os.environ.get('CLOUDFLARE_R2_ENDPOINT')
-R2_PUBLIC_BASE = (os.environ.get('R2_PUBLIC_URL') or 'https://pub-2259fa12e9b94fa889241fc9a770be80.r2.dev').rstrip('/')
+R2_PUBLIC_BASE = (os.environ.get('R2_PUBLIC_URL') or 'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev').rstrip('/')
 
 def get_r2_client():
     """Retorna cliente S3/boto3 configurado para Cloudflare R2, ou None se indisponível."""
