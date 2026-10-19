@@ -49,6 +49,7 @@ scratch/
 
 # Backups
 Backups/
+*.bak*
 
 # Geospatial Big Data & Robot Output
 *.mbtiles
@@ -63,3 +64,5 @@ enrc-geopdf-robot/*.webp
 enrc-geopdf-robot/*.txt
 *.aux.xml
 run_log.txt
+procedures-robot/cache/
+
