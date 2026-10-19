@@ -52,7 +52,7 @@ class AixmFpdamEngine:
     def compile_from_snapshot(self):
         """Lê o snapshot AIXM 5.1 e constrói o banco de procedimentos estruturados."""
         if not os.path.exists(self.zip_path):
-            print(f"❌ [FPDAM] Arquivo de snapshot não encontrado: {self.zip_path}")
+            # Fallback transparente para o modo GeoPDF Standard
             return False
 
         t0 = time.time()

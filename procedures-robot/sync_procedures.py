@@ -63,6 +63,51 @@ HEADERS_REST = {
 TABLE_PROCEDURES = f"{SUPABASE_URL}/rest/v1/procedures_fms"
 TABLE_CHARTS = f"{SUPABASE_URL}/rest/v1/charts_procedural"
 
+# ─── Configurações Cloudflare R2 (Área Exclusiva: procedures/fms/) ─────────────
+R2_BUCKET = os.environ.get('R2_BUCKET_NAME') or 'skyfpl-charts'
+R2_ACCESS_KEY_ID = os.environ.get('R2_ACCESS_KEY_ID') or os.environ.get('CLOUDFLARE_R2_ACCESS_KEY_ID')
+R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY') or os.environ.get('CLOUDFLARE_R2_SECRET_ACCESS_KEY')
+R2_ENDPOINT = os.environ.get('R2_ENDPOINT') or os.environ.get('CLOUDFLARE_R2_ENDPOINT')
+R2_PUBLIC_BASE = (os.environ.get('R2_PUBLIC_URL') or 'https://pub-2259fa12e9b94fa889241fc9a770be80.r2.dev').rstrip('/')
+
+def get_r2_client():
+    """Retorna cliente S3/boto3 configurado para Cloudflare R2, ou None se indisponível."""
+    if not (R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY and R2_ENDPOINT):
+        return None
+    try:
+        import boto3
+        from botocore.config import Config
+        config = Config(retries={'max_attempts': 3}, max_pool_connections=25)
+        return boto3.client(
+            's3',
+            endpoint_url=R2_ENDPOINT,
+            aws_access_key_id=R2_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+            region_name='auto',
+            config=config
+        )
+    except Exception as e:
+        log.warning(f"⚠️ Não foi possível instanciar cliente R2 boto3: {e}")
+        return None
+
+def upload_json_to_r2(s3, key: str, data_obj: any, max_age: int = 300) -> str:
+    """Envia payload JSON para o Cloudflare R2 com controle de cache."""
+    if not s3:
+        return ""
+    try:
+        body = json.dumps(data_obj, ensure_ascii=False, indent=2).encode('utf-8')
+        s3.put_object(
+            Bucket=R2_BUCKET,
+            Key=key,
+            Body=body,
+            ContentType='application/json; charset=utf-8',
+            CacheControl=f'public, max-age={max_age}'
+        )
+        return f"{R2_PUBLIC_BASE}/{key}"
+    except Exception as e:
+        log.warning(f"⚠️ Falha no upload para o R2 ({key}): {e}")
+        return ""
+
 STOP_WORDS = {
     'CHART', 'NOTES', 'SCALE', 'FINAL', 'DECEA', 'NORTH', 'SOUTH', 'INSTR', 'SPEED',
     'POINT', 'APPRO', 'CLIMB', 'TRANS', 'AIRAC', 'ELEV', 'COORD', 'AEROD', 'AERO',
@@ -1905,65 +1950,375 @@ def process_single_chart(chart, airac_cycle, dry_run=False):
                 if not r_post.ok:
                     log.warning(f"Erro ao salvar no Supabase ({icao} {nome} {trans_name}): {r_post.text[:120]}")
 
-        return payloads[0] if payloads else None
+        return payloads
     except Exception as e:
         log.error(f"Falha na carta {icao} {nome}: {e}")
-        return None
+        return []
+
+# ─── Gerenciador de Exportação R2 e Telemetria em Nuvem ───────────────────────
+
+def update_telemetry(s3, airac: str, status: str, current_chart: str, processed: int, total: int, elapsed_sec: float, recent_logs: list, stats: dict = None):
+    """Atualiza o arquivo de telemetria em tempo real no R2 para streaming no Dashboard Admin."""
+    if not s3:
+        return
+    pct = round((processed / total * 100), 1) if total > 0 else 0.0
+    payload = {
+        "status": status,  # "IDLE" | "RUNNING" | "COMPLETED" | "FAILED"
+        "airac_cycle": airac,
+        "processed_charts": processed,
+        "total_charts": total,
+        "percent": pct,
+        "elapsed_seconds": round(elapsed_sec, 1),
+        "current_chart": current_chart,
+        "logs": recent_logs[-25:],
+        "stats": stats or {},
+        "updated_at": datetime.now(timezone.utc).isoformat()
+    }
+    upload_json_to_r2(s3, "procedures/fms/telemetry.json", payload, max_age=5)
+
+def export_r2_artifacts(s3, airac: str, all_payloads: list) -> dict:
+    """Exporta o pacote master consolidado e manifesto de validação para o Cloudflare R2."""
+    if not s3 or not all_payloads:
+        log.warning("⚠️ R2 indisponível ou sem procedimentos extraídos para exportação.")
+        return {}
+
+    log.info("☁️ [R2] Iniciando exportação do pacote master consolidado para o Cloudflare R2...")
+    by_airport = {}
+    by_type = {"IAC": 0, "STAR": 0, "SID": 0}
+
+    for p in all_payloads:
+        icao = p.get('icao', 'UNKNOWN')
+        tipo = p.get('tipo', 'IAC')
+        by_airport.setdefault(icao, []).append(p)
+        by_type[tipo] = by_type.get(tipo, 0) + 1
+
+    # 1. Exporta Master JSON Consolidado do Ciclo Ativo (Consumido diretamente pelo App Mobile)
+    master_key = f"procedures/fms/{airac}/master_procedures_fms.json"
+    master_url = upload_json_to_r2(s3, master_key, {
+        "airac_cycle": airac,
+        "total_procedures": len(all_payloads),
+        "total_airports": len(by_airport),
+        "by_type": by_type,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "procedures": all_payloads
+    }, max_age=86400)
+    log.info(f"   📦 [R2] Master consolidado gravado: {master_key} ({len(all_payloads)} procedimentos)")
+
+    # 2. Exporta Manifesto Executivo
+    manifest_key = f"procedures/fms/{airac}/manifest.json"
+    manifest_data = {
+        "airac_cycle": airac,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "total_procedures": len(all_payloads),
+        "total_airports": len(by_airport),
+        "by_type": by_type,
+        "airports": sorted(list(by_airport.keys())),
+        "master_url": master_url
+    }
+    upload_json_to_r2(s3, manifest_key, manifest_data, max_age=86400)
+    log.info(f"   📜 [R2] Manifesto oficial gravado: {manifest_key}")
+
+    return manifest_data
+
+# ─── Módulo de Descoberta Autônoma e Soberana no DECEA ─────────────────────────
+
+def resolve_airac_cycle(cycle_arg: str = None) -> str:
+    """Calcula e retorna o ciclo AIRAC em vigor caso cycle_arg seja vazio ou 'AUTO'."""
+    if cycle_arg and cycle_arg.upper() not in ['AUTO', '', 'CURRENT']:
+        return cycle_arg.strip()
+
+    now = datetime.now(timezone.utc)
+    for cand_path in [
+        os.path.join(os.path.dirname(__file__), 'calendar.json'),
+        os.path.join(os.path.dirname(__file__), '..', 'proc-charts-robot', 'calendar.json')
+    ]:
+        if os.path.exists(cand_path):
+            try:
+                with open(cand_path, 'r', encoding='utf-8') as f:
+                    cal_data = json.load(f)
+                candidates = []
+                for y, cycles in cal_data.items():
+                    for c_id, d_str in cycles.items():
+                        d_obj = datetime.strptime(d_str, '%d/%m/%Y').replace(tzinfo=timezone.utc)
+                        candidates.append((d_obj, c_id))
+                candidates.sort(key=lambda x: x[0])
+                active = '2610'
+                for d_obj, c_id in candidates:
+                    if d_obj <= now:
+                        active = c_id
+                return active
+            except Exception:
+                pass
+
+    return '2610'
+
+def fetch_decea_charts_for_icao(icao: str, type_filter: str = 'ALL') -> list:
+    """Consulta diretamente o DECEA AISWEB para descobrir as cartas IFR ativas de um aeródromo."""
+    sanitized = icao.strip().upper()
+    url = f"https://aisweb.decea.mil.br/?i=aerodromos&codigo={sanitized}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+    }
+    charts = []
+    try:
+        res = requests.get(url, headers=headers, timeout=20)
+        if not res.ok:
+            return []
+        html = res.text
+        charts_match = re.search(r'<h4[^>]*>Cartas\s*[(]\d+[)]<\/h4>([\s\S]*?)(?:<h2|<h3|$)', html, re.IGNORECASE)
+        if not charts_match:
+            return []
+        section_html = charts_match.group(1)
+        category_blocks = re.split(r'<h4[^>]*>', section_html, flags=re.IGNORECASE)
+        allowed_types = ['IAC', 'STAR', 'SID'] if type_filter == 'ALL' else [type_filter.upper()]
+        for block in category_blocks[1:]:
+            cat_match = re.match(r'^([^<]+)<\/h4>([\s\S]*)$', block, re.IGNORECASE)
+            if not cat_match:
+                continue
+            tipo = cat_match.group(1).strip().upper()
+            if tipo not in allowed_types:
+                continue
+            block_content = cat_match.group(2)
+            link_regex = re.compile(r'<a[^>]*href=["\']([^"\']*download[^"\']*)["\'][^>]*>([\s\S]*?)<\/a>', re.IGNORECASE)
+            for m in link_regex.finditer(block_content):
+                link = m.group(1)
+                label = re.sub(r'<[^>]*>', ' ', m.group(2))
+                label = re.sub(r'\s+', ' ', label).strip()
+                if not link.startswith('http'):
+                    link = f"https://aisweb.decea.mil.br{'' if link.startswith('/') else '/'}{link}"
+                charts.append({
+                    'icao': sanitized,
+                    'tipo': tipo,
+                    'nome_procedimento': label,
+                    'url_decea': link,
+                    'link': link
+                })
+    except Exception as e:
+        log.debug(f"Aviso ao consultar DECEA para {sanitized}: {e}")
+    return charts
+
+def discover_charts_pipeline(filter_icaos: list, type_filter: str, workers: int, s3, airac: str, live_logs: list) -> list:
+    """Executa a Fase 1: Descoberta Autônoma e Soberana de Cartas no DECEA AISWEB."""
+    is_full_mesh = not filter_icaos or filter_icaos == ['ALL'] or 'ALL' in filter_icaos
+
+    if not is_full_mesh:
+        msg = f"🔍 [FASE 1] Iniciando Descoberta Oficial no DECEA para {len(filter_icaos)} aeródromo(s): {', '.join(filter_icaos)}..."
+        log.info(msg)
+        live_logs.append(msg)
+        update_telemetry(s3, airac, "RUNNING", "Descoberta DECEA...", 0, len(filter_icaos), 0.0, live_logs)
+
+        discovered = []
+        with ThreadPoolExecutor(max_workers=min(workers, max(1, len(filter_icaos)))) as exe:
+            futures = {exe.submit(fetch_decea_charts_for_icao, icao, type_filter): icao for icao in filter_icaos}
+            for fut in as_completed(futures):
+                try:
+                    c_list = fut.result()
+                    if c_list:
+                        discovered.extend(c_list)
+                except Exception as e:
+                    log.warning(f"Erro na descoberta de {futures[fut]}: {e}")
+
+        if discovered:
+            msg = f"🎯 [FASE 1] Descoberta DECEA concluída: {len(discovered)} cartas IFR identificadas."
+            log.info(msg)
+            live_logs.append(msg)
+            return discovered
+
+    # Modo Malha Completa: Varredura da rede nacional
+    msg = "🌍 [FASE 1] Modo Malha Completa Ativado: Obtendo malha de aeródromos para varredura soberana no DECEA..."
+    log.info(msg)
+    live_logs.append(msg)
+    update_telemetry(s3, airac, "RUNNING", "Varrendo Malha DECEA...", 0, 100, 0.0, live_logs)
+
+    candidate_icaos = []
+    try:
+        r = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json', timeout=25)
+        if r.ok:
+            nav_data = r.json().get('data', [])
+            candidate_icaos = sorted({p['icao'] for p in nav_data if p.get('icao') and p.get('type') in ['airport', 'heliport']})
+    except Exception as e:
+        log.warning(f"Aviso ao obter malha aérea do R2: {e}")
+
+    if not candidate_icaos:
+        try:
+            r_db = requests.get(f"{TABLE_CHARTS}?select=icao&limit=2000", headers=HEADERS_REST, timeout=15)
+            if r_db.ok:
+                candidate_icaos = sorted(set(x['icao'] for x in r_db.json() if x.get('icao')))
+        except Exception:
+            candidate_icaos = []
+
+    if not candidate_icaos:
+        log.error("❌ Não foi possível carregar a lista de aeródromos para varredura.")
+        return []
+
+    msg = f"📡 [FASE 1] Varrendo {len(candidate_icaos)} aeródromos no DECEA AISWEB com {workers * 2} threads simultâneas..."
+    log.info(msg)
+    live_logs.append(msg)
+
+    all_discovered = []
+    processed_count = 0
+    total_candidates = len(candidate_icaos)
+
+    with ThreadPoolExecutor(max_workers=max(workers * 2, 20)) as exe:
+        futures = {exe.submit(fetch_decea_charts_for_icao, icao, type_filter): icao for icao in candidate_icaos}
+        for fut in as_completed(futures):
+            processed_count += 1
+            try:
+                charts = fut.result()
+                if charts:
+                    all_discovered.extend(charts)
+            except Exception:
+                pass
+            if processed_count % 100 == 0 or processed_count == total_candidates:
+                msg_prog = f"🔍 [FASE 1] Descoberta DECEA: {processed_count}/{total_candidates} aeródromos verificados ({len(all_discovered)} cartas encontradas)"
+                log.info(msg_prog)
+                live_logs.append(msg_prog)
+                update_telemetry(s3, airac, "RUNNING", f"Descoberta: {processed_count}/{total_candidates}", processed_count, total_candidates, 0.0, live_logs)
+
+    if all_discovered:
+        unique_ad = len(set(c['icao'] for c in all_discovered))
+        msg_done = f"✅ [FASE 1] Descoberta Soberana DECEA concluída com sucesso: {unique_ad} aeródromos IFR e {len(all_discovered)} cartas em vigor."
+        log.info(msg_done)
+        live_logs.append(msg_done)
+        return all_discovered
+
+    # Salvaguarda de contingência: se o scraping DECEA falhou totalmente, usa charts_procedural com paginação
+    log.warning("⚠️ DECEA não retornou cartas na varredura. Ativando salvaguarda de contingência da base interna...")
+    db_charts = []
+    offset = 0
+    while True:
+        headers_page = {**HEADERS_REST, 'Range': f"{offset}-{offset+999}"}
+        q = f"select=*&tipo=in.(IAC,STAR,SID)" if type_filter == 'ALL' else f"select=*&tipo=eq.{type_filter}"
+        if not is_full_mesh and filter_icaos:
+            q += f"&icao=in.({','.join(filter_icaos)})"
+        r_page = requests.get(f"{TABLE_CHARTS}?{q}", headers=headers_page, timeout=30)
+        if not r_page.ok:
+            break
+        items = r_page.json()
+        if not items:
+            break
+        db_charts.extend(items)
+        if len(items) < 1000:
+            break
+        offset += 1000
+    return db_charts
 
 # ─── Orquestrador Principal ───────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="SkyFPL Procedures Robot 360")
-    parser.add_argument('--airac', type=str, default='2609', help='Ciclo AIRAC (Ex: 2609)')
-    parser.add_argument('--icao', type=str, default='', help='Filtro de ICAOs separados por vírgula (Ex: SBSV,SBGR)')
+    parser.add_argument('--airac', type=str, default='AUTO', help='Ciclo AIRAC (Ex: 2610 ou AUTO)')
+    parser.add_argument('--icao', type=str, default='', help='Filtro de ICAOs separados por vírgula (Ex: SBSV,SBGR ou ALL)')
+    parser.add_argument('--type', type=str, default='ALL', help='Filtro de tipo (ALL, IAC, STAR, SID)')
     parser.add_argument('--workers', type=int, default=10, help='Número de threads simultâneas')
     parser.add_argument('--dry-run', type=str, default='false', help='Modo simulação sem escrita')
     args = parser.parse_args()
 
-    airac = args.airac
+    airac = resolve_airac_cycle(args.airac)
     dry_run = args.dry_run.lower() == 'true'
     filter_icaos = [x.strip().upper() for x in args.icao.split(',') if x.strip()]
+    type_filter = args.type.upper()
+
+    # Inicializa cliente R2 se credenciais existirem
+    s3 = get_r2_client()
+    if s3:
+        log.info(f"☁️ Cloudflare R2 Conectado: Bucket '{R2_BUCKET}' pronto.")
+    else:
+        log.info("ℹ️ Cloudflare R2: Operando sem upload direto (credenciais R2 ausentes).")
 
     log.info("============================================================")
     log.info("🛰️ SKYFPL PROCEDURES ROBOT 360° (FULL SPECTRUM ENGINE)")
-    log.info(f"   Ciclo AIRAC: {airac} | Dry Run: {dry_run} | Workers: {args.workers}")
-    if filter_icaos:
+    log.info(f"   Ciclo AIRAC: {airac} (Resolvido automaticamente) | Dry Run: {dry_run} | Workers: {args.workers}")
+    if filter_icaos and filter_icaos != ['ALL']:
         log.info(f"   Filtro de Aeródromos: {', '.join(filter_icaos)}")
+    else:
+        log.info("   Modo de Extração: MALHA COMPLETA (Descoberta Soberana DECEA)")
+    if type_filter != 'ALL':
+        log.info(f"   Filtro de Tipo: {type_filter}")
     log.info("============================================================")
 
-    # Consulta cartas candidatas no Supabase
-    query_params = "select=*&tipo=in.(IAC,STAR,SID)"
-    if filter_icaos:
-        icaos_in = f"in.({','.join(filter_icaos)})"
-        query_params += f"&icao={icaos_in}"
+    # Telemetria inicial
+    live_logs = [
+        f"Iniciando esteira serverless FMS para o Ciclo AIRAC {airac}...",
+        f"Alvo: {'Malha Completa Brasil' if (not filter_icaos or filter_icaos == ['ALL']) else ', '.join(filter_icaos)}"
+    ]
+    update_telemetry(s3, airac, "RUNNING", "Iniciando Descoberta DECEA...", 0, 1, 0.0, live_logs)
 
-    res = requests.get(f"{TABLE_CHARTS}?{query_params}", headers=HEADERS_REST, timeout=30)
-    if not res.ok:
-        log.error(f"Erro ao consultar charts_procedural: {res.text}")
-        sys.exit(1)
-
-    charts = res.json()
-    log.info(f"📋 Total de cartas IFR encontradas para processamento: {len(charts)}")
+    # ── FASE 1: DESCOBERTA AUTÔNOMA NO DECEA AISWEB ───────────────────────────
+    charts = discover_charts_pipeline(filter_icaos, type_filter, args.workers, s3, airac, live_logs)
+    log.info(f"📋 Total de cartas IFR prontas para extração: {len(charts)}")
 
     if not charts:
         log.warning("Nenhuma carta encontrada para os filtros especificados.")
+        update_telemetry(s3, airac, "COMPLETED", "Nenhuma carta encontrada", 0, 0, 0.0, live_logs)
         sys.exit(0)
 
-    # Processamento Concorrente
     t0 = time.time()
-    success_count = 0
+    processed_count = 0
+    all_payloads = []
+
+    update_telemetry(s3, airac, "RUNNING", "Processando Cartas & Vetores...", 0, len(charts), 0.0, live_logs)
+
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
         futures = {executor.submit(process_single_chart, c, airac, dry_run): c for c in charts}
         for future in as_completed(futures):
-            res_item = future.result()
-            if res_item:
-                success_count += 1
-                log.info(f"✅ [{res_item['icao']}] {res_item['tipo']} {res_item['nome_procedimento']} | Legs: {len(res_item['legs_json'])} | Freqs: {len(res_item['frequencies_json'])}")
+            processed_count += 1
+            chart_c = futures[future]
+            chart_name = f"{chart_c.get('icao')} {chart_c.get('tipo')} {chart_c.get('nome_procedimento')}"
+            try:
+                res_items = future.result()
+                if res_items:
+                    all_payloads.extend(res_items)
+                    msg = f"✅ [{res_items[0]['icao']}] {res_items[0]['tipo']} {res_items[0]['nome_procedimento']} ({len(res_items)} transições)"
+                    log.info(msg)
+                    live_logs.append(msg)
+                else:
+                    msg = f"⚠️ [{chart_c.get('icao')}] {chart_c.get('nome_procedimento')} sem transições válidas"
+                    live_logs.append(msg)
+            except Exception as e:
+                msg = f"❌ [{chart_c.get('icao')}] Falha crítica: {e}"
+                log.error(msg)
+                live_logs.append(msg)
+
+            # Atualiza telemetria a cada 2 cartas processadas ou na última
+            if processed_count % 2 == 0 or processed_count == len(charts):
+                elapsed_now = time.time() - t0
+                unique_airports = len(set(p['icao'] for p in all_payloads))
+                stats_now = {
+                    "total_procedures": len(all_payloads),
+                    "airports_covered": unique_airports,
+                    "by_type": {
+                        "IAC": len([p for p in all_payloads if p.get('tipo') == 'IAC']),
+                        "STAR": len([p for p in all_payloads if p.get('tipo') == 'STAR']),
+                        "SID": len([p for p in all_payloads if p.get('tipo') == 'SID'])
+                    }
+                }
+                update_telemetry(s3, airac, "RUNNING", chart_name, processed_count, len(charts), elapsed_now, live_logs, stats_now)
 
     elapsed = round(time.time() - t0, 1)
+
+    # Exportação definitiva para o Cloudflare R2
+    if not dry_run and s3 and all_payloads:
+        export_r2_artifacts(s3, airac, all_payloads)
+
+    # Telemetria Final
+    final_stats = {
+        "total_procedures": len(all_payloads),
+        "airports_covered": len(set(p['icao'] for p in all_payloads)),
+        "by_type": {
+            "IAC": len([p for p in all_payloads if p.get('tipo') == 'IAC']),
+            "STAR": len([p for p in all_payloads if p.get('tipo') == 'STAR']),
+            "SID": len([p for p in all_payloads if p.get('tipo') == 'SID'])
+        }
+    }
+    update_telemetry(s3, airac, "COMPLETED", "Finalizado", len(charts), len(charts), elapsed, live_logs, final_stats)
+
     log.info("============================================================")
     log.info(f"🏁 Processamento Concluído em {elapsed}s!")
-    log.info(f"   Sucessos 360°: {success_count}/{len(charts)} ({round(success_count/len(charts)*100, 1) if charts else 0}%)")
+    log.info(f"   Total de Cartas Processadas: {processed_count}/{len(charts)}")
+    log.info(f"   Total de Procedimentos FMS / Transições: {len(all_payloads)}")
     log.info("============================================================")
 
 if __name__ == '__main__':
     main()
+

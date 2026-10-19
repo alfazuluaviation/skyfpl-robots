@@ -1,0 +1,111 @@
+name: 🤖 FMS Procedures Extractor — Extração Vetorial 360° ARINC 424
+
+on:
+  workflow_dispatch:
+    inputs:
+      icao_code:
+        description: 'ICAO específico (ex: SBSV,SBGR ou vazio para todos os aeródromos estratégicos)'
+        required: false
+        default: ''
+      airac_cycle:
+        description: 'Ciclo AIRAC alvo (ex: 2610 ou AUTO para ciclo vigente)'
+        required: false
+        default: 'AUTO'
+      type_filter:
+        description: 'Tipo de Procedimento a extrair'
+        required: false
+        default: 'ALL'
+        type: choice
+        options:
+          - 'ALL'
+          - 'IAC'
+          - 'STAR'
+          - 'SID'
+      workers:
+        description: 'Número de Workers paralelos (1 a 20)'
+        required: false
+        default: '10'
+      dry_run:
+        description: 'Modo Simulação (sem gravar no R2 ou Supabase)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+  # Executa aos domingos às 03:30 UTC para revalidação periódica
+  schedule:
+    - cron: '30 3 * * 0'
+
+jobs:
+  extract_fms_procedures:
+    name: Extrair Procedimentos IFR / FMS
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    concurrency:
+      group: fms-procedures-extraction
+      cancel-in-progress: true
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: procedures-robot/requirements.txt
+
+      - name: 📦 Instalar Dependências do Robô FMS
+        working-directory: procedures-robot
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🛰️ Executar Robô FMS 360° (PyMuPDF + CDFA + Holdings + R2)
+        working-directory: procedures-robot
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://gongoqjjpwphhttumdjm.supabase.co' }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME || 'skyfpl-charts' }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL || 'https://pub-2259fa12e9b94fa889241fc9a770be80.r2.dev' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.icao_code }}" ]; then
+            ARGS="$ARGS --icao ${{ github.event.inputs.icao_code }}"
+          fi
+          if [ -n "${{ github.event.inputs.airac_cycle }}" ]; then
+            ARGS="$ARGS --airac ${{ github.event.inputs.airac_cycle }}"
+          else
+            ARGS="$ARGS --airac AUTO"
+          fi
+          if [ -n "${{ github.event.inputs.type_filter }}" ]; then
+            ARGS="$ARGS --type ${{ github.event.inputs.type_filter }}"
+          fi
+          ARGS="$ARGS --workers ${{ github.event.inputs.workers || '10' }}"
+          ARGS="$ARGS --dry-run ${{ github.event.inputs.dry_run || 'false' }}"
+
+          echo "🚀 Executando: python sync_procedures.py $ARGS"
+          python sync_procedures.py $ARGS
+
+      - name: 🚨 Notificar Falha no Telegram (Fallback)
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -n "$TELEGRAM_BOT_TOKEN" ] && [ -n "$TELEGRAM_CHAT_ID" ]; then
+            curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+              -d "chat_id=${TELEGRAM_CHAT_ID}" \
+              -d "parse_mode=Markdown" \
+              -d "text=🚨 *FALHA CRÍTICA NO ROBÔ DE PROCEDIMENTOS FMS*%0A%0A*Runner:* GitHub Actions%0A*Workflow:* process-fms-procedures.yml%0A*Status:* Interrompido com erro." || true
+          fi
