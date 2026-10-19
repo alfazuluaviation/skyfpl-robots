@@ -194,15 +194,27 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
         if w[4].upper() == 'TRNS':
             tx, ty = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
             trns_indices.add(idx)
-            best_fix_w, best_fix_idx, min_d = None, None, 55.0
-            for j, w2 in enumerate(words):
-                if j == idx:
-                    continue
-                cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
-                if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
-                    d = math.hypot((w2[0] + w2[2]) / 2 - tx, (w2[1] + w2[3]) / 2 - ty)
-                    if d < min_d:
-                        min_d, best_fix_w, best_fix_idx = d, cand, j
+            best_fix_w, best_fix_idx = None, None
+            # 1. Tenta palavra imediatamente adjacente no fluxo de texto (distância <= 38 pt)
+            if idx + 1 < len(words):
+                cand_next = re.sub(r'[^A-Z0-9]', '', words[idx + 1][4].upper())
+                if FIX_REGEX.match(cand_next) and cand_next not in STAR_SID_STOP_WORDS:
+                    d_next = math.hypot((words[idx + 1][0] + words[idx + 1][2]) / 2 - tx, (words[idx + 1][1] + words[idx + 1][3]) / 2 - ty)
+                    if d_next <= 38.0:
+                        best_fix_w, best_fix_idx = cand_next, idx + 1
+
+            # 2. Busca espacial 2D por proximidade euclidiana (fixo não associado a outro TRNS)
+            if not best_fix_w:
+                min_d = 55.0
+                for j, w2 in enumerate(words):
+                    if j == idx or j in trns_indices:
+                        continue
+                    cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
+                    if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
+                        d = math.hypot((w2[0] + w2[2]) / 2 - tx, (w2[1] + w2[3]) / 2 - ty)
+                        if d < min_d:
+                            min_d, best_fix_w, best_fix_idx = d, cand, j
+
             if best_fix_w:
                 if best_fix_w not in trns_headers:
                     trns_headers.append(best_fix_w)
@@ -432,7 +444,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     px, py = ax + t * dx, ay + t * dy
                     perp = math.hypot(cx - px, cy - py)
                     crs_diff = abs((geom_angle - cw['val'] + 180) % 360 - 180)
-                    if perp < min_d_crs and crs_diff <= 70.0:
+                    if perp < min_d_crs and crs_diff <= 75.0:
                         min_d_crs = perp
                         best_crs = cw['val']
                         best_cw = cw
