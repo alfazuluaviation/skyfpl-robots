@@ -309,31 +309,37 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
         nearby.sort(key=lambda x: x["dist"])
 
         best_hp = None
+        # Coleta e ordena pares de rumos pela proximidade da reciprocidade exata de 180°
+        pairs = []
         for i, c1 in enumerate(nearby):
             for c2 in nearby[i + 1:]:
                 diff = abs(c1["val"] - c2["val"])
                 if diff in (179, 180, 181):
-                    inbound_cand = c1 if c1["dist"] < c2["dist"] else c2
-                    outbound_cand = c2 if c1["dist"] < c2["dist"] else c1
+                    recip_error = abs(diff - 180)
+                    pairs.append((recip_error, c1, c2))
+        pairs.sort(key=lambda p: (p[0], min(p[1]['dist'], p[2]['dist'])))
 
-                    dx_track = fx - inbound_cand["pos"][0]
-                    dy_track = fy - inbound_cand["pos"][1]
-                    dx_out = outbound_cand["pos"][0] - inbound_cand["pos"][0]
-                    dy_out = outbound_cand["pos"][1] - inbound_cand["pos"][1]
-                    cp = dx_track * dy_out - dy_track * dx_out
-                    turn_dir = "RIGHT" if cp >= 0 else "LEFT"
+        for recip_error, c1, c2 in pairs:
+            inbound_cand = c1 if c1["dist"] < c2["dist"] else c2
+            outbound_cand = c2 if c1["dist"] < c2["dist"] else c1
 
-                    best_hp = {
-                        "fix": fix_name,
-                        "inbound_course": inbound_cand["val"],
-                        "outbound_course": outbound_cand["val"],
-                        "turn_direction": turn_dir,
-                        "is_standard": (turn_dir == "RIGHT"),
-                        "type": "HM"
-                    }
-                    break
-            if best_hp:
-                break
+            dx_track = fx - inbound_cand["pos"][0]
+            dy_track = fy - inbound_cand["pos"][1]
+            dx_out = outbound_cand["pos"][0] - inbound_cand["pos"][0]
+            dy_out = outbound_cand["pos"][1] - inbound_cand["pos"][1]
+            # Em coordenadas de tela PDF (onde Y cresce para baixo), inverte Y para produto vetorial cartesiano padrão
+            cp_cartesian = -(dx_track * dy_out - dy_track * dx_out)
+            turn_dir = "RIGHT" if cp_cartesian >= 0 else "LEFT"
+
+            best_hp = {
+                "fix": fix_name,
+                "inbound_course": inbound_cand["val"],
+                "outbound_course": outbound_cand["val"],
+                "turn_direction": turn_dir,
+                "is_standard": (turn_dir == "RIGHT"),
+                "type": "HM"
+            }
+            break
         if best_hp:
             holding_patterns.append(best_hp)
             seen_hold_fixes.add(fix_name)
@@ -392,7 +398,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
             else:
                 geom_angle = (math.degrees(math.atan2(dx, -dy)) + var_deg) % 360
 
-            best_crs, min_d_crs, best_cw = None, 30.0, None
+            best_crs, min_d_crs, best_cw = None, 50.0, None
             t_min = -0.60 if a_name in trns_headers else -0.15
             t_max = 1.25 if a_name in trns_headers else 1.15
             for cw in course_words:
@@ -435,7 +441,38 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
 
     # 9. Reconstrução dos Caminhos de cada Transição
     transitions_dict = {}
-    entry_fixes = trns_headers if trns_headers else [k for k in waypoints.keys() if k != term_fix][:1]
+
+    # Identifica o fixo nominal primário da carta (ex: "AKPAS" de "RNAV AKPAS 1B RWY 28")
+    primary_name_fix = None
+    m_name = re.search(r'\b([A-Z]{4,5})\s+\d[A-Z]\b', nome_carta)
+    if m_name and m_name.group(1).upper() in waypoints:
+        primary_name_fix = m_name.group(1).upper()
+
+    # Regra de Engenharia Aeronáutica (ARINC 424 / DECEA):
+    # 1. Se houver tags explícitas TRNS <NOME> na carta: gera transições para cada uma
+    # 2. Se houver múltiplos nós raiz com In-Degree = 0 convergindo para uma junção: gera transições confluentes
+    # 3. Caso contrário: STAR de Tronco Único (COMMON ROUTE).
+    #    Possui apenas UMA rota contínua iniciando no nó com In-Degree = 0 (ex: AKPAS).
+    #    Fixos intermediários (como XOLUT com In-Degree=1 e Out-Degree=1) são pernas TF com holding associada,
+    #    NUNCA transições fantasmas nem início de perna IF!
+    targets = {e['to'] for e in edges}
+    sources = [e['from'] for e in edges if e['from'] not in targets and e['from'] in adj]
+
+    is_common_route_only = False
+    if trns_headers:
+        entry_fixes = [th for th in trns_headers if th in adj]
+    elif len(sources) > 1:
+        entry_fixes = sources
+    else:
+        is_common_route_only = True
+        if primary_name_fix and primary_name_fix in sources:
+            entry_fixes = [primary_name_fix]
+        elif sources:
+            entry_fixes = [sources[0]]
+        elif primary_name_fix and primary_name_fix in adj:
+            entry_fixes = [primary_name_fix]
+        else:
+            entry_fixes = [k for k in waypoints.keys() if k != term_fix and k in adj][:1]
 
     for entry in entry_fixes:
         curr = entry
@@ -463,7 +500,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                 'seq': seq,
                 'type': 'IF',
                 'fix': first_w,
-                'role': 'TRANSITION_ENTRY',
+                'role': 'STAR_ENTRY',
                 'fly_over': False,
                 'altitude': first_alt.get('text'),
                 'altitude_min': first_alt.get('alt_min'),
@@ -482,7 +519,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     'seq': seq,
                     'type': 'TF',
                     'fix': w_name,
-                    'role': 'IAF' if is_last else None,
+                    'role': 'IAF' if is_last else 'WAYPOINT',
                     'fly_over': False,
                     'course': edge_info['course'],
                     'distance_nm': edge_info.get('dist'),
@@ -493,7 +530,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                 })
                 seq += 10
 
-            trans_key = f"TRNS {entry}" if not entry.startswith("TRNS") else entry
+            trans_key = "COMMON" if is_common_route_only else (f"TRNS {entry}" if not entry.startswith("TRNS") else entry)
             transitions_dict[trans_key] = legs
 
     # Perna primária de referência (primeira transição ou tronco)
