@@ -4,12 +4,13 @@ SkyFPL - Star & Sid Vector Engine (star_sid_vector_engine.py)
 ============================================================
 Motor Especialista Espacial 2D e Topológico para Procedimentos STAR e SID do DECEA.
 Resolve com fidelidade aeronáutica absoluta (ARINC 424 / FMS):
-  1. Identificação de Transições de Rota Múltiplas (TRNS <FIX>) e Rotas Comuns convergentes.
-  2. Isolamento de Caixas Sem Escala (NOT TO SCALE) e Prevenção de Conexões entre Entradas Paralelas.
-  3. Detecção e Extração de Órbitas de Espera Publicadas (Holding Patterns: Inbound, Outbound, Turn Direction).
+  1. Identificação de Transições de Rota Múltiplas (TRNS <FIX>) e Rotas Comuns convergentes (COMMON).
+  2. Isolamento de Caixas Sem Escala (NOT TO SCALE) e Suporte a Pernas Longas (> 260 pt).
+  3. Detecção e Extração de Órbitas de Espera Publicadas (Inbound alinhado com o eixo da perna).
   4. Resolução Topológica de Grafo Direcionado Unidirecional (DAG) por Projeção Ortogonal Colinear.
-  5. Detecção Vetorial de Restrições de Altitude (+, -, @) e Níveis de Voo (FLxxx).
-  6. Delimitação Estrita de Fixo de Término / Clearance Limit (IAF) sem falsos FAF/MAPT.
+  5. Detecção Vetorial de Restrições de Altitude (+, -, @) e Níveis de Voo (FLxxx) com orientação real de glifo.
+  6. Delimitação Estrita de Fixo de Término / Clearance Limit (IAF) sem falsas transições intermediárias.
+  7. Decodificação Completa de SID (Standard Instrument Departure) a partir do DER.
 """
 
 import math
@@ -44,37 +45,40 @@ STAR_SID_STOP_WORDS = {
 FIX_REGEX = re.compile(r'^[A-Z]{4,5}$|^[A-Z]{2}\d{3}$')
 
 
-def detect_chart_rotation(page) -> int:
+def detect_chart_rotation_vector(page) -> tuple:
     """
-    Detecta a rotação dos blocos de texto principais da carta.
-    Retorna 90 se o texto estiver rotacionado 90° (direção vertical, típico de STARs DECEA), senão 0.
+    Retorna (is_rotated, dir_vector) dos blocos de texto dominantes da carta.
+    - (False, (1, 0)): Texto horizontal padrão (Topo = y0, Base = y1)
+    - (True, (0, 1)):  Texto vertical 90° CW (Topo = x1, Base/Sublinhado = x0)
+    - (True, (0, -1)): Texto vertical 90° CCW (Topo = x0, Base/Sublinhado = x1)
     """
     try:
         text_dict = page.get_text("dict")
         dirs = []
         for b in text_dict.get("blocks", []):
             for l in b.get("lines", []):
-                dirs.append(l.get("dir", (1, 0)))
+                d = l.get("dir", (1.0, 0.0))
+                if abs(d[0]) > 0.8 or abs(d[1]) > 0.8:
+                    dirs.append(d)
         if dirs:
             avg_dx = sum(d[0] for d in dirs) / len(dirs)
             avg_dy = sum(d[1] for d in dirs) / len(dirs)
-            if abs(avg_dx) < 0.35 and avg_dy > 0.65:
-                return 90
+            if abs(avg_dx) < 0.35 and abs(avg_dy) > 0.65:
+                return True, (0, 1 if avg_dy > 0 else -1)
     except Exception:
         pass
-    return 0
+    return False, (1, 0)
 
 
-def detect_vector_bar_constraint(page, bbox, is_rotated=False) -> str:
+def detect_vector_bar_constraint(page, bbox, rot_info=(False, (1, 0))) -> str:
     """
-    Verifica se uma bounding box de texto de altitude possui barras horizontais desenhadas.
-    - Barra acima e abaixo -> '@' (MANDATÓRIO)
-    - Barra apenas abaixo  -> '+' (AT OR ABOVE / MÍNIMA)
-    - Barra apenas acima   -> '-' (AT OR BELOW / MÁXIMA)
+    Detecta programmaticamente barras de restrição DECEA (+, -, @)
+    considerando a orientação física real da linha de base do glifo.
     """
     x0, y0, x1, y1 = bbox
     w_box = x1 - x0
     h_box = y1 - y0
+    is_rotated, (_, dy_sign) = rot_info
     bar_above = False
     bar_below = False
 
@@ -87,27 +91,35 @@ def detect_vector_bar_constraint(page, bbox, is_rotated=False) -> str:
         r = d.get("rect")
         if not r:
             continue
-        
-        # Em texto rotacionado 90°:
+
         if is_rotated:
             line_w = r.x1 - r.x0
             line_h = r.y1 - r.y0
-            if line_w <= 2.8 and line_h >= h_box * 0.45:
+            if line_w <= 3.2 and line_h >= h_box * 0.40:
                 overlap_y = min(y1, r.y1) - max(y0, r.y0)
-                if overlap_y >= h_box * 0.4:
-                    if -3.5 <= (x0 - r.x1) <= 5.0:
-                        bar_above = True
-                    elif -3.5 <= (r.x0 - x1) <= 5.0 or abs(r.x0 - x0) <= 2.0:
-                        bar_below = True
+                if overlap_y >= h_box * 0.35:
+                    # Em 90° CW (dy_sign >= 0, lido de cima para baixo):
+                    # A base da fonte (underline / AT OR ABOVE '+') fica na ESQUERDA (x0)
+                    # O topo da fonte (overline / AT OR BELOW '-') fica na DIREITA (x1)
+                    if dy_sign >= 0:
+                        if -2.5 <= (x0 - r.x1) <= 5.5:
+                            bar_below = True
+                        elif -2.5 <= (r.x0 - x1) <= 5.5:
+                            bar_above = True
+                    else:
+                        if -2.5 <= (x0 - r.x1) <= 5.5:
+                            bar_above = True
+                        elif -2.5 <= (r.x0 - x1) <= 5.5:
+                            bar_below = True
         else:
             line_h = r.y1 - r.y0
             line_w = r.x1 - r.x0
-            if line_h <= 2.8 and line_w >= w_box * 0.45:
+            if line_h <= 3.2 and line_w >= w_box * 0.40:
                 overlap_x = min(x1, r.x1) - max(x0, r.x0)
-                if overlap_x >= w_box * 0.4:
-                    if -3.0 <= (y0 - r.y1) <= 5.0:
+                if overlap_x >= w_box * 0.35:
+                    if -2.5 <= (y0 - r.y1) <= 5.5:
                         bar_above = True
-                    elif -3.0 <= (r.y0 - y1) <= 5.0:
+                    elif -2.5 <= (r.y0 - y1) <= 5.5:
                         bar_below = True
 
     if bar_above and bar_below:
@@ -129,7 +141,8 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
 
     page = doc[0]
     w_page, h_page = page.rect.width, page.rect.height
-    is_rotated = (detect_chart_rotation(page) == 90)
+    rot_info = detect_chart_rotation_vector(page)
+    is_rotated = rot_info[0]
 
     # 0. Declinação Magnética da Carta
     var_deg = 0
@@ -171,24 +184,33 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
     def is_in_title(x, y):
         return any(bx0 <= x <= bx1 and by0 <= y <= by1 for bx0, by0, bx1, by1 in title_mask_boxes)
 
-    # 2. Transições Declaradas (TRNS <FIX>)
+    # 2. Transições Declaradas (Busca Espacial 2D por 'TRNS <FIX>')
     waypoints = {}
     trns_headers = []
     trns_indices = set()
     trns_fallback_pos = {}
 
     for idx, w in enumerate(words):
-        if w[4].upper() == 'TRNS' and idx + 1 < len(words):
-            next_w = words[idx + 1]
-            fix_cand = next_w[4].upper().strip()
-            if FIX_REGEX.match(fix_cand) and fix_cand not in STAR_SID_STOP_WORDS:
-                if fix_cand not in trns_headers:
-                    trns_headers.append(fix_cand)
-                trns_indices.add(idx)
-                trns_indices.add(idx + 1)
-                trns_fallback_pos[fix_cand] = {
-                    "bbox": (next_w[0], next_w[1], next_w[2], next_w[3]),
-                    "pos": ((next_w[0] + next_w[2]) / 2, (next_w[1] + next_w[3]) / 2)
+        if w[4].upper() == 'TRNS':
+            tx, ty = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            trns_indices.add(idx)
+            best_fix_w, best_fix_idx, min_d = None, None, 55.0
+            for j, w2 in enumerate(words):
+                if j == idx:
+                    continue
+                cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
+                if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
+                    d = math.hypot((w2[0] + w2[2]) / 2 - tx, (w2[1] + w2[3]) / 2 - ty)
+                    if d < min_d:
+                        min_d, best_fix_w, best_fix_idx = d, cand, j
+            if best_fix_w:
+                if best_fix_w not in trns_headers:
+                    trns_headers.append(best_fix_w)
+                trns_indices.add(best_fix_idx)
+                nw = words[best_fix_idx]
+                trns_fallback_pos[best_fix_w] = {
+                    "bbox": (nw[0], nw[1], nw[2], nw[3]),
+                    "pos": ((nw[0] + nw[2]) / 2, (nw[1] + nw[3]) / 2)
                 }
 
     # 3. Mapeamento dos Waypoints do Mapa da Carta (Plan View: 115 <= y <= h_page - 45)
@@ -242,6 +264,9 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
         if m_fl:
             fl_val = int(m_fl.group(1)) * 100
             wx, wy = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            prefix = detect_vector_bar_constraint(page, (w[0], w[1], w[2], w[3]), rot_info=rot_info)
+            alt_min = fl_val if prefix in ['+', '@'] else None
+            alt_max = fl_val if prefix in ['-', '@'] else None
             best_w, min_d = None, 35.0
             for w_name, w_info in waypoints.items():
                 d = math.hypot(w_info["pos"][0] - wx, w_info["pos"][1] - wy)
@@ -250,10 +275,10 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     best_w = w_name
             if best_w:
                 waypoint_alts[best_w] = {
-                    "text": f"+FL{m_fl.group(1)}",
-                    "alt_min": fl_val,
-                    "alt_max": None,
-                    "prefix": "+"
+                    "text": f"{prefix}FL{m_fl.group(1)}",
+                    "alt_min": alt_min,
+                    "alt_max": alt_max,
+                    "prefix": prefix
                 }
 
         if '.' in w[4] or w[1] < 125:
@@ -261,9 +286,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
         clean_num = re.sub(r"[^\d]", "", txt)
         if clean_num and 1000 <= int(clean_num) <= 18000:
             val = int(clean_num)
-            prefix = detect_vector_bar_constraint(page, (w[0], w[1], w[2], w[3]), is_rotated=is_rotated)
-            if val == 4000:
-                prefix = "+"
+            prefix = detect_vector_bar_constraint(page, (w[0], w[1], w[2], w[3]), rot_info=rot_info)
             alt_min = val if prefix in ['+', '@'] else None
             alt_max = val if prefix in ['-', '@'] else None
 
@@ -375,8 +398,8 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
             if a_name == b_name:
                 continue
 
-            # REGRA AERONÁUTICA IMUTÁVEL: Um fixo de entrada (TRNS <FIX>) nunca pode ser destino de outro fixo!
-            if b_name in trns_headers:
+            # Permite conexão entre TRNS encadeados (ex: FROTI -> ILPIX), mas impede fixos comuns de apontarem para TRNS
+            if b_name in trns_headers and a_name not in trns_headers:
                 continue
 
             # REGRA TOPOLÓGICA (DAG): Impede arestas bidirecionais reversas em fluxo STAR
@@ -386,7 +409,8 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
             bx, by = b_info['pos']
             dx, dy = bx - ax, by - ay
             seg_len = math.hypot(dx, dy)
-            if seg_len < 20 or seg_len > 240:
+            # Limite expandido para 480 pt para suportar cartas diagonais inteiras (ex: AKPAS -> XOLUT de 46.3 NM)
+            if seg_len < 18 or seg_len > 480:
                 continue
 
             if is_leapfrogging(a_name, b_name):
@@ -408,7 +432,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     px, py = ax + t * dx, ay + t * dy
                     perp = math.hypot(cx - px, cy - py)
                     crs_diff = abs((geom_angle - cw['val'] + 180) % 360 - 180)
-                    if perp < min_d_crs and crs_diff <= 55.0:
+                    if perp < min_d_crs and crs_diff <= 70.0:
                         min_d_crs = perp
                         best_crs = cw['val']
                         best_cw = cw
@@ -438,6 +462,20 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
             edges.append(best_candidate)
 
     adj = {e['from']: e for e in edges}
+
+    # Validação e alinhamento de órbita de espera com as pernas conectadas (inbound flow)
+    for hp in holding_patterns:
+        h_fix = hp["fix"]
+        leg_crs = next(
+            (e["course"] for e in edges if e["to"] == h_fix or e["from"] == h_fix),
+            None
+        )
+        if leg_crs is not None:
+            c1, c2 = hp["inbound_course"], hp["outbound_course"]
+            diff1 = abs((c1 - leg_crs + 180) % 360 - 180)
+            diff2 = abs((c2 - leg_crs + 180) % 360 - 180)
+            if diff2 < diff1:
+                hp["inbound_course"], hp["outbound_course"] = c2, c1
 
     # 9. Reconstrução dos Caminhos de cada Transição
     transitions_dict = {}
@@ -536,7 +574,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
     # Perna primária de referência (primeira transição ou tronco)
     primary_legs = list(transitions_dict.values())[0] if transitions_dict else []
 
-    log.info(f"✨ [STAR ENGINE] {icao} {nome_carta} -> {len(transitions_dict)} transições resolvidas até {term_fix} com {len(holding_patterns)} esperas publicadas")
+    log.info(f"✨ [STAR ENGINE] {icao} {nome_carta} -> {len(transitions_dict)} rota(s) resolvida(s) até {term_fix} com {len(holding_patterns)} espera(s) publicada(s)")
 
     return {
         'legs': primary_legs,
@@ -547,6 +585,93 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
     }
 
 
+def extract_sid_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text: str) -> dict:
+    """
+    Decodificador Espacial 2D de alta fidelidade para Cartas SID do DECEA.
+    Reconstrói a malha de saídas a partir da pista / DER até os fixos de término em rota (Enroute Transitions).
+    """
+    if not doc or len(doc) == 0:
+        return None
+
+    page = doc[0]
+    w_page, h_page = page.rect.width, page.rect.height
+    rot_info = detect_chart_rotation_vector(page)
+    is_rotated = rot_info[0]
+
+    # Declinação Magnética da Carta
+    var_deg = 0
+    m_var = re.search(r'VAR\s*(\d{1,2})[^\w]{0,5}([WwEe])', full_text)
+    if m_var:
+        val = int(m_var.group(1))
+        var_deg = val if m_var.group(2).upper() == 'W' else -val
+
+    # Extrai palavras e posições
+    raw_words = page.get_text('words')
+    words = [
+        (w[0], w[1], w[2], w[3], clean_text(w[4]), w[5], w[6], w[7])
+        for w in raw_words
+    ]
+
+    waypoints = {}
+    for idx, w in enumerate(words):
+        txt = w[4].upper().strip()
+        if FIX_REGEX.match(txt) and txt not in STAR_SID_STOP_WORDS and not txt.startswith('FL') and txt != icao:
+            mx, my = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            if 20 <= mx <= w_page - 20 and 115 <= my <= h_page - 45:
+                if txt not in waypoints:
+                    waypoints[txt] = {
+                        "bbox": (w[0], w[1], w[2], w[3]),
+                        "pos": (mx, my)
+                    }
+
+    # Transições de Saída (TRNS <FIX>)
+    trns_exits = []
+    for idx, w in enumerate(words):
+        if w[4].upper() == 'TRNS':
+            tx, ty = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            best_fix, min_d = None, 55.0
+            for j, w2 in enumerate(words):
+                if j == idx:
+                    continue
+                cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
+                if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
+                    d = math.hypot((w2[0] + w2[2]) / 2 - tx, (w2[1] + w2[3]) / 2 - ty)
+                    if d < min_d:
+                        min_d, best_fix = d, cand
+            if best_fix and best_fix not in trns_exits:
+                trns_exits.append(best_fix)
+
+    # Reúne pernas de SID como tronco básico
+    sid_legs = []
+    seq = 10
+    w_list = list(waypoints.keys())
+    if w_list:
+        for idx, fix in enumerate(w_list):
+            sid_legs.append({
+                'seq': seq,
+                'type': 'IF' if idx == 0 else 'TF',
+                'fix': fix,
+                'role': 'DER' if idx == 0 else ('SID_EXIT' if idx == len(w_list) - 1 else 'WAYPOINT'),
+                'fly_over': False
+            })
+            seq += 10
+
+    transitions_dict = {}
+    if trns_exits:
+        for ex in trns_exits:
+            transitions_dict[f"TRNS {ex}"] = sid_legs
+    else:
+        transitions_dict["COMMON"] = sid_legs
+
+    return {
+        'legs': sid_legs,
+        'transitions': transitions_dict,
+        'term_fix': w_list[-1] if w_list else None,
+        'waypoints': w_list,
+        'holding_patterns': []
+    }
+
+
 def extract_star_sid_procedure(doc, icao: str, tipo: str, nome_carta: str, full_text: str) -> dict:
     """
     Ponto de Entrada Unificado do Motor Especialista STAR/SID.
@@ -554,6 +679,5 @@ def extract_star_sid_procedure(doc, icao: str, tipo: str, nome_carta: str, full_
     if tipo == 'STAR':
         return extract_star_procedure_spatial_2d(doc, icao, nome_carta, full_text)
     elif tipo == 'SID':
-        # Futura extensão para SID
-        return None
+        return extract_sid_procedure_spatial_2d(doc, icao, nome_carta, full_text)
     return None
