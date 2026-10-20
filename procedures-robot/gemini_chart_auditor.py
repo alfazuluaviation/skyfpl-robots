@@ -16,27 +16,55 @@ Executa:
 """
 
 import os
+import re
 import json
 import logging
+import threading
+import time
 
 log = logging.getLogger('GeminiAuditor')
+
+_key_lock = threading.Lock()
+_key_counter = 0
+
+def get_gemini_api_keys() -> list:
+    """Recupera lista de chaves de API a partir de variáveis de ambiente."""
+    raw = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
+    keys = [k.strip() for k in re.split(r'[,;\s]+', raw) if k.strip()]
+    
+    idx = 1
+    while True:
+        k = os.environ.get(f"GEMINI_API_KEY_{idx}")
+        if not k:
+            break
+        k_clean = k.strip()
+        if k_clean and k_clean not in keys:
+            keys.append(k_clean)
+        idx += 1
+    return keys
 
 def audit_and_enrich_chart_with_gemini(pdf_bytes: bytes, icao: str, tipo: str, nome_carta: str, transitions_dict: dict, extracted_base: dict) -> tuple:
     """
     Submete a carta PDF e o rascunho de pernas à auditoria multimodal do Gemini.
     Retorna (transitions_dict_auditado, extracted_base_enriquecido).
-    Em caso de ausência de chave ou falha de rede, retorna os dados originais com segurança.
+    Alterna chaves de API em Round-Robin com failover automático em caso de Rate Limit (429).
     """
-    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        log.info(f"ℹ️ [AI AUDITOR] GEMINI_API_KEY não configurada. Usando motor determinístico padrão para {icao} {nome_carta}.")
+    keys = get_gemini_api_keys()
+    if not keys:
+        log.info(f"ℹ️ [AI AUDITOR] Nenhuma chave Gemini configurada. Usando motor determinístico padrão para {icao} {nome_carta}.")
         return transitions_dict, extracted_base
+
+    global _key_counter
+    with _key_lock:
+        start_key_idx = _key_counter % len(keys)
+        _key_counter += 1
+
+    # Ordena as chaves começando pela da vez no Round-Robin, seguida pelas reservas
+    ordered_keys = [keys[(start_key_idx + i) % len(keys)] for i in range(len(keys))]
 
     try:
         from google import genai
         from google.genai import types
-
-        client = genai.Client(api_key=api_key)
 
         # Prepara resumo compacto das transições para auditoria
         draft_summary = {}
@@ -126,8 +154,6 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
 """
 
         model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.8-flash'
-        log.info(f"🤖 [AI AUDITOR] Enviando PDF real de {icao} {nome_carta} para auditoria multimodal Gemini ({model_name})...")
-
         models_to_try = [model_name]
         for fallback in ['gemini-3.8-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']:
             if fallback not in models_to_try:
@@ -135,31 +161,50 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
 
         response = None
         last_err = None
-        for mod in models_to_try:
-            try:
-                response = client.models.generate_content(
-                    model=mod,
-                    contents=[
-                        types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                        prompt
-                    ],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.0
-                    ),
-                )
-                if response and response.text:
-                    break
-            except Exception as call_err:
-                last_err = call_err
-                if "404" in str(call_err) or "NOT_FOUND" in str(call_err) or "not found" in str(call_err).lower():
-                    log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
-                    continue
-                else:
-                    raise call_err
+
+        for k_idx, current_key in enumerate(ordered_keys):
+            client = genai.Client(api_key=current_key)
+            masked_key = f"...{current_key[-6:]}" if len(current_key) > 6 else "***"
+            log.info(f"🤖 [AI AUDITOR] Auditoria de {icao} {nome_carta} via Gemini ({model_name}) [Chave #{k_idx + 1}/{len(ordered_keys)}: {masked_key}]...")
+
+            rate_limit_hit = False
+            for mod in models_to_try:
+                try:
+                    response = client.models.generate_content(
+                        model=mod,
+                        contents=[
+                            types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                            prompt
+                        ],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.0
+                        ),
+                    )
+                    if response and response.text:
+                        break
+                except Exception as call_err:
+                    last_err = call_err
+                    err_str = str(call_err).lower()
+                    if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "rate limit" in err_str:
+                        log.warning(f"  ⚠️ [AI AUDITOR] Chave {masked_key} atingiu Rate Limit / Cota (429). Alternando para próxima chave...")
+                        rate_limit_hit = True
+                        break
+                    elif "404" in err_str or "not_found" in err_str or "not found" in err_str:
+                        log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
+                        continue
+                    else:
+                        raise call_err
+
+            if response and response.text:
+                break
+
+            if rate_limit_hit and k_idx < len(ordered_keys) - 1:
+                # Tenta a próxima chave imediatamente
+                continue
 
         if not response or not response.text:
-            log.warning(f"⚠️ [AI AUDITOR] Resposta vazia ou indisponível da IA para {icao} {nome_carta}. Mantendo dados brutos.")
+            log.warning(f"⚠️ [AI AUDITOR] Resposta vazia ou cota esgotada em todas as chaves para {icao} {nome_carta}. Mantendo dados brutos.")
             return transitions_dict, extracted_base
 
         audited_data = json.loads(response.text)
