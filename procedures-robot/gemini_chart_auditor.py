@@ -123,21 +123,41 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
 }}
 """
 
-        log.info(f"🤖 [AI AUDITOR] Enviando PDF real de {icao} {nome_carta} para auditoria multimodal Gemini 2.5 Flash...")
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[
-                types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                prompt
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            ),
-        )
+        model_name = os.environ.get("GEMINI_MODEL") or 'gemini-3.8-flash'
+        log.info(f"🤖 [AI AUDITOR] Enviando PDF real de {icao} {nome_carta} para auditoria multimodal Gemini ({model_name})...")
+
+        models_to_try = [model_name]
+        for fallback in ['gemini-3.8-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']:
+            if fallback not in models_to_try:
+                models_to_try.append(fallback)
+
+        response = None
+        last_err = None
+        for mod in models_to_try:
+            try:
+                response = client.models.generate_content(
+                    model=mod,
+                    contents=[
+                        types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                        prompt
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.0
+                    ),
+                )
+                if response and response.text:
+                    break
+            except Exception as call_err:
+                last_err = call_err
+                if "404" in str(call_err) or "NOT_FOUND" in str(call_err) or "not found" in str(call_err).lower():
+                    log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
+                    continue
+                else:
+                    raise call_err
 
         if not response or not response.text:
-            log.warning(f"⚠️ [AI AUDITOR] Resposta vazia da IA para {icao} {nome_carta}. Mantendo dados brutos.")
+            log.warning(f"⚠️ [AI AUDITOR] Resposta vazia ou indisponível da IA para {icao} {nome_carta}. Mantendo dados brutos.")
             return transitions_dict, extracted_base
 
         audited_data = json.loads(response.text)
