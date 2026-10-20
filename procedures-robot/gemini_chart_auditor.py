@@ -92,8 +92,9 @@ Examine a folha da carta inteira e extraia:
 1. operational_remarks: Lista de strings contendo todas as notas operacionais, avisos ATC, restrições de atenuação de ruído, proibições de curva antes do DER e notas livres publicadas no texto da folha (ex: 'Curva antes do DER proibida', 'Aeronaves Cat A, B, C e D', etc.).
 2. notable_obstacles: Lista de obstáculos com cota altimétrica plotados no relevo (ex: [ {{"elevation_ft": 426, "type": "ANTENNA"}}, {{"elevation_ft": 534, "type": "TERRAIN_PEAK"}} ]).
 3. area_minimum_altitudes: Lista de valores de altitude mínima de área (AMA / MEF) impressos nas quadrículas da carta (ex: [ 2900, 2000 ]).
-4. mag_var_annual_change: Taxa anual de variação magnética (ex: '02\\' E' de 'VAR 23° W / VA/CHG 02\\' E').
-5. navaids: Lista de rádio-auxílios convencionais plotados com frequência, canal e indicativo morse (ex: [ {{"id": "SVD", "type": "VOR/DME", "frequency": "116.80", "channel": "115X"}} ]).
+4. mag_var: Declinação magnética oficial publicada na carta (ex: '23° W' ou '23° W (2020)').
+5. mag_var_annual_change: Taxa anual de variação magnética (ex: '02\\' E' de 'VAR 23° W / VA/CHG 02\\' E').
+6. navaids: Lista de rádio-auxílios convencionais plotados com frequência, canal e indicativo morse (ex: [ {{"id": "SVD", "type": "VOR/DME", "frequency": "116.80", "channel": "115X"}} ]).
 
 FORMATO DE RESPOSTA OBRIGATÓRIO (JSON PURO):
 Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
@@ -118,6 +119,7 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
   "operational_remarks": ["..."],
   "notable_obstacles": [ {{"elevation_ft": 426, "type": "ANTENNA"}} ],
   "area_minimum_altitudes": [2900],
+  "mag_var": "23° W",
   "mag_var_annual_change": "02' E",
   "navaids": []
 }}
@@ -198,6 +200,8 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
             meta['area_minimum_altitudes'] = audited_data['area_minimum_altitudes']
         if audited_data.get('mag_var_annual_change'):
             meta['mag_var_annual_change'] = audited_data['mag_var_annual_change']
+        if audited_data.get('mag_var'):
+            meta['mag_var'] = audited_data['mag_var']
         if audited_data.get('navaids'):
             meta['navaids'] = audited_data['navaids']
 
