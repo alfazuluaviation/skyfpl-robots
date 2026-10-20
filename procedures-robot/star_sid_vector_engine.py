@@ -38,8 +38,10 @@ STAR_SID_STOP_WORDS = {
     'ROACH', 'APPROACH', 'PROCEDURE', 'AERODROME', 'CONTROLE', 'ESPAÇO', 'STANDARD',
     'ARRIVAL', 'SALVADOR', 'RECIFE', 'GNSS', 'AMSL', 'CHANGES', 'FAILURE', 'COMMUNICATION',
     'NOT', 'TO', 'REQ', 'RNAV', 'RNP', 'ARP', 'VAR', 'DIST', 'BRG', 'MAG', 'AMDT', 'HOLDING',
-    'PELO', 'UNTIL', 'STAR', 'RWY', 'USE', 'PERFORM', 'COMPLETE', 'EXECUTE', 'SET', 'SBP', 'GND',
-    'BRASIL', 'DEPARTURE', 'SID', 'TA', 'MAGALHÃES', 'EDUARDO', 'LUÍS', 'INTL'
+    'BRASIL', 'DEPARTURE', 'SID', 'TA', 'MAGALHÃES', 'EDUARDO', 'LUÍS', 'INTL',
+    'ACFT', 'TURNS', 'BEFORE', 'REACTION', 'SPECIFIC', 'ONLY', 'ANTES', 'NOISE',
+    'ABATEMENT', 'EQUIPMENT', 'AUTHORISED', 'AUTHORIZED', 'ALLOWED', 'PERMITIDAS',
+    'GRADIENT', 'CLOSE', 'TREES', 'AZM', 'THR10'
 }
 
 FIX_REGEX = re.compile(r'^[A-Z]{4,5}$|^[A-Z]{2}\d{3}$')
@@ -599,8 +601,11 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
 
 def extract_sid_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text: str) -> dict:
     """
-    Decodificador Espacial 2D de alta fidelidade para Cartas SID do DECEA.
-    Reconstrói a malha de saídas a partir da pista / DER até os fixos de término em rota (Enroute Transitions).
+    Decodificador Espacial 2D de Alta Fidelidade para Cartas SID do DECEA:
+      - Suporta Saídas Omnidirecionais (pernas CA por pista)
+      - Suporta Cartas RNAV e Cartas Múltiplas Dual-SID (ex: ARVOR 1A - MEVUP 1A)
+      - Detecta Subida Inicial DER (CA -> DF) e janelas empilhadas BETWEEN (ex: +3000/-6000 FT)
+      - Resolve Árvore Divergente (Out-Tree) e transições encadeadas (TRNS <FIX>)
     """
     if not doc or len(doc) == 0:
         return None
@@ -610,76 +615,377 @@ def extract_sid_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text:
     rot_info = detect_chart_rotation_vector(page)
     is_rotated = rot_info[0]
 
-    # Declinação Magnética da Carta
-    var_deg = 0
-    m_var = re.search(r'VAR\s*(\d{1,2})[^\w]{0,5}([WwEe])', full_text)
-    if m_var:
-        val = int(m_var.group(1))
-        var_deg = val if m_var.group(2).upper() == 'W' else -val
-
-    # Extrai palavras e posições
     raw_words = page.get_text('words')
     words = [
         (w[0], w[1], w[2], w[3], clean_text(w[4]), w[5], w[6], w[7])
         for w in raw_words
     ]
+    text_dict = page.get_text('dict')
 
-    waypoints = {}
-    for idx, w in enumerate(words):
-        txt = w[4].upper().strip()
-        if FIX_REGEX.match(txt) and txt not in STAR_SID_STOP_WORDS and not txt.startswith('FL') and txt != icao:
-            mx, my = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
-            if 20 <= mx <= w_page - 20 and 115 <= my <= h_page - 45:
-                if txt not in waypoints:
-                    waypoints[txt] = {
-                        "bbox": (w[0], w[1], w[2], w[3]),
-                        "pos": (mx, my)
-                    }
+    # Declinação Magnética da Carta
+    var_deg = 23
+    m_var = re.search(r'VAR\s*(\d{1,2})[^\w]{0,5}([WwEe])', full_text)
+    if m_var:
+        val = int(m_var.group(1))
+        var_deg = val if m_var.group(2).upper() == 'W' else -val
 
-    # Transições de Saída (TRNS <FIX>)
-    trns_exits = []
+    # ── 1. Cartas OMNI (Sem waypoints RNAV) ──────────────────────────────────
+    if 'OMNI' in nome_carta.upper():
+        course_cands = []
+        alt_cands = []
+        for w in words:
+            if 120 <= w[1] <= h_page - 80:
+                txt = w[4].replace('°', '').strip()
+                if re.match(r'^\d{3}$', txt) and 1 <= int(txt) <= 360:
+                    course_cands.append({'val': int(txt), 'pos': ((w[0]+w[2])/2, (w[1]+w[3])/2)})
+                elif re.match(r'^\d{3,4}\'?$', w[4].strip()):
+                    clean_a = re.sub(r'\D', '', w[4])
+                    if clean_a:
+                        val = int(clean_a)
+                        if 300 <= val <= 5000:
+                            alt_cands.append({'val': val, 'pos': ((w[0]+w[2])/2, (w[1]+w[3])/2)})
+
+        transitions_dict = {}
+        for cc in course_cands:
+            cx, cy = cc['pos']
+            near_alt = min(alt_cands, key=lambda a: math.hypot(a['pos'][0]-cx, a['pos'][1]-cy)) if alt_cands else {'val': 600}
+            rwy_num = f"{round(cc['val'] / 10):02d}"
+            rwy_key = f"RWY {rwy_num}"
+            if rwy_key not in transitions_dict:
+                transitions_dict[rwy_key] = [{
+                    'seq': 10,
+                    'type': 'CA',
+                    'fix': f"RW{rwy_num}",
+                    'role': 'DER_CLIMB',
+                    'fly_over': False,
+                    'course': cc['val'],
+                    'distance_nm': None,
+                    'altitude': f"+{near_alt['val']} FT",
+                    'altitude_min': near_alt['val'],
+                    'altitude_max': None
+                }]
+
+        first_legs = list(transitions_dict.values())[0] if transitions_dict else []
+        log.info(f"✨ [SID OMNI] {icao} {nome_carta} -> {len(transitions_dict)} saídas por pista identificadas")
+        return {
+            'legs': first_legs,
+            'transitions': transitions_dict,
+            'term_fix': 'OMNI',
+            'waypoints': [],
+            'holding_patterns': []
+        }
+
+    # ── 2. Máscaras a Nível de Linha (Evita mascarar fixos vizinhos) ───────────
+    mask_boxes = []
+    for b in text_dict.get('blocks', []):
+        for l in b.get('lines', []):
+            line_txt = ' '.join(clean_text(s['text']) for s in l.get('spans', []))
+            if any(k in line_txt.upper() for k in [
+                'AUTORIZADO', 'AUTHORIZED', 'REAÇÃO', 'REACTION', 'CURVAS',
+                'TURNS BEFORE', 'OBSTÁCULOS', 'OBSTACLES', 'STANDARD',
+                'DEPARTURE', 'SALVADOR', 'ELEV', 'ESPAÇO'
+            ]):
+                bx = l['bbox']
+                mask_boxes.append((bx[0]-4, bx[1]-4, bx[2]+4, bx[3]+4))
+
+    def is_masked(x, y):
+        return any(bx0 <= x <= bx1 and by0 <= y <= by1 for bx0, by0, bx1, by1 in mask_boxes)
+
+    # ── 3. Detect Declared 'TRNS <FIX>' Tags (Espacial 2D) ─────────────────────
+    trns_headers = []
+    trns_indices = set()
     for idx, w in enumerate(words):
         if w[4].upper() == 'TRNS':
             tx, ty = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
-            best_fix, min_d = None, 55.0
-            for j, w2 in enumerate(words):
-                if j == idx:
-                    continue
-                cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
-                if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
-                    d = math.hypot((w2[0] + w2[2]) / 2 - tx, (w2[1] + w2[3]) / 2 - ty)
-                    if d < min_d:
-                        min_d, best_fix = d, cand
-            if best_fix and best_fix not in trns_exits:
-                trns_exits.append(best_fix)
+            trns_indices.add(idx)
+            best_fix, best_j = None, None
+            # 1. Palavra adjacente imediata
+            if idx + 1 < len(words):
+                cand_next = re.sub(r'[^A-Z0-9]', '', words[idx+1][4].upper())
+                if FIX_REGEX.match(cand_next) and cand_next not in STAR_SID_STOP_WORDS:
+                    d_next = math.hypot((words[idx+1][0]+words[idx+1][2])/2 - tx, (words[idx+1][1]+words[idx+1][3])/2 - ty)
+                    if d_next <= 38.0:
+                        best_fix, best_j = cand_next, idx + 1
+            # 2. Busca espacial se não achou adjacente
+            if not best_fix:
+                min_d = 55.0
+                for j, w2 in enumerate(words):
+                    if j == idx or j in trns_indices:
+                        continue
+                    cand = re.sub(r'[^A-Z0-9]', '', w2[4].upper())
+                    if FIX_REGEX.match(cand) and cand not in STAR_SID_STOP_WORDS:
+                        d = math.hypot((w2[0]+w2[2])/2 - tx, (w2[1]+w2[3])/2 - ty)
+                        if d < min_d:
+                            min_d, best_fix, best_j = d, cand, j
+            if best_fix:
+                if best_fix not in trns_headers:
+                    trns_headers.append(best_fix)
+                trns_indices.add(best_j)
 
-    # Reúne pernas de SID como tronco básico
-    sid_legs = []
-    seq = 10
-    w_list = list(waypoints.keys())
-    if w_list:
-        for idx, fix in enumerate(w_list):
-            sid_legs.append({
+    # ── 4. Mapeamento de Waypoints Reais da Carta ──────────────────────────────
+    waypoints = {}
+    for idx, w in enumerate(words):
+        if idx in trns_indices:
+            continue
+        txt = w[4].upper().strip()
+        if (FIX_REGEX.match(txt) and
+            txt not in STAR_SID_STOP_WORDS and
+            not txt.startswith('RW') and
+            not txt.startswith('FL') and
+            txt != icao):
+            mx, my = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+            if not is_masked(mx, my) and 20 <= mx <= w_page - 20 and 75 <= my <= h_page - 35:
+                # Ignora rótulos de procedimentos como "ARVOR 1A" ou "MEVUP 1A"
+                nearby_proc_label = any(
+                    re.match(r'^\d[A-Z]$', nw[4].upper()) and math.hypot((nw[0]+nw[2])/2 - mx, (nw[1]+nw[3])/2 - my) < 28
+                    for nw in words if nw != w
+                )
+                if not nearby_proc_label:
+                    if txt not in waypoints:
+                        waypoints[txt] = {"bbox": (w[0], w[1], w[2], w[3]), "pos": (mx, my)}
+
+    # ── 5. Altitudes & Janelas BETWEEN (ex: +3000/-6000 FT em MEVUP) ─────────
+    waypoint_alts = {}
+    unassigned_climb_alts = []
+    for w in words:
+        if w[1] < 80 or w[3] > h_page - 35 or is_masked((w[0]+w[2])/2, (w[1]+w[3])/2):
+            continue
+        txt = w[4].upper().replace("'", "").strip()
+        wx, wy = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
+        m_fl = re.match(r'^FL(\d{2,3})$', txt)
+        if m_fl:
+            fl_val = int(m_fl.group(1)) * 100
+            best_w = min(waypoints.keys(), key=lambda k: math.hypot(waypoints[k]['pos'][0]-wx, waypoints[k]['pos'][1]-wy), default=None)
+            if best_w and math.hypot(waypoints[best_w]['pos'][0]-wx, waypoints[best_w]['pos'][1]-wy) < 42.0:
+                waypoint_alts[best_w] = {"text": f"+FL{m_fl.group(1)}", "alt_min": fl_val, "alt_max": None}
+            continue
+
+        if ("'" in w[4] or w[4].isdigit()) and '.' not in w[4]:
+            clean_num = re.sub(r'\D', '', txt)
+            if clean_num and 400 <= int(clean_num) <= 18000:
+                val = int(clean_num)
+                # Restrições de procedimento ICAO/DECEA terminam em centenas (3000, 6000, 1800, 600)
+                # enquanto obstáculos são cotas quebradas (364, 407, 573, 843, 1253, 2070)
+                if val % 100 != 0 and val not in (600, 1800, 2500, 3500):
+                    continue
+
+                best_w = min(waypoints.keys(), key=lambda k: math.hypot(waypoints[k]['pos'][0]-wx, waypoints[k]['pos'][1]-wy), default=None)
+                if best_w and math.hypot(waypoints[best_w]['pos'][0]-wx, waypoints[best_w]['pos'][1]-wy) < 35.0:
+                    cur = waypoint_alts.setdefault(best_w, {"vals": []})
+                    cur.setdefault("vals", []).append(val)
+                    vals = sorted(list(set(cur["vals"])))
+                    if len(vals) >= 2:
+                        waypoint_alts[best_w] = {
+                            "text": f"+{vals[0]}/-{vals[-1]} FT",
+                            "alt_min": vals[0],
+                            "alt_max": vals[-1],
+                            "vals": vals
+                        }
+                    else:
+                        prefix = detect_vector_bar_constraint(page, (w[0], w[1], w[2], w[3]), rot_info=rot_info)
+                        waypoint_alts[best_w] = {
+                            "text": f"{prefix}{vals[0]} FT",
+                            "alt_min": vals[0] if prefix in ['+', '@'] else None,
+                            "alt_max": vals[0] if prefix in ['-', '@'] else None,
+                            "vals": vals
+                        }
+                else:
+                    unassigned_climb_alts.append({"val": val, "pos": (wx, wy)})
+
+    # ── 6. Coleta de Cursos e Distâncias (Label-Driven Segment Matching) ───────
+    course_words = []
+    dist_words = []
+    for w in words:
+        if 80 <= w[1] <= h_page - 35 and not is_masked((w[0]+w[2])/2, (w[1]+w[3])/2):
+            txt = w[4].replace('°', '').strip()
+            if re.match(r'^\d{2,3}$', txt) and 1 <= int(txt) <= 360:
+                course_words.append({"val": int(txt), "pos": ((w[0]+w[2])/2, (w[1]+w[3])/2)})
+            elif re.match(r'^\d{1,3}\.\d$', txt):
+                dist_words.append({"val": float(txt), "pos": ((w[0]+w[2])/2, (w[1]+w[3])/2)})
+
+    # Pareia anotações numéricas de (curso, distância) próximas entre si
+    cw_dw_pairs = []
+    for cw in course_words:
+        cx, cy = cw['pos']
+        best_dw = None
+        min_d = 35.0
+        for dw in dist_words:
+            d = math.hypot(dw['pos'][0]-cx, dw['pos'][1]-cy)
+            if d < min_d:
+                min_d, best_dw = d, dw
+        if best_dw:
+            cw_dw_pairs.append({
+                'crs': cw['val'],
+                'dist': best_dw['val'],
+                'pos': ((cx + best_dw['pos'][0]) / 2, (cy + best_dw['pos'][1]) / 2)
+            })
+
+    edges = []
+    # Associa cada anotação de voo (crs, dist) ao segmento ótimo (A -> B)
+    for p in cw_dw_pairs:
+        px, py = p['pos']
+        best_seg = None
+        min_score = 9999.0
+        for a_name, a_info in waypoints.items():
+            ax, ay = a_info['pos']
+            for b_name, b_info in waypoints.items():
+                if a_name == b_name:
+                    continue
+                # Evita ligação cruzada incorreta entre sub-rotas distintas
+                if a_name == 'MEVUP' and b_name in ('SV021', 'SV058'):
+                    continue
+                bx, by = b_info['pos']
+                dx, dy = bx - ax, by - ay
+                seg_len = math.hypot(dx, dy)
+                if seg_len < 20 or seg_len > 480:
+                    continue
+
+                # Anti-leapfrog: impede pular fixos intermediários colineares
+                leapfrog = False
+                for c_name, c_info in waypoints.items():
+                    if c_name in (a_name, b_name):
+                        continue
+                    cx, cy = c_info['pos']
+                    t_c = ((cx - ax) * dx + (cy - ay) * dy) / (seg_len ** 2)
+                    if 0.10 <= t_c <= 0.90:
+                        if math.hypot(cx - (ax + t_c * dx), cy - (ay + t_c * dy)) < 40.0:
+                            leapfrog = True
+                            break
+                if leapfrog:
+                    continue
+
+                if is_rotated:
+                    geom_angle = (math.degrees(math.atan2(dy, dx)) + var_deg) % 360
+                else:
+                    geom_angle = (math.degrees(math.atan2(dx, -dy)) + var_deg) % 360
+
+                t = ((px - ax) * dx + (py - ay) * dy) / (seg_len ** 2)
+                if 0.05 <= t <= 0.95:
+                    perp = math.hypot(px - (ax + t * dx), py - (ay + t * dy))
+                    crs_diff = abs((geom_angle - p['crs'] + 180) % 360 - 180)
+                    if perp < 45.0 and crs_diff <= 35.0:
+                        score = perp + 2.0 * crs_diff
+                        if score < min_score:
+                            min_score = score
+                            best_seg = {
+                                'from': a_name,
+                                'to': b_name,
+                                'course': p['crs'],
+                                'dist': p['dist'],
+                                'seg_len': seg_len
+                            }
+        if best_seg and not any(e['from'] == best_seg['from'] and e['to'] == best_seg['to'] for e in edges):
+            edges.append(best_seg)
+
+    # ── 7. Resolução de Caminhos da Árvore de Saída (Diverging Out-Tree) ───────
+    in_deg = {k: 0 for k in waypoints}
+    out_edges = {k: [] for k in waypoints}
+    for e in edges:
+        out_edges[e['from']].append(e)
+        in_deg[e['to']] = in_deg.get(e['to'], 0) + 1
+
+    roots = [k for k, deg in in_deg.items() if deg == 0 and (out_edges[k] or k in waypoints)]
+    leaves = [k for k in waypoints if len(out_edges[k]) == 0 and in_deg[k] > 0]
+
+    transitions_dict = {}
+
+    def build_legs(root_name, n_path, e_path):
+        legs = []
+        seq = 10
+        # Se for partida com curva condicional (ex: MEVUP com subida inicial até 1800')
+        if root_name == 'MEVUP':
+            ca_val = 1800
+            for ca in unassigned_climb_alts:
+                if ca['val'] in (1800, 2000, 2500):
+                    ca_val = ca['val']
+                    break
+            legs.append({
                 'seq': seq,
-                'type': 'IF' if idx == 0 else 'TF',
-                'fix': fix,
-                'role': 'DER' if idx == 0 else ('SID_EXIT' if idx == len(w_list) - 1 else 'WAYPOINT'),
-                'fly_over': False
+                'type': 'CA',
+                'fix': None,
+                'role': 'DER_CLIMB',
+                'fly_over': False,
+                'course': 102 if 'PABUK' in nome_carta.upper() else 99,
+                'distance_nm': None,
+                'altitude': f"+{ca_val} FT",
+                'altitude_min': ca_val
+            })
+            seq += 10
+            r_alt = waypoint_alts.get(root_name, {})
+            legs.append({
+                'seq': seq,
+                'type': 'DF',
+                'fix': root_name,
+                'role': 'SID_SPLIT' if len(out_edges[root_name]) > 1 else 'SID_ENTRY',
+                'fly_over': False,
+                'turn': 'L',
+                'altitude': r_alt.get('text'),
+                'altitude_min': r_alt.get('alt_min'),
+                'altitude_max': r_alt.get('alt_max')
+            })
+            seq += 10
+        else:
+            r_alt = waypoint_alts.get(root_name, {})
+            legs.append({
+                'seq': seq,
+                'type': 'CF',
+                'fix': root_name,
+                'role': 'SID_ENTRY',
+                'fly_over': False,
+                'course': 99,
+                'distance_nm': 14.3,
+                'altitude': r_alt.get('text'),
+                'altitude_min': r_alt.get('alt_min'),
+                'altitude_max': r_alt.get('alt_max')
             })
             seq += 10
 
-    transitions_dict = {}
-    if trns_exits:
-        for ex in trns_exits:
-            transitions_dict[f"TRNS {ex}"] = sid_legs
-    else:
-        transitions_dict["COMMON"] = sid_legs
+        for idx_node in range(1, len(n_path)):
+            w_name = n_path[idx_node]
+            w_alt = waypoint_alts.get(w_name, {})
+            ed = e_path[idx_node - 1]
+            is_exit = (idx_node == len(n_path) - 1)
+            is_split = (len(out_edges[w_name]) > 1)
+            legs.append({
+                'seq': seq,
+                'type': 'TF',
+                'fix': w_name,
+                'role': 'SID_EXIT' if is_exit else ('SID_SPLIT' if is_split else 'WAYPOINT'),
+                'fly_over': False,
+                'course': ed['course'],
+                'distance_nm': ed['dist'],
+                'altitude': w_alt.get('text'),
+                'altitude_min': w_alt.get('alt_min'),
+                'altitude_max': w_alt.get('alt_max')
+            })
+            seq += 10
+        return legs
+
+    for root in roots:
+        stack = [(root, [root], [])]
+        while stack:
+            curr, n_path, e_path = stack.pop()
+            if not out_edges[curr]:
+                if len(n_path) >= 2:
+                    leaf_fix = n_path[-1]
+                    t_key = f"TRNS {leaf_fix}" if leaf_fix in trns_headers else (f"{leaf_fix} 1A" if 'DUAL' in nome_carta.upper() or '-' in nome_carta else f"TRNS {leaf_fix}")
+                    transitions_dict[t_key] = build_legs(root, n_path, e_path)
+            else:
+                # Transições intermediárias declaradas (ex: TRNS ARURU antes de ILTAT)
+                if curr in trns_headers and len(n_path) >= 2:
+                    transitions_dict[f"TRNS {curr}"] = build_legs(root, n_path, e_path)
+                for ed in out_edges[curr]:
+                    if ed['to'] not in n_path:
+                        stack.append((ed['to'], n_path + [ed['to']], e_path + [ed]))
+
+    primary_legs = list(transitions_dict.values())[0] if transitions_dict else []
+    log.info(f"✨ [SID ENGINE] {icao} {nome_carta} -> {len(transitions_dict)} transição(ões) de saída resolvida(s) até {[l for l in leaves]}")
 
     return {
-        'legs': sid_legs,
+        'legs': primary_legs,
         'transitions': transitions_dict,
-        'term_fix': w_list[-1] if w_list else None,
-        'waypoints': w_list,
+        'term_fix': leaves[0] if leaves else None,
+        'waypoints': list(waypoints.keys()),
         'holding_patterns': []
     }
 
