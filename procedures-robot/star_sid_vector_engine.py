@@ -169,6 +169,35 @@ def detect_vector_bar_constraint(page, bbox, rot_info=(False, (1, 0))) -> str:
     return detect_vector_bar_constraint_relative(bbox, ((x0+x1)/2, y0 - 20), candidate_bars)
 
 
+def is_airspace_or_obstacle_label(page_words, page_blocks, w, radius=22.0) -> bool:
+    """
+    Retorna True se o número pertencer a legendas de espaço aéreo condicionado
+    (ex: 'SBP 225', '1500 AMSL', 'GND', 'SBR', 'SBD', 'CTR', 'TMA') ou áreas proibidas/restritas.
+    Evita que tetos/pisos de espaços aéreos interfiram nas altitudes dos fixos da rota.
+    """
+    wx0, wy0, wx1, wy1 = w[:4]
+    cx, cy = (wx0 + wx1) / 2.0, (wy0 + wy1) / 2.0
+
+    # 1. Checagem contextual no bloco do PyMuPDF (parágrafo/caixa delimitadora)
+    if page_blocks:
+        for b in page_blocks:
+            bx0, by0, bx1, by1, btxt = b[:5]
+            if bx0 - 2 <= cx <= bx1 + 2 and by0 - 2 <= cy <= by1 + 2:
+                btxt_u = btxt.upper()
+                if any(k in btxt_u for k in ['AMSL', 'GND', 'SBP', 'SBR', 'SBD', 'CTR', 'TMA', 'PROIBID', 'RESTRIT']):
+                    return True
+
+    # 2. Varredura por proximidade euclidiana curta (raio <= 22 pt, evitando falsos positivos com fixos adjacentes)
+    for pw in page_words:
+        px, py = (pw[0] + pw[2]) / 2.0, (pw[1] + pw[3]) / 2.0
+        if math.hypot(px - cx, py - cy) <= radius:
+            txt_upper = pw[4].upper()
+            if any(k in txt_upper for k in ['AMSL', 'GND', 'SBP', 'SBR', 'SBD', 'PROIBID', 'RESTRIT']):
+                return True
+
+    return False
+
+
 def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text: str) -> dict:
     """
     Decodificador Espacial 2D de alta fidelidade para Cartas STAR do DECEA.
@@ -314,9 +343,11 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
         term_fix = max(waypoints.keys(), key=lambda k: waypoints[k]["pos"][1])
 
     # 5. Restrições de Altitude e Níveis de Voo (Referencial Vetorial Relativo Fixo -> Altitude)
+    page_blocks = page.get_text('blocks')
     waypoint_alts = {}
+    waypoint_alts_dist = {}
     for w in words:
-        txt = w[4].upper().replace("'", "").strip()
+        txt = w[4].upper().replace("'", "").replace("’", "").strip()
         m_fl = re.match(r'^FL(\d{2,3})$', txt)
         if m_fl:
             fl_val = int(m_fl.group(1)) * 100
@@ -328,6 +359,8 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     min_d = d
                     best_w = w_name
             if best_w:
+                if best_w in waypoint_alts_dist and min_d >= waypoint_alts_dist[best_w]:
+                    continue
                 prefix = detect_vector_bar_constraint_relative(
                     (w[0], w[1], w[2], w[3]),
                     waypoints[best_w]["pos"],
@@ -335,6 +368,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                 )
                 alt_min = fl_val if prefix in ['+', '@'] else None
                 alt_max = fl_val if prefix in ['-', '@'] else None
+                waypoint_alts_dist[best_w] = min_d
                 waypoint_alts[best_w] = {
                     "text": f"{prefix}FL{m_fl.group(1)}",
                     "alt_min": alt_min,
@@ -344,6 +378,11 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
 
         if '.' in w[4] or w[1] < 125:
             continue
+
+        # 🛡️ BARREIRA DE SEGURANÇA: Descarta se pertencer a espaço aéreo condicionado (AMSL, GND, SBP...)
+        if is_airspace_or_obstacle_label(words, page_blocks, w, radius=22.0):
+            continue
+
         clean_num = re.sub(r"[^\d]", "", txt)
         if clean_num and 1000 <= int(clean_num) <= 18000:
             val = int(clean_num)
@@ -355,6 +394,10 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                     min_d = d
                     best_w = w_name
             if best_w:
+                # Se já temos uma anotação de altitude mais próxima deste waypoint, não sobrescreve com uma mais distante
+                if best_w in waypoint_alts_dist and min_d >= waypoint_alts_dist[best_w]:
+                    continue
+
                 prefix = detect_vector_bar_constraint_relative(
                     (w[0], w[1], w[2], w[3]),
                     waypoints[best_w]["pos"],
@@ -362,6 +405,7 @@ def extract_star_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text
                 )
                 alt_min = val if prefix in ['+', '@'] else None
                 alt_max = val if prefix in ['-', '@'] else None
+                waypoint_alts_dist[best_w] = min_d
                 waypoint_alts[best_w] = {
                     "text": f"{prefix}{val} FT",
                     "alt_min": alt_min,
@@ -799,12 +843,18 @@ def extract_sid_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text:
                         waypoints[txt] = {"bbox": (w[0], w[1], w[2], w[3]), "pos": (mx, my)}
 
     # ── 5. Altitudes & Janelas BETWEEN (ex: +3000/-6000 FT em MEVUP) ─────────
+    page_blocks = page.get_text('blocks')
     waypoint_alts = {}
     unassigned_climb_alts = []
     for w in words:
         if w[1] < 80 or w[3] > h_page - 35 or is_masked((w[0]+w[2])/2, (w[1]+w[3])/2):
             continue
-        txt = w[4].upper().replace("'", "").strip()
+
+        # 🛡️ BARREIRA DE SEGURANÇA: Descarta se pertencer a espaço aéreo condicionado (AMSL, GND, SBP...)
+        if is_airspace_or_obstacle_label(words, page_blocks, w, radius=22.0):
+            continue
+
+        txt = w[4].upper().replace("'", "").replace("’", "").strip()
         wx, wy = (w[0] + w[2]) / 2, (w[1] + w[3]) / 2
         m_fl = re.match(r'^FL(\d{2,3})$', txt)
         if m_fl:

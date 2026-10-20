@@ -20,6 +20,7 @@ import time
 import re
 import argparse
 import logging
+import math
 import requests
 import fitz  # PyMuPDF
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -40,6 +41,13 @@ try:
 except Exception as _e:
     extract_star_sid_procedure = None
     print(f"⚠️ [STAR_SID] Aviso: Motor STAR/SID não pôde ser carregado ({_e}).")
+
+# ─── Módulo Oficial Gemini Multimodal Chart Auditor ──────────────────────────
+try:
+    import gemini_chart_auditor
+except Exception as _e:
+    gemini_chart_auditor = None
+    print(f"⚠️ [AI AUDITOR] Aviso: Módulo Gemini Auditor não pôde ser carregado ({_e}).")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1106,6 +1114,139 @@ def extract_performance_tables_spatial_2d(doc):
         'descent_rate_table': descent_rate_table
     }
 
+# ─── Extrator Espacial 2D Unificado de MSA / TAA ──────────────────────────────
+def extract_msa_spatial_2d(doc, full_text, icao=''):
+    """
+    Extrator Cirúrgico e Unificado de MSA / TAA para cartas DECEA (IAC, STAR, SID).
+    Combina reconstrução espacial 2D em torno do bloco âncora do círculo MSA com normalização
+    tipográfica de apóstrofos e filtragem de altitudes PANS-OPS (múltiplos de 100 FT).
+    """
+    msa = {'radius_nm': 25, 'sectors': []}
+    page = doc[0]
+    blocks = page.get_text('blocks')
+    
+    # 1. Localização do Bloco Âncora do Círculo MSA (ex: "MSA 25 NM", "MSA 25NM", "25 NM ARP")
+    msa_anchors = []
+    for b in blocks:
+        txt = b[4].strip()
+        m_rad = re.search(r'MSA\s*(\d{1,2})\s*NM', txt, re.IGNORECASE)
+        if m_rad:
+            msa_anchors.append((b, int(m_rad.group(1))))
+        elif 'MSA' in txt.upper() and ('25' in txt or 'NM' in txt):
+            msa_anchors.append((b, 25))
+            
+    if msa_anchors:
+        anchor_block, radius = msa_anchors[0]
+        msa['radius_nm'] = radius
+        ax0, ay0, ax1, ay1 = anchor_block[:4]
+        acx, acy = (ax0 + ax1) / 2.0, (ay0 + ay1) / 2.0
+        
+        # O círculo de MSA em cartas DECEA tem raio geométrico de ~55-65 pontos
+        nearby_blocks = []
+        for b in blocks:
+            bx0, by0, bx1, by1 = b[:4]
+            bcx, bcy = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
+            dist = math.hypot(acx - bcx, acy - bcy)
+            if dist <= 65.0:
+                nearby_blocks.append((dist, b[4].strip(), (bx0, by0, bx1, by1)))
+        nearby_blocks.sort(key=lambda x: x[0])
+        
+        # A. Identificar Fixo Balizador / Reference Fix (ex: "ARP SBSV", "ARP SBKP", "VOR/DME SVD")
+        ref_fix = None
+        for dist, txt, _ in nearby_blocks:
+            arp_m = re.search(r'(ARP\s+[A-Z]{4}|ARP|VOR(?:/DME)?\s+[A-Z]{3}|NDB\s+[A-Z]{2,3})', txt, re.IGNORECASE)
+            if arp_m:
+                ref_fix = arp_m.group(1).upper()
+                break
+        if not ref_fix or ref_fix == "ARP":
+            ref_fix = f"ARP {icao}" if icao else "ARP"
+
+        # B. Identificar Altitudes de Segurança e Radiais Divisórias de Setor
+        altitudes_found = []
+        radials_found = []
+        
+        for dist, txt, bbox in nearby_blocks:
+            norm_txt = txt.replace('’', "'").replace('`', "'")
+            
+            # Altitudes PANS-OPS oficiais: terminam em apóstrofo e são arredondadas para centenas (ex: 2000', 3000', 5000')
+            alt_matches = re.findall(r'(?<!\d)(\d{3,5})\'', norm_txt)
+            for am in alt_matches:
+                v = int(am)
+                if 800 <= v <= 20000 and v % 100 == 0:
+                    altitudes_found.append(v)
+                    
+            # Radiais de delimitação de setores (ex: 015, 195, 270, 090)
+            rad_matches = re.findall(r'\b(0\d{2}|[12]\d{2}|3[0-5]\d|360)\b', norm_txt)
+            for rm in rad_matches:
+                rad_val = int(rm)
+                if rad_val not in altitudes_found and rad_val != radius:
+                    radials_found.append(rad_val)
+
+        # Desduplicar preservando ordem de aparição espacial
+        unique_alts = []
+        for a in altitudes_found:
+            if a not in unique_alts:
+                unique_alts.append(a)
+
+        if unique_alts:
+            if len(unique_alts) == 1:
+                msa['sectors'].append({
+                    'reference_fix': ref_fix,
+                    'safe_altitude_ft': unique_alts[0],
+                    'radius_nm': radius,
+                    'bearing_from_deg': 0,
+                    'bearing_to_deg': 360,
+                    'sector_label': '360° TOTAL'
+                })
+            else:
+                for idx, alt in enumerate(unique_alts):
+                    b_from = radials_found[idx % len(radials_found)] if radials_found else 0
+                    b_to = radials_found[(idx + 1) % len(radials_found)] if len(radials_found) > 1 else 360
+                    msa['sectors'].append({
+                        'reference_fix': ref_fix,
+                        'safe_altitude_ft': alt,
+                        'radius_nm': radius,
+                        'bearing_from_deg': b_from,
+                        'bearing_to_deg': b_to,
+                        'sector_label': f"Setor {idx + 1}"
+                    })
+
+    # 2. Fallback de Texto Normalizado (caso o círculo esteja em outra camada de desenho)
+    if not msa['sectors']:
+        norm_full = full_text.replace('’', "'").replace('`', "'")
+        m_txt = re.search(r'MSA\s*(\d{1,2})\s*NM[^\n\d]{0,40}(\d{3,5})\'', norm_full, re.IGNORECASE)
+        if not m_txt:
+            m_txt = re.search(r'(\d{3,5})\'[^\n]{0,30}(?:ARP\s+([A-Z]{4}))?[^\n]{0,30}MSA\s*(\d{1,2})\s*NM', norm_full, re.IGNORECASE)
+            if m_txt:
+                alt = int(m_txt.group(1))
+                if alt % 100 == 0:
+                    ref = f"ARP {m_txt.group(2)}" if m_txt.group(2) else (f"ARP {icao}" if icao else "ARP")
+                    rad = int(m_txt.group(3))
+                    msa['radius_nm'] = rad
+                    msa['sectors'].append({
+                        'reference_fix': ref,
+                        'safe_altitude_ft': alt,
+                        'radius_nm': rad,
+                        'bearing_from_deg': 0,
+                        'bearing_to_deg': 360,
+                        'sector_label': '360° TOTAL'
+                    })
+        else:
+            rad = int(m_txt.group(1))
+            alt = int(m_txt.group(2))
+            if alt % 100 == 0:
+                msa['radius_nm'] = rad
+                msa['sectors'].append({
+                    'reference_fix': f"ARP {icao}" if icao else "ARP",
+                    'safe_altitude_ft': alt,
+                    'radius_nm': rad,
+                    'bearing_from_deg': 0,
+                    'bearing_to_deg': 360,
+                    'sector_label': '360° TOTAL'
+                })
+
+    return msa
+
 # ─── Parser 360° Aeronáutico ─────────────────────────────────────────────────
 def parse_procedure_from_pdf(pdf_bytes, icao, tipo, nome_carta):
     """
@@ -1720,35 +1861,8 @@ def parse_procedure_from_pdf(pdf_bytes, icao, tipo, nome_carta):
             lost_comm['transponder_code'] = 'A7600'
             missed_approach = lost_comm
 
-    # ── 6. Altitudes Mínimas de Setor (MSA / TAA) ─────────────────────────────
-    msa = {'radius_nm': 25, 'sectors': []}
-    msa_matches = re.findall(r'25\s*NM\s*(?:TO\s*)?([A-Z0-9]+)[^\d]{1,15}(\d{3,5})\'?', full_text, re.IGNORECASE)
-    for mm in msa_matches:
-        if mm[0] not in STOP_WORDS:
-            msa['sectors'].append({
-                'reference_fix': mm[0],
-                'safe_altitude_ft': int(mm[1]),
-                'radius_nm': 25
-            })
-
-    # Se ainda estiver vazio (padrão de STAR ancorado no ARP do aeródromo):
-    if not msa['sectors']:
-        msa_star = re.search(r'(?:MSA\s+)?25\s*NM\s*(?:(?:ARP|TO)\s+)?([A-Z0-9]+)[^\d]{1,15}(\d{3,5})\'?', full_text, re.IGNORECASE)
-        if msa_star:
-            ref_name = f"ARP {msa_star.group(1)}" if 'ARP' in full_text else msa_star.group(1)
-            msa['sectors'].append({
-                'reference_fix': ref_name,
-                'safe_altitude_ft': int(msa_star.group(2)),
-                'radius_nm': 25
-            })
-        else:
-            m_arp = re.search(r'ARP\s+([A-Z0-9]+)\s+MSA\s+25\s*NM[^\d]{1,15}(\d{3,5})\'?', full_text)
-            if m_arp:
-                msa['sectors'].append({
-                    'reference_fix': f"ARP {m_arp.group(1)}",
-                    'safe_altitude_ft': int(m_arp.group(2)),
-                    'radius_nm': 25
-                })
+    # ── 6. Altitudes Mínimas de Setor (MSA / TAA - Motor Espacial 2D Unificado) ──
+    msa = extract_msa_spatial_2d(doc, full_text, icao)
 
     # ── 7. Metadados Oficiais & Emenda ────────────────────────────────────────
     metadata = {}
@@ -1899,6 +2013,21 @@ def process_single_chart(chart, airac_cycle, dry_run=False):
         transitions_dict = extracted.get('transitions') or {}
         if not transitions_dict and legs:
             transitions_dict = {legs[0]['fix']: legs}
+
+        # ── Auditoria & Enriquecimento Multimodal 360° com Gemini AI ─────────────
+        if gemini_chart_auditor:
+            try:
+                transitions_dict, extracted = gemini_chart_auditor.audit_and_enrich_chart_with_gemini(
+                    pdf_bytes=res.content,
+                    icao=icao,
+                    tipo=tipo,
+                    nome_carta=nome,
+                    transitions_dict=transitions_dict,
+                    extracted_base=extracted
+                )
+                chart_meta = extracted.get('chart_metadata', chart_meta)
+            except Exception as _ea:
+                log.warning(f"⚠️ [AI AUDITOR] Falha na auditoria Gemini de {icao} {nome}: {_ea}")
 
         if not dry_run:
             # Limpa qualquer versão anterior desta mesma carta para garantir integridade e unicidade
