@@ -2030,12 +2030,16 @@ def process_single_chart(chart, airac_cycle, dry_run=False):
                 log.warning(f"⚠️ [AI AUDITOR] Falha na auditoria Gemini de {icao} {nome}: {_ea}")
 
         if not dry_run:
-            # Limpa qualquer versão anterior desta mesma carta para garantir integridade e unicidade
+            # Limpa qualquer versão anterior desta mesma carta para garantir integridade, unicidade e idempotência
             try:
-                del_url = f"{TABLE_PROCEDURES}?airac_cycle=eq.{airac_cycle}&icao=eq.{icao}&nome_procedimento=eq.{requests.utils.quote(nome)}"
-                requests.delete(del_url, headers=HEADERS_REST, timeout=10)
-            except Exception:
-                pass
+                del_params = {
+                    'airac_cycle': f'eq.{airac_cycle}',
+                    'icao': f'eq.{icao}',
+                    'nome_procedimento': f'eq.{nome}'
+                }
+                requests.delete(TABLE_PROCEDURES, params=del_params, headers=HEADERS_REST, timeout=10)
+            except Exception as _ed:
+                log.warning(f"Aviso na limpeza prévia de {icao} {nome}: {_ed}")
 
         airport_name = chart.get('nome_aerodrome') or chart.get('airport_name')
         if not airport_name:
