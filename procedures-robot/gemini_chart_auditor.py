@@ -173,56 +173,67 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
             if fallback not in models_to_try:
                 models_to_try.append(fallback)
 
+        cadence_sec = float(os.environ.get("GEMINI_CADENCE_SECONDS", "3.0"))
         response = None
         last_err = None
 
-        for k_idx, current_key in enumerate(ordered_keys):
-            client = genai.Client(api_key=current_key)
-            masked_key = f"...{current_key[-6:]}" if len(current_key) > 6 else "***"
-            log.info(f"🤖 [AI AUDITOR] Auditoria de {icao} {nome_carta} via Gemini ({model_name}) [Chave #{k_idx + 1}/{len(ordered_keys)}: {masked_key}]...")
+        # Tenta até 2 rodadas completas no pool de chaves antes de desistir
+        for attempt_round in range(2):
+            for k_idx, current_key in enumerate(ordered_keys):
+                client = genai.Client(api_key=current_key)
+                masked_key = f"...{current_key[-6:]}" if len(current_key) > 6 else "***"
+                log.info(f"🤖 [AI AUDITOR] Auditoria de {icao} {nome_carta} via Gemini ({model_name}) [Chave #{k_idx + 1}/{len(ordered_keys)}: {masked_key}]...")
 
-            rate_limit_hit = False
-            for mod in models_to_try:
-                try:
-                    # Aplica espaçamento suave entre chamadas paralelas para blindar contra 503/429
-                    wait_for_api_cadence(interval_seconds=2.5)
+                rate_limit_hit = False
+                for mod in models_to_try:
+                    try:
+                        # Aplica espaçamento suave entre chamadas paralelas para blindar contra picos simultâneos
+                        wait_for_api_cadence(interval_seconds=cadence_sec)
 
-                    response = client.models.generate_content(
-                        model=mod,
-                        contents=[
-                            types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
-                            prompt
-                        ],
-                        config=types.GenerateContentConfig(
-                            response_mime_type="application/json",
-                            temperature=0.0
-                        ),
-                    )
-                    if response and response.text:
-                        break
-                except Exception as call_err:
-                    last_err = call_err
-                    err_str = str(call_err).lower()
-                    if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "rate limit" in err_str:
-                        log.warning(f"  ⚠️ [AI AUDITOR] Chave {masked_key} atingiu Rate Limit / Cota (429). Alternando para próxima chave...")
-                        rate_limit_hit = True
-                        break
-                    elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
-                        log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' em alta demanda temporária (503). Tentando modelo alternativo...")
-                        time.sleep(1.5)
-                        continue
-                    elif "404" in err_str or "not_found" in err_str or "not found" in err_str:
-                        log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
-                        continue
-                    else:
-                        raise call_err
+                        response = client.models.generate_content(
+                            model=mod,
+                            contents=[
+                                types.Part.from_bytes(data=pdf_bytes, mime_type='application/pdf'),
+                                prompt
+                            ],
+                            config=types.GenerateContentConfig(
+                                response_mime_type="application/json",
+                                temperature=0.0
+                            ),
+                        )
+                        if response and response.text:
+                            break
+                    except Exception as call_err:
+                        last_err = call_err
+                        err_str = str(call_err).lower()
+                        if "429" in err_str or "resource_exhausted" in err_str or "quota" in err_str or "rate limit" in err_str:
+                            log.warning(f"  ⚠️ [AI AUDITOR] Chave {masked_key} atingiu Rate Limit (429). Pausando 15s e alternando para próxima chave do pool...")
+                            time.sleep(15.0)
+                            rate_limit_hit = True
+                            break
+                        elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
+                            log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' em alta demanda temporária (503). Pausando 5s para retentar...")
+                            time.sleep(5.0)
+                            continue
+                        elif "404" in err_str or "not_found" in err_str or "not found" in err_str:
+                            log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
+                            continue
+                        else:
+                            raise call_err
+
+                if response and response.text:
+                    break
+
+                if rate_limit_hit and k_idx < len(ordered_keys) - 1:
+                    continue
 
             if response and response.text:
                 break
 
-            if rate_limit_hit and k_idx < len(ordered_keys) - 1:
-                # Tenta a próxima chave imediatamente
-                continue
+            # Se todas as chaves tomaram 429 na primeira rodada, aguarda 15 segundos para renovar a janela de 1 minuto do Google
+            if attempt_round == 0:
+                log.warning(f"  ⏳ [AI AUDITOR] Todas as {len(ordered_keys)} chaves em limite momentâneo. Aguardando 15s para renovação da cota...")
+                time.sleep(15.0)
 
         if not response or not response.text:
             log.warning(f"⚠️ [AI AUDITOR] Resposta vazia ou cota esgotada em todas as chaves para {icao} {nome_carta}. Mantendo dados brutos.")
