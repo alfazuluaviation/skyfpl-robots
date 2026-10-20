@@ -61,6 +61,7 @@ def audit_and_enrich_chart_with_gemini(pdf_bytes: bytes, icao: str, tipo: str, n
 
     # Ordena as chaves começando pela da vez no Round-Robin, seguida pelas reservas
     ordered_keys = [keys[(start_key_idx + i) % len(keys)] for i in range(len(keys))]
+    log.info(f"🔑 [AI AUDITOR] Pool ativo com {len(keys)} chave(s) Gemini para distribuição Round-Robin.")
 
     try:
         from google import genai
