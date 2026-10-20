@@ -27,6 +27,19 @@ log = logging.getLogger('GeminiAuditor')
 _key_lock = threading.Lock()
 _key_counter = 0
 
+_cadence_lock = threading.Lock()
+_last_call_timestamp = 0.0
+
+def wait_for_api_cadence(interval_seconds: float = 2.5):
+    """Garante cadência suave entre chamadas para evitar picos simultâneos (503/429) no Google."""
+    global _last_call_timestamp
+    with _cadence_lock:
+        now = time.time()
+        elapsed = now - _last_call_timestamp
+        if elapsed < interval_seconds:
+            time.sleep(interval_seconds - elapsed)
+        _last_call_timestamp = time.time()
+
 def get_gemini_api_keys() -> list:
     """Recupera lista de chaves de API a partir de variáveis de ambiente."""
     raw = os.environ.get("GEMINI_API_KEYS") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
@@ -171,6 +184,9 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
             rate_limit_hit = False
             for mod in models_to_try:
                 try:
+                    # Aplica espaçamento suave entre chamadas paralelas para blindar contra 503/429
+                    wait_for_api_cadence(interval_seconds=2.5)
+
                     response = client.models.generate_content(
                         model=mod,
                         contents=[
@@ -191,6 +207,10 @@ Retorne ESTRITAMENTE um objeto JSON com esta estrutura:
                         log.warning(f"  ⚠️ [AI AUDITOR] Chave {masked_key} atingiu Rate Limit / Cota (429). Alternando para próxima chave...")
                         rate_limit_hit = True
                         break
+                    elif "503" in err_str or "unavailable" in err_str or "high demand" in err_str:
+                        log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' em alta demanda temporária (503). Tentando modelo alternativo...")
+                        time.sleep(1.5)
+                        continue
                     elif "404" in err_str or "not_found" in err_str or "not found" in err_str:
                         log.warning(f"  ⚠️ [AI AUDITOR] Modelo '{mod}' indisponível ({call_err}). Tentando próximo modelo...")
                         continue
