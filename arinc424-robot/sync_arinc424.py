@@ -560,7 +560,10 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             continue
 
         # Agrupar pernas por transição
-        transitions: Dict[str, list] = {}
+        # Nota DECEA: a Coding Table agrupa todos os IAFs de entrada sob 'APCH'.
+        # Este compilador expande automaticamente a transição APCH em sub-transições
+        # individuais por IAF quando há múltiplos fixes com role='IAF'.
+        raw_transitions: Dict[str, list] = {}
         for l in p_legs:
             t_ident = l.get('transition_ident') or 'COMMON'
             fix_id = l.get('fix_ident')
@@ -588,8 +591,31 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                 'lat': lat,
                 'lng': lng
             }
-            transitions.setdefault(t_ident, []).append(compiled_leg)
-            total_legs_count += 1
+            raw_transitions.setdefault(t_ident, []).append(compiled_leg)
+
+        # ── Expandir transições com múltiplos IAFs em sub-transições individuais ──
+        # Ex: APCH com MO006/MO007/MO008 vira 3 transições: 'MO006', 'MO007', 'MO008'
+        transitions: Dict[str, list] = {}
+        for t_key, t_legs in raw_transitions.items():
+            iaf_legs = [l for l in t_legs if (l.get('role') or '').upper() == 'IAF']
+            non_iaf_legs = [l for l in t_legs if (l.get('role') or '').upper() != 'IAF']
+            if len(iaf_legs) > 1:
+                # Múltiplos IAFs: criar uma sub-transição por IAF
+                # Cada sub-transição = leg do IAF + todas as legs comuns (IF, FAF, etc.)
+                for iaf_leg in iaf_legs:
+                    iaf_fix = iaf_leg['fix']
+                    sub_key = iaf_fix  # Ex: 'MO008', 'MO006', 'MO007'
+                    sub_legs = []
+                    for idx, sl in enumerate([iaf_leg] + non_iaf_legs):
+                        patched = dict(sl)
+                        patched['seq'] = (idx + 1) * 10
+                        patched['trans'] = sub_key
+                        sub_legs.append(patched)
+                    transitions[sub_key] = sub_legs
+            else:
+                # Transição simples: manter como está
+                transitions[t_key] = t_legs
+        total_legs_count += sum(len(v) for v in transitions.values())
 
         # Extrair pista da carta
         rwy = ''
@@ -999,6 +1025,34 @@ def main():
                                             holdings_batch.append(hold)
 
                                 if legs_batch:
+                                    # ── PATCH_IAF_DB_EXPAND ──────────────────────────────────────
+                                    # Expandir transições APCH/ALL com múltiplos IAFs em sub-transições
+                                    # individuais para que o Supabase tenha MO006/MO007/MO008 separados.
+                                    expanded_legs = []
+                                    raw_trans_map = {}
+                                    for leg in legs_batch:
+                                        t_key = (leg.get('transition_ident') or 'COMMON').upper()
+                                        raw_trans_map.setdefault(t_key, []).append(leg)
+
+                                    for t_key, t_legs in raw_trans_map.items():
+                                        iaf_group = [l for l in t_legs if (l.get('role_of_fix') or '').upper() == 'IAF']
+                                        non_iaf   = [l for l in t_legs if (l.get('role_of_fix') or '').upper() != 'IAF']
+                                        if len(iaf_group) > 1:
+                                            print(f'    [IAF-EXPAND] Transicao "{t_key}" tem {len(iaf_group)} IAFs -> expandindo em sub-transicoes individuais', flush=True)
+                                            for iaf_leg in iaf_group:
+                                                iaf_fix = iaf_leg.get('fix_ident', t_key)
+                                                base_seq = 10
+                                                for idx, sl in enumerate([iaf_leg] + non_iaf):
+                                                    patched = dict(sl)
+                                                    patched['transition_ident'] = iaf_fix
+                                                    patched['seq_num'] = base_seq + (idx * 10)
+                                                    expanded_legs.append(patched)
+                                        else:
+                                            expanded_legs.extend(t_legs)
+
+                                    legs_batch = expanded_legs
+                                    # ── FIM PATCH_IAF_DB_EXPAND ──────────────────────────────────
+
                                     db_legs = []
                                     for leg in legs_batch:
                                         db_legs.append({
