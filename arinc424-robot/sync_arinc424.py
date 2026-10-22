@@ -424,7 +424,7 @@ def extract_text_from_pdf_stream(pdf_bytes: bytes) -> str:
 
 # ─── MOTOR DE COMPILACAO STAGING PARA O APP MOVEL ────────────────────────────
 
-def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryManager) -> Tuple[dict, str]:
+def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryManager, in_memory_procedures: List[dict] = None) -> Tuple[dict, str]:
     telemetry.log('📦 Iniciando compilação do pacote consolidado ARINC 424...', level='INFO')
 
     # 1. Carrega todas as pernas, cabeçalhos e órbitas do Supabase
@@ -464,6 +464,88 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
     total_legs_count = 0
     total_holdings_count = 0
     total_procs_count = 0
+    if in_memory_procedures:
+        for p in in_memory_procedures:
+            p_icao = p.get('icao', '').upper()
+            p_name = p.get('name', '')
+            p_type = p.get('type', 'IAC')
+            p_legs = p.get('legs', [])
+            p_holdings = p.get('holdings', [])
+            p_waypoints = p.get('waypoints', {})
+
+            if not p_icao or not p_legs:
+                continue
+
+            if p_icao not in airports_map:
+                airports_map[p_icao] = {
+                    'icao': p_icao,
+                    'procedures': {'IAC': {}, 'SID': {}, 'STAR': {}}
+                }
+
+            transitions_p: Dict[str, list] = {}
+            for l in p_legs:
+                t_ident = l.get('transition_ident') or 'COMMON'
+                fix_id = l.get('fix_ident')
+                wp_c = p_waypoints.get(fix_id, {})
+                lat_c = l.get('lat_dd') if l.get('lat_dd') is not None else wp_c.get('lat_dd')
+                lng_c = l.get('lng_dd') if l.get('lng_dd') is not None else wp_c.get('lng_dd')
+
+                transitions_p.setdefault(t_ident, []).append({
+                    'seq': l.get('seq_num'),
+                    'trans': t_ident,
+                    'fix': fix_id,
+                    'flyOver': bool(l.get('fly_over')),
+                    'path': l.get('path_terminator'),
+                    'magCourse': l.get('mag_course'),
+                    'trueCourse': l.get('true_course'),
+                    'turn': l.get('turn_direction'),
+                    'altConstraint': l.get('altitude_constraint_type'),
+                    'minAlt': l.get('lower_limit_altitude_ft'),
+                    'maxAlt': l.get('upper_limit_altitude_ft'),
+                    'speedLimit': l.get('speed_limit_kts'),
+                    'distance': l.get('distance_nm'),
+                    'vertAngle': l.get('vertical_angle'),
+                    'role': l.get('role_of_fix'),
+                    'navSpec': l.get('nav_spec'),
+                    'lat': lat_c,
+                    'lng': lng_c
+                })
+
+            holdings_p = []
+            for h in p_holdings:
+                holdings_p.append({
+                    'fix': h.get('fix_ident'),
+                    'inboundCourse': h.get('inbound_mag_course'),
+                    'turn': h.get('turn_direction'),
+                    'minAlt': h.get('min_altitude_ft'),
+                    'maxAlt': h.get('max_altitude_ft'),
+                    'speedLimit': h.get('speed_limit_kts'),
+                    'legDist': h.get('leg_distance_nm'),
+                    'legTime': h.get('leg_time_min')
+                })
+
+            all_legs_p = []
+            for trans_arr in transitions_p.values():
+                all_legs_p.extend(trans_arr)
+            all_legs_p.sort(key=lambda x: (x.get('trans') or '', x.get('seq') or 0))
+
+            if p_type not in airports_map[p_icao]['procedures']:
+                airports_map[p_icao]['procedures'][p_type] = {}
+
+            airports_map[p_icao]['procedures'][p_type][p_name] = {
+                'name': p_name,
+                'type': p_type,
+                'chartUrl': p.get('chart_url'),
+                'codingTableUrl': p.get('coding_table_url'),
+                'transitions': transitions_p,
+                'holdings': holdings_p,
+                'allLegs': all_legs_p
+            }
+
+            total_procs_count += 1
+            total_legs_count += len(p_legs)
+            total_holdings_count += len(holdings_p)
+
 
     for h in headers:
         icao = (h.get('icao_code') or '').upper()
@@ -669,6 +751,7 @@ def main():
         target_icaos = ['SBSV']
 
     telemetry = TelemetryManager(s3, target_icaos)
+    in_memory_procs: List[dict] = []
     telemetry.log(f'🚀 Robô ARINC 424 iniciado para {len(target_icaos)} aeródromo(s): {", ".join(target_icaos)}', 1, 0)
 
     total_procs_ingested = 0
@@ -946,6 +1029,17 @@ def main():
                                     timeout=15
                                 )
                                 total_procs_ingested += 1
+                                in_memory_procs.append({
+                                    'icao': icao,
+                                    'id': proc_id or f"{icao}_{name_val}",
+                                    'name': name_val,
+                                    'type': t_val,
+                                    'chart_url': chart_link,
+                                    'coding_table_url': tab_link,
+                                    'legs': legs_batch,
+                                    'holdings': holdings_batch,
+                                    'waypoints': waypoints
+                                })
 
                     except Exception as err_p:
                         print(f'  [Aviso] Falha ao decodificar {name_val}: {err_p}', flush=True)
@@ -958,7 +1052,7 @@ def main():
 
     # ── FASE FINAL: COMPILACAO AUTOMATICA E ENTREGA NO STAGING DO R2 ───────────
     try:
-        pkg, staging_url = compile_arinc_staging_package(s3, args.airac, telemetry)
+        pkg, staging_url = compile_arinc_staging_package(s3, args.airac, telemetry, in_memory_procedures=in_memory_procs)
         size_kb = pkg['metadata']['fileSizeBytes'] / 1024.0
 
         telemetry.log(
