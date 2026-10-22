@@ -45,8 +45,8 @@ R2_SECRET_KEY = os.environ.get('R2_SECRET_ACCESS_KEY') or os.environ.get('CLOUDF
 R2_BUCKET = os.environ.get('R2_BUCKET_NAME') or os.environ.get('CLOUDFLARE_R2_BUCKET', 'skyfpl-charts')
 R2_PUBLIC_URL = os.environ.get('R2_PUBLIC_URL', 'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev').rstrip('/')
 
-AISWEB_API_KEY = os.environ.get('AISWEB_API_KEY', '')
-AISWEB_API_PASS = os.environ.get('AISWEB_API_PASS', '')
+AISWEB_API_KEY = os.environ.get('AISWEB_API_KEY') or '1587263166'
+AISWEB_API_PASS = os.environ.get('AISWEB_API_PASS') or '3199249e-755b-1033-a49b-72567f175e3a'
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '')
@@ -223,6 +223,11 @@ def send_telegram_notification(
         return False
 
 # ─── PARSER ARINC 424 ─────────────────────────────────────────────────────────
+
+def clean_cdata(val: str) -> str:
+    if not val:
+        return ''
+    return re.sub(r'<!\[CDATA\[|\]\]>', '', val).strip()
 
 def convert_dms_to_dd(dms_str: str) -> Optional[float]:
     if not dms_str:
@@ -659,24 +664,28 @@ def main():
                 continue
 
             xml = r.text
-            items = re.findall(r'<item[\s\S]*?<\/item>', xml)
+            if 'Informe uma chave' in xml or '<erro>' in xml:
+                telemetry.log(f'❌ [{icao}] Erro de autenticação AISWEB: chave inválida', idx, 90, level='ERROR')
+                continue
+
+            items = re.findall(r'<item.*?>.*?</item>', xml, re.DOTALL | re.IGNORECASE)
             telemetry.charts_found += len(items)
 
             # Filtrar cartas IFR que possuam <tabcode>
             for it in items:
-                m_type = re.search(r'<tipo>([\\s\\S]*?)<\/tipo>', it)
-                t_val = m_type.group(1).strip() if m_type else ''
+                m_type = re.search(r'<tipo>(.*?)</tipo>', it, re.DOTALL | re.IGNORECASE)
+                t_val = clean_cdata(m_type.group(1)) if m_type else ''
                 if t_val not in ('IAC', 'STAR', 'SID'):
                     continue
 
-                m_name = re.search(r'<nome>([\\s\\S]*?)<\/nome>', it)
-                name_val = m_name.group(1).strip() if m_name else ''
+                m_name = re.search(r'<nome>(.*?)</nome>', it, re.DOTALL | re.IGNORECASE)
+                name_val = clean_cdata(m_name.group(1)) if m_name else ''
 
-                m_tab = re.search(r'<tabcode>([\\s\\S]*?)<\/tabcode>', it)
-                tab_link = m_tab.group(1).strip() if m_tab else ''
+                m_tab = re.search(r'<tabcode>(.*?)</tabcode>', it, re.DOTALL | re.IGNORECASE)
+                tab_link = clean_cdata(m_tab.group(1)) if m_tab else ''
 
-                m_chart = re.search(r'<link>([\\s\\S]*?)<\/link>', it)
-                chart_link = m_chart.group(1).strip() if m_chart else ''
+                m_chart = re.search(r'<link>(.*?)</link>', it, re.DOTALL | re.IGNORECASE)
+                chart_link = clean_cdata(m_chart.group(1)) if m_chart else ''
 
                 has_table = bool(tab_link and tab_link.startswith('http'))
                 if has_table:
@@ -696,7 +705,7 @@ def main():
 
                 h_resp = requests.post(
                     f'{SUPABASE_URL}/rest/v1/procedure_headers?on_conflict=icao_code,procedure_name',
-                    headers=HEADERS_REST,
+                    headers={**HEADERS_REST, 'Prefer': 'return=representation,resolution=merge-duplicates'},
                     json=header_payload,
                     timeout=15
                 )
@@ -706,6 +715,18 @@ def main():
                     res_json = h_resp.json()
                     if isinstance(res_json, list) and len(res_json) > 0:
                         proc_id = res_json[0].get('id')
+
+                if not proc_id:
+                    try:
+                        q_resp = requests.get(
+                            f'{SUPABASE_URL}/rest/v1/procedure_headers?icao_code=eq.{icao}&procedure_name=eq.{requests.utils.quote(name_val)}&select=id',
+                            headers=HEADERS_REST,
+                            timeout=10
+                        )
+                        if q_resp.status_code == 200 and q_resp.json():
+                            proc_id = q_resp.json()[0].get('id')
+                    except Exception:
+                        pass
 
                 # Se tem tabela de codificação, baixa e decodifica pernas
                 if has_table and proc_id:
