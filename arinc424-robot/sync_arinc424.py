@@ -479,7 +479,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             if p_icao not in airports_map:
                 airports_map[p_icao] = {
                     'icao': p_icao,
-                    'procedures': {'IAC': {}, 'SID': {}, 'STAR': {}}
+                    'procedures': []
                 }
 
             transitions_p: Dict[str, list] = {}
@@ -494,7 +494,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                     'seq': l.get('seq_num'),
                     'trans': t_ident,
                     'fix': fix_id,
-                    'flyOver': bool(l.get('fly_over')),
+                    'flyOver': bool(l.get('is_fly_over', l.get('fly_over', False))),
                     'path': l.get('path_terminator'),
                     'magCourse': l.get('mag_course'),
                     'trueCourse': l.get('true_course'),
@@ -529,10 +529,8 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                 all_legs_p.extend(trans_arr)
             all_legs_p.sort(key=lambda x: (x.get('trans') or '', x.get('seq') or 0))
 
-            if p_type not in airports_map[p_icao]['procedures']:
-                airports_map[p_icao]['procedures'][p_type] = {}
-
-            airports_map[p_icao]['procedures'][p_type][p_name] = {
+            compiled_mem_proc = {
+                'id': p.get('id') or f"{p_icao}_{p_type}_{p_name}",
                 'name': p_name,
                 'type': p_type,
                 'chartUrl': p.get('chart_url'),
@@ -542,6 +540,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                 'allLegs': all_legs_p
             }
 
+            airports_map[p_icao]['procedures'].append(compiled_mem_proc)
             total_procs_count += 1
             total_legs_count += len(p_legs)
             total_holdings_count += len(holdings_p)
@@ -628,6 +627,12 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
 
         if icao not in airports_map:
             airports_map[icao] = {'icao': icao, 'procedures': []}
+
+        # Evita duplicidade se o procedimento já foi adicionado da memória recente
+        existing_names = {pr['name'].strip().upper() for pr in airports_map[icao]['procedures']}
+        if p_name.strip().upper() in existing_names:
+            continue
+
         airports_map[icao]['procedures'].append(compiled_proc)
         total_procs_count += 1
 
