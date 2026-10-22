@@ -594,19 +594,36 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             raw_transitions.setdefault(t_ident, []).append(compiled_leg)
 
         # ── Expandir transições com múltiplos IAFs em sub-transições individuais ──
-        # Ex: APCH com MO006/MO007/MO008 vira 3 transições: 'MO006', 'MO007', 'MO008'
+        # Estrutura DECEA: [IAF1][priv1][IAF2][priv2][IAF3][priv3][comuns...]
+        # Cada IAF é seguido pela sua leg privada (conexão ao IF).
+        # Apenas as legs APÓS todos os pares IAF/privada são compartilhadas.
         transitions: Dict[str, list] = {}
         for t_key, t_legs in raw_transitions.items():
-            iaf_legs = [l for l in t_legs if (l.get('role') or '').upper() == 'IAF']
-            non_iaf_legs = [l for l in t_legs if (l.get('role') or '').upper() != 'IAF']
-            if len(iaf_legs) > 1:
-                # Múltiplos IAFs: criar uma sub-transição por IAF
-                # Cada sub-transição = leg do IAF + todas as legs comuns (IF, FAF, etc.)
-                for iaf_leg in iaf_legs:
-                    iaf_fix = iaf_leg['fix']
-                    sub_key = iaf_fix  # Ex: 'MO008', 'MO006', 'MO007'
+            sorted_rl = sorted(t_legs, key=lambda l: l.get('seq') or 0)
+            iaf_pairs_r2 = []
+            i_rl = 0
+            last_iaf_end_r2 = 0
+            while i_rl < len(sorted_rl):
+                leg = sorted_rl[i_rl]
+                if (leg.get('role') or '').upper() == 'IAF':
+                    iaf_fix = leg.get('fix') or t_key
+                    pair = [leg]
+                    if i_rl + 1 < len(sorted_rl) and (sorted_rl[i_rl + 1].get('role') or '').upper() != 'IAF':
+                        pair.append(sorted_rl[i_rl + 1])
+                        i_rl += 2
+                    else:
+                        i_rl += 1
+                    last_iaf_end_r2 = i_rl
+                    iaf_pairs_r2.append((iaf_fix, pair))
+                else:
+                    i_rl += 1
+            common_r2 = sorted_rl[last_iaf_end_r2:]
+            if len(iaf_pairs_r2) > 1:
+                # Múltiplos IAFs: criar sub-transição por IAF (legs privadas + legs comuns)
+                for iaf_fix, priv_r2 in iaf_pairs_r2:
+                    sub_key = iaf_fix  # Ex: 'MO006', 'MO007', 'MO008'
                     sub_legs = []
-                    for idx, sl in enumerate([iaf_leg] + non_iaf_legs):
+                    for idx, sl in enumerate(priv_r2 + common_r2):
                         patched = dict(sl)
                         patched['seq'] = (idx + 1) * 10
                         patched['trans'] = sub_key
@@ -1025,9 +1042,10 @@ def main():
                                             holdings_batch.append(hold)
 
                                 if legs_batch:
-                                    # ── PATCH_IAF_DB_EXPAND ──────────────────────────────────────
-                                    # Expandir transições APCH/ALL com múltiplos IAFs em sub-transições
-                                    # individuais para que o Supabase tenha MO006/MO007/MO008 separados.
+                                    # ── PATCH_IAF_DB_EXPAND (v2 - par IAF+leg_privada) ───────────
+                                    # Estrutura DECEA: [IAF1][priv1][IAF2][priv2][IAF3][priv3][comuns...]
+                                    # Cada IAF é seguido pela sua leg privada (conexão ao IF).
+                                    # Apenas as legs APÓS todos os pares IAF/privada são compartilhadas.
                                     expanded_legs = []
                                     raw_trans_map = {}
                                     for leg in legs_batch:
@@ -1035,17 +1053,33 @@ def main():
                                         raw_trans_map.setdefault(t_key, []).append(leg)
 
                                     for t_key, t_legs in raw_trans_map.items():
-                                        iaf_group = [l for l in t_legs if (l.get('role_of_fix') or '').upper() == 'IAF']
-                                        non_iaf   = [l for l in t_legs if (l.get('role_of_fix') or '').upper() != 'IAF']
-                                        if len(iaf_group) > 1:
-                                            print(f'    [IAF-EXPAND] Transicao "{t_key}" tem {len(iaf_group)} IAFs -> expandindo em sub-transicoes individuais', flush=True)
-                                            for iaf_leg in iaf_group:
-                                                iaf_fix = iaf_leg.get('fix_ident', t_key)
-                                                base_seq = 10
-                                                for idx, sl in enumerate([iaf_leg] + non_iaf):
+                                        sorted_tl = sorted(t_legs, key=lambda l: l.get('seq_num') or 0)
+                                        iaf_pairs = []
+                                        i_tl = 0
+                                        last_iaf_end = 0
+                                        while i_tl < len(sorted_tl):
+                                            leg = sorted_tl[i_tl]
+                                            if (leg.get('role_of_fix') or '').upper() == 'IAF':
+                                                iaf_fix = leg.get('fix_ident') or t_key
+                                                pair = [leg]
+                                                # A leg imediatamente seguinte (se não for IAF) é privada deste IAF
+                                                if i_tl + 1 < len(sorted_tl) and (sorted_tl[i_tl+1].get('role_of_fix') or '').upper() != 'IAF':
+                                                    pair.append(sorted_tl[i_tl + 1])
+                                                    i_tl += 2
+                                                else:
+                                                    i_tl += 1
+                                                last_iaf_end = i_tl
+                                                iaf_pairs.append((iaf_fix, pair))
+                                            else:
+                                                i_tl += 1
+                                        common_db = sorted_tl[last_iaf_end:]
+                                        if len(iaf_pairs) > 1:
+                                            print(f'    [IAF-EXPAND v2] "{t_key}" -> {len(iaf_pairs)} IAFs, {len(common_db)} legs comuns', flush=True)
+                                            for iaf_fix, priv_legs in iaf_pairs:
+                                                for idx, sl in enumerate(priv_legs + common_db):
                                                     patched = dict(sl)
                                                     patched['transition_ident'] = iaf_fix
-                                                    patched['seq_num'] = base_seq + (idx * 10)
+                                                    patched['seq_num'] = (idx + 1) * 10
                                                     expanded_legs.append(patched)
                                         else:
                                             expanded_legs.extend(t_legs)
