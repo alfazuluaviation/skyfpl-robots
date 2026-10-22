@@ -636,8 +636,27 @@ def main():
         print(f'☁️ Cloudflare R2 Conectado: Bucket {R2_BUCKET}.', flush=True)
 
     raw_input = args.icao.strip().upper()
-    if raw_input in PRESET_AIRPORTS:
-        target_icaos = PRESET_AIRPORTS[raw_input]
+    if raw_input in ('ALL', 'TODOS'):
+        print('🌍 Modo Malha Nacional Ativado: Baixando lista completa de aeródromos...', flush=True)
+        target_icaos = []
+        try:
+            r_nav = requests.get('https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev/latest_navdata.json', timeout=30)
+            if r_nav.status_code == 200:
+                nav_data = r_nav.json().get('data', [])
+                target_icaos = sorted({p['icao'] for p in nav_data if p.get('icao') and len(p.get('icao')) == 4 and p['icao'].startswith(('SB', 'SW', 'SS', 'SN', 'SD', 'SI', 'SJ'))})
+        except Exception as e:
+            print(f'⚠️ Falha ao baixar latest_navdata.json: {e}', flush=True)
+
+        if not target_icaos:
+            try:
+                r_sb = requests.get(f'{SUPABASE_URL}/rest/v1/procedure_headers?select=icao_code', headers=HEADERS_REST, timeout=20)
+                if r_sb.status_code == 200:
+                    target_icaos = sorted({x['icao_code'] for x in r_sb.json() if x.get('icao_code')})
+            except Exception:
+                pass
+
+        if not target_icaos:
+            target_icaos = ['SBSV', 'SBGR', 'SBRJ', 'SBBR']
     else:
         target_icaos = [x.strip() for x in raw_input.split(',') if len(x.strip()) == 4]
 
