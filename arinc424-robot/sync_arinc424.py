@@ -37,7 +37,12 @@ except ImportError:
 # ─── CONFIGURACOES DE AMBIENTE ───────────────────────────────────────────────
 
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://gongoqjjpwphhttumdjm.supabase.co').rstrip('/')
-SUPABASE_KEY = os.environ.get('SUPABASE_SERVICE_ROLE_KEY') or os.environ.get('SUPABASE_KEY') or os.environ.get('SUPABASE_ANON_KEY', '')
+SUPABASE_KEY = (
+    os.environ.get('SUPABASE_SERVICE_ROLE_KEY')
+    or os.environ.get('SUPABASE_KEY')
+    or os.environ.get('SUPABASE_ANON_KEY')
+    or 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvbmdvcWpqcHdwaGh0dHVtZGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTUyMDcsImV4cCI6MjA4Mjk5MTIwN30.XhdrWma90JeoQdGfeqCoXgGVnyiTZ5GXHszEHw3Ce2o'
+)
 
 R2_ENDPOINT = os.environ.get('R2_ENDPOINT') or os.environ.get('CLOUDFLARE_R2_ENDPOINT', '')
 R2_ACCESS_KEY = os.environ.get('R2_ACCESS_KEY_ID') or os.environ.get('CLOUDFLARE_R2_ACCESS_KEY_ID', '')
@@ -773,17 +778,145 @@ def main():
                                     timeout=15
                                 )
 
-                                lines = [l.strip() for l in raw_text.split('\n') if l.strip()]
                                 legs_batch = []
                                 holdings_batch = []
 
-                                for line in lines:
-                                    leg, hold = parse_leg_line(line, waypoints, icao, name_val)
-                                    if leg:
-                                        leg['procedure_id'] = proc_id
-                                        legs_batch.append(leg)
-                                    if hold:
-                                        holdings_batch.append(hold)
+                                # Estruturacao via tabelas PyMuPDF (fitz)
+                                if fitz:
+                                    try:
+                                        doc_tab = fitz.open(stream=pdf_r.content, filetype='pdf')
+                                        # 1. Busca waypoints em tabelas
+                                        for p_tab in doc_tab:
+                                            tf = p_tab.find_tables()
+                                            for t_item in getattr(tf, 'tables', []):
+                                                for r_row in t_item.extract():
+                                                    c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
+                                                    if len(c_row) >= 2:
+                                                        w_id = c_row[0].strip().upper()
+                                                        w_co = c_row[1].strip()
+                                                        if re.match(r'^[A-Z0-9]{3,7}$', w_id) and ('S ' in w_co or 'N ' in w_co):
+                                                            lat_m = re.search(r'([NS]\s*\d{2}:\d{2}:[\d\.]+)', w_co, re.I)
+                                                            lng_m = re.search(r'([EW]\s*\d{2,3}:\d{2}:[\d\.]+)', w_co, re.I)
+                                                            if lat_m and lng_m:
+                                                                lat_v = convert_dms_to_dd(lat_m.group(1))
+                                                                lng_v = convert_dms_to_dd(lng_m.group(1))
+                                                                if lat_v is not None and lng_v is not None:
+                                                                    waypoints[w_id] = {
+                                                                        'ident': w_id,
+                                                                        'lat_dd': lat_v,
+                                                                        'lng_dd': lng_v,
+                                                                        'dms_coord': f"{lat_m.group(1)} {lng_m.group(1)}",
+                                                                        'source': f'DECEA CODING TABLE {name_val}'
+                                                                    }
+                                        # 2. Busca pernas da Coding Table
+                                        for p_tab in doc_tab:
+                                            tf = p_tab.find_tables()
+                                            for t_item in getattr(tf, 'tables', []):
+                                                for r_row in t_item.extract():
+                                                    c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
+                                                    if len(c_row) >= 6:
+                                                        s_num = c_row[0].strip()
+                                                        p_term = c_row[5].strip().upper()
+                                                        if s_num.isdigit() and p_term in ('IF', 'TF', 'CF', 'DF', 'FA', 'FC', 'FD', 'FM', 'HA', 'HF', 'HM', 'PI', 'RF', 'VA', 'VD', 'VI', 'VM', 'VR'):
+                                                            seq_val = int(s_num)
+                                                            tr_id = c_row[1].strip() or 'ALL'
+                                                            fl_ov = c_row[2].strip().upper() == 'Y'
+                                                            fx_id = c_row[4].strip()
+                                                            crs_str = c_row[6].strip() if len(c_row) > 6 else ''
+                                                            trn_str = c_row[7].strip().upper() if len(c_row) > 7 else ''
+                                                            u_alt_str = c_row[8].strip() if len(c_row) > 8 else ''
+                                                            l_alt_str = c_row[9].strip() if len(c_row) > 9 else ''
+                                                            spd_str = c_row[10].strip() if len(c_row) > 10 else ''
+                                                            dst_str = c_row[12].strip() if len(c_row) > 12 else ''
+                                                            va_str = c_row[13].strip() if len(c_row) > 13 else ''
+                                                            rol_str = c_row[14].strip() if len(c_row) > 14 else ''
+                                                            nav_str = c_row[15].strip() if len(c_row) > 15 else ''
+
+                                                            mg_crs = None
+                                                            m_mg = re.search(r'([\d\.]+)\s*°?\s*Mag', crs_str, re.I)
+                                                            if m_mg: mg_crs = float(m_mg.group(1))
+
+                                                            tr_crs = None
+                                                            m_tr = re.search(r'([\d\.]+)\s*°?\s*True', crs_str, re.I)
+                                                            if m_tr: tr_crs = float(m_tr.group(1))
+
+                                                            lw_alt = None
+                                                            m_lw = re.search(r'(\d{3,5})', l_alt_str)
+                                                            if m_lw: lw_alt = int(m_lw.group(1))
+
+                                                            up_alt = None
+                                                            m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', u_alt_str, re.I)
+                                                            if m_up:
+                                                                if m_up.group(1): up_alt = int(m_up.group(1)) * 100
+                                                                elif m_up.group(2): up_alt = int(m_up.group(2))
+
+                                                            spd_lim = None
+                                                            m_sp = re.search(r'(\d{2,3})', spd_str)
+                                                            if m_sp: spd_lim = int(m_sp.group(1))
+
+                                                            dst_nm = None
+                                                            if dst_str and dst_str != 'N/A':
+                                                                try: dst_nm = float(dst_str)
+                                                                except: pass
+
+                                                            v_ang = None
+                                                            if va_str and va_str != 'N/A':
+                                                                try: v_ang = float(va_str)
+                                                                except: pass
+
+                                                            wp_obj = waypoints.get(fx_id)
+                                                            leg_entry = {
+                                                                'procedure_id': proc_id,
+                                                                'seq_num': seq_val,
+                                                                'transition_ident': tr_id,
+                                                                'fix_ident': fx_id,
+                                                                'path_terminator': p_term,
+                                                                'fly_over': fl_ov,
+                                                                'mag_course': mg_crs,
+                                                                'true_course': tr_crs,
+                                                                'turn_direction': trn_str if trn_str in ('R', 'L') else None,
+                                                                'altitude_constraint_type': None,
+                                                                'lower_limit_altitude_ft': lw_alt,
+                                                                'upper_limit_altitude_ft': up_alt,
+                                                                'speed_limit_kts': spd_lim,
+                                                                'distance_nm': dst_nm,
+                                                                'leg_time_min': None,
+                                                                'vertical_angle': v_ang,
+                                                                'role_of_fix': rol_str if rol_str and rol_str != 'N/A' else None,
+                                                                'nav_spec': nav_str,
+                                                                'lat_dd': wp_obj['lat_dd'] if wp_obj else None,
+                                                                'lng_dd': wp_obj['lng_dd'] if wp_obj else None,
+                                                                'raw_row_text': ' | '.join(c_row)
+                                                            }
+                                                            legs_batch.append(leg_entry)
+
+                                                            if p_term in ('HM', 'HF', 'HA'):
+                                                                holdings_batch.append({
+                                                                    'fix_ident': fx_id,
+                                                                    'icao_associated': icao,
+                                                                    'inbound_mag_course': mg_crs or 0,
+                                                                    'turn_direction': trn_str if trn_str in ('R', 'L') else 'R',
+                                                                    'leg_time_min': 1.0,
+                                                                    'leg_distance_nm': dst_nm,
+                                                                    'min_altitude_ft': lw_alt or 2000,
+                                                                    'max_altitude_ft': up_alt,
+                                                                    'speed_limit_kts': spd_lim or 230,
+                                                                    'source_reference': f'{name_val} / Coding Table Leg {seq_val}',
+                                                                    'is_procedural': True
+                                                                })
+                                    except Exception as ex_t:
+                                        print(f'  [Aviso] Falha na extracao por tabelas PyMuPDF: {ex_t}', flush=True)
+
+                                # Fallback para regex linha a linha se a tabela nao tiver retornado pernas
+                                if not legs_batch:
+                                    lines_f = [l.strip() for l in raw_text.split('\n') if l.strip()]
+                                    for line in lines_f:
+                                        leg, hold = parse_leg_line(line, waypoints, icao, name_val)
+                                        if leg:
+                                            leg['procedure_id'] = proc_id
+                                            legs_batch.append(leg)
+                                        if hold:
+                                            holdings_batch.append(hold)
 
                                 if legs_batch:
                                     requests.post(
