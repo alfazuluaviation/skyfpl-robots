@@ -795,8 +795,11 @@ def main():
                 chart_link = clean_cdata(m_chart.group(1)) if m_chart else ''
 
                 has_table = bool(tab_link and tab_link.startswith('http'))
-                if has_table:
-                    telemetry.tables_detected += 1
+                if not has_table:
+                    # O módulo ARINC 424 processa estritamente procedimentos com Coding Table oficial
+                    continue
+
+                telemetry.tables_detected += 1
 
                 # Upsert em procedure_headers com ID deterministico
                 p_slug = re.sub(r'[^A-Z0-9]', '_', name_val.upper())
