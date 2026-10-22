@@ -798,8 +798,13 @@ def main():
                 if has_table:
                     telemetry.tables_detected += 1
 
-                # Upsert em procedure_headers
+                # Upsert em procedure_headers com ID deterministico
+                p_slug = re.sub(r'[^A-Z0-9]', '_', name_val.upper())
+                p_slug = re.sub(r'_+', '_', p_slug).strip('_')
+                calc_id = f'{icao}_{t_val}_{p_slug}'
+
                 header_payload = {
+                    'id': calc_id,
                     'icao_code': icao,
                     'procedure_name': name_val,
                     'procedure_type': t_val,
@@ -811,29 +816,13 @@ def main():
                 }
 
                 h_resp = requests.post(
-                    f'{SUPABASE_URL}/rest/v1/procedure_headers?on_conflict=icao_code,procedure_name',
+                    f'{SUPABASE_URL}/rest/v1/procedure_headers?on_conflict=id',
                     headers={**HEADERS_REST, 'Prefer': 'return=representation,resolution=merge-duplicates'},
                     json=header_payload,
                     timeout=15
                 )
 
-                proc_id = None
-                if h_resp.status_code in (200, 201):
-                    res_json = h_resp.json()
-                    if isinstance(res_json, list) and len(res_json) > 0:
-                        proc_id = res_json[0].get('id')
-
-                if not proc_id:
-                    try:
-                        q_resp = requests.get(
-                            f'{SUPABASE_URL}/rest/v1/procedure_headers?icao_code=eq.{icao}&procedure_name=eq.{requests.utils.quote(name_val)}&select=id',
-                            headers=HEADERS_REST,
-                            timeout=10
-                        )
-                        if q_resp.status_code == 200 and q_resp.json():
-                            proc_id = q_resp.json()[0].get('id')
-                    except Exception:
-                        pass
+                proc_id = calc_id
 
                 # Se tem tabela de codificação, baixa e decodifica pernas
                 if has_table and proc_id:
@@ -954,7 +943,7 @@ def main():
                                                                 'transition_ident': tr_id,
                                                                 'fix_ident': fx_id,
                                                                 'path_terminator': p_term,
-                                                                'fly_over': fl_ov,
+                                                                'is_fly_over': fl_ov,
                                                                 'mag_course': mg_crs,
                                                                 'true_course': tr_crs,
                                                                 'turn_direction': trn_str if trn_str in ('R', 'L') else None,
@@ -1002,12 +991,36 @@ def main():
                                             holdings_batch.append(hold)
 
                                 if legs_batch:
-                                    requests.post(
+                                    db_legs = []
+                                    for leg in legs_batch:
+                                        db_legs.append({
+                                            'procedure_id': leg.get('procedure_id'),
+                                            'seq_num': leg.get('seq_num'),
+                                            'transition_ident': leg.get('transition_ident'),
+                                            'fix_ident': leg.get('fix_ident'),
+                                            'is_fly_over': bool(leg.get('is_fly_over', False)),
+                                            'path_terminator': leg.get('path_terminator'),
+                                            'mag_course': leg.get('mag_course'),
+                                            'true_course': leg.get('true_course'),
+                                            'turn_direction': leg.get('turn_direction'),
+                                            'upper_limit_altitude_ft': leg.get('upper_limit_altitude_ft'),
+                                            'lower_limit_altitude_ft': leg.get('lower_limit_altitude_ft'),
+                                            'altitude_constraint_type': leg.get('altitude_constraint_type'),
+                                            'speed_limit_kts': leg.get('speed_limit_kts'),
+                                            'distance_nm': leg.get('distance_nm'),
+                                            'vertical_angle': leg.get('vertical_angle'),
+                                            'role_of_fix': leg.get('role_of_fix'),
+                                            'nav_spec': leg.get('nav_spec') or 'RNP APCH',
+                                            'raw_row_text': leg.get('raw_row_text')
+                                        })
+                                    r_legs = requests.post(
                                         f'{SUPABASE_URL}/rest/v1/procedure_legs',
                                         headers=HEADERS_REST,
-                                        json=legs_batch,
+                                        json=db_legs,
                                         timeout=20
                                     )
+                                    if r_legs.status_code not in (200, 201):
+                                        print(f'  [Aviso DB] Erro ao gravar pernas de {name_val}: {r_legs.status_code} - {r_legs.text}', flush=True)
                                     telemetry.legs_decoded += len(legs_batch)
                                     total_legs_ingested += len(legs_batch)
 
