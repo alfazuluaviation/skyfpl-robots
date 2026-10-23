@@ -594,34 +594,34 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             raw_transitions.setdefault(t_ident, []).append(compiled_leg)
 
         # ── Expandir transições com múltiplos IAFs em sub-transições individuais ──
-        # Estrutura DECEA: [IAF1][priv1][IAF2][priv2][IAF3][priv3][comuns...]
-        # Cada IAF é seguido pela sua leg privada (conexão ao IF).
-        # Apenas as legs APÓS todos os pares IAF/privada são compartilhadas.
+        # Estrutura DECEA (intercalada): seq reinicia por IAF, cada IAF é seguido
+        # imediatamente pela sua leg privada na ORDEM DE APARECIMENTO NO PDF.
+        # NÃO reordenar por seq - preservar ordem de inserção (= ordem do PDF).
         transitions: Dict[str, list] = {}
         for t_key, t_legs in raw_transitions.items():
-            sorted_rl = sorted(t_legs, key=lambda l: l.get('seq') or 0)
-            iaf_pairs_r2 = []
-            i_rl = 0
-            last_iaf_end_r2 = 0
-            while i_rl < len(sorted_rl):
-                leg = sorted_rl[i_rl]
+            # NÃO reordenar - preservar ordem de aparecimento do PDF
+            iaf_pairs_r2 = []  # [(iaf_fix, [iaf_leg, priv_leg]), ...]
+            i_r2 = 0
+            last_r2 = 0
+            while i_r2 < len(t_legs):
+                leg = t_legs[i_r2]
                 if (leg.get('role') or '').upper() == 'IAF':
                     iaf_fix = leg.get('fix') or t_key
                     pair = [leg]
-                    if i_rl + 1 < len(sorted_rl) and (sorted_rl[i_rl + 1].get('role') or '').upper() != 'IAF':
-                        pair.append(sorted_rl[i_rl + 1])
-                        i_rl += 2
+                    if i_r2 + 1 < len(t_legs) and (t_legs[i_r2 + 1].get('role') or '').upper() != 'IAF':
+                        pair.append(t_legs[i_r2 + 1])
+                        i_r2 += 2
                     else:
-                        i_rl += 1
-                    last_iaf_end_r2 = i_rl
+                        i_r2 += 1
+                    last_r2 = i_r2
                     iaf_pairs_r2.append((iaf_fix, pair))
                 else:
-                    i_rl += 1
-            common_r2 = sorted_rl[last_iaf_end_r2:]
+                    i_r2 += 1
+            common_r2 = t_legs[last_r2:]
             if len(iaf_pairs_r2) > 1:
-                # Múltiplos IAFs: criar sub-transição por IAF (legs privadas + legs comuns)
+                # Múltiplos IAFs: cada sub-transição = legs privadas do IAF + comuns
                 for iaf_fix, priv_r2 in iaf_pairs_r2:
-                    sub_key = iaf_fix  # Ex: 'MO006', 'MO007', 'MO008'
+                    sub_key = iaf_fix  # 'MO008', 'MO006', 'MO007'
                     sub_legs = []
                     for idx, sl in enumerate(priv_r2 + common_r2):
                         patched = dict(sl)
@@ -1042,10 +1042,11 @@ def main():
                                             holdings_batch.append(hold)
 
                                 if legs_batch:
-                                    # ── PATCH_IAF_DB_EXPAND (v2 - par IAF+leg_privada) ───────────
-                                    # Estrutura DECEA: [IAF1][priv1][IAF2][priv2][IAF3][priv3][comuns...]
-                                    # Cada IAF é seguido pela sua leg privada (conexão ao IF).
-                                    # Apenas as legs APÓS todos os pares IAF/privada são compartilhadas.
+                                    # ── PATCH_IAF_DB_EXPAND (v4 - ordem PDF) ────────────────────
+                                    # Estrutura DECEA (intercalada, seq reinicia por IAF):
+                                    #   seq10/MO008/IAF → seq20/MO004/TF(192°) → seq10/MO006/IAF → seq20/MO004/TF(122°) ...
+                                    # CRÍTICO: NÃO ordenar por seq_num. A ordem de aparecimento no PDF
+                                    # é a correspondência correta entre cada IAF e sua leg privada.
                                     expanded_legs = []
                                     raw_trans_map = {}
                                     for leg in legs_batch:
@@ -1053,29 +1054,29 @@ def main():
                                         raw_trans_map.setdefault(t_key, []).append(leg)
 
                                     for t_key, t_legs in raw_trans_map.items():
-                                        sorted_tl = sorted(t_legs, key=lambda l: l.get('seq_num') or 0)
-                                        iaf_pairs = []
-                                        i_tl = 0
-                                        last_iaf_end = 0
-                                        while i_tl < len(sorted_tl):
-                                            leg = sorted_tl[i_tl]
+                                        # NÃO reordenar - preservar ordem de leitura do PDF
+                                        iaf_pairs_db = []  # [(iaf_fix, [iaf_leg, priv_leg]), ...]
+                                        i_db = 0
+                                        last_end = 0
+                                        while i_db < len(t_legs):
+                                            leg = t_legs[i_db]
                                             if (leg.get('role_of_fix') or '').upper() == 'IAF':
                                                 iaf_fix = leg.get('fix_ident') or t_key
                                                 pair = [leg]
-                                                # A leg imediatamente seguinte (se não for IAF) é privada deste IAF
-                                                if i_tl + 1 < len(sorted_tl) and (sorted_tl[i_tl+1].get('role_of_fix') or '').upper() != 'IAF':
-                                                    pair.append(sorted_tl[i_tl + 1])
-                                                    i_tl += 2
+                                                # A leg seguinte (se não for IAF) é a leg privada deste IAF
+                                                if i_db + 1 < len(t_legs) and (t_legs[i_db+1].get('role_of_fix') or '').upper() != 'IAF':
+                                                    pair.append(t_legs[i_db + 1])
+                                                    i_db += 2
                                                 else:
-                                                    i_tl += 1
-                                                last_iaf_end = i_tl
-                                                iaf_pairs.append((iaf_fix, pair))
+                                                    i_db += 1
+                                                last_end = i_db
+                                                iaf_pairs_db.append((iaf_fix, pair))
                                             else:
-                                                i_tl += 1
-                                        common_db = sorted_tl[last_iaf_end:]
-                                        if len(iaf_pairs) > 1:
-                                            print(f'    [IAF-EXPAND v2] "{t_key}" -> {len(iaf_pairs)} IAFs, {len(common_db)} legs comuns', flush=True)
-                                            for iaf_fix, priv_legs in iaf_pairs:
+                                                i_db += 1
+                                        common_db = t_legs[last_end:]
+                                        if len(iaf_pairs_db) > 1:
+                                            print(f'    [IAF-EXPAND v4] "{t_key}" {len(iaf_pairs_db)} IAFs (ordem PDF) + {len(common_db)} comuns', flush=True)
+                                            for iaf_fix, priv_legs in iaf_pairs_db:
                                                 for idx, sl in enumerate(priv_legs + common_db):
                                                     patched = dict(sl)
                                                     patched['transition_ident'] = iaf_fix
