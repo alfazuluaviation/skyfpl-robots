@@ -894,9 +894,18 @@ def main():
                                         timeout=15
                                     )
 
-                                # Deletar pernas antigas antes de inserir
+                                # Deletar pernas e holdings antigos antes de inserir
+                                # (evita duplicatas em execuções sucessivas do robô)
                                 requests.delete(
                                     f'{SUPABASE_URL}/rest/v1/procedure_legs?procedure_id=eq.{proc_id}',
+                                    headers=HEADERS_REST,
+                                    timeout=15
+                                )
+                                # Holdings não têm procedure_id: deletar pelo nome do procedimento via source_reference
+                                import urllib.parse as _up
+                                _encoded_name = _up.quote(name_val.upper())
+                                requests.delete(
+                                    f'{SUPABASE_URL}/rest/v1/holding_patterns?icao_associated=eq.{icao}&source_reference=ilike.{_encoded_name}%25',
                                     headers=HEADERS_REST,
                                     timeout=15
                                 )
