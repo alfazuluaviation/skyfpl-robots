@@ -351,7 +351,7 @@ def parse_leg_line(line: str, waypoints: Dict[str, dict], icao_code: str, proc_n
     if len(tokens) > 14 and tokens[14].upper() != 'N/A':
         role_of_fix = tokens[14].upper()
 
-    nav_spec = 'RNP APCH'
+    nav_spec = None
     if len(tokens) > 15:
         nav_spec = tokens[15].replace('_', ' ').upper()
 
@@ -385,13 +385,13 @@ def parse_leg_line(line: str, waypoints: Dict[str, dict], icao_code: str, proc_n
         holding = {
             'fix_ident': fix_ident,
             'icao_associated': icao_code,
-            'inbound_mag_course': mag_course or 0,
-            'turn_direction': turn_direction or 'R',
-            'leg_time_min': leg_time_min or 1.0,
+            'inbound_mag_course': mag_course,
+            'turn_direction': turn_direction,
+            'leg_time_min': leg_time_min,
             'leg_distance_nm': distance_nm,
-            'min_altitude_ft': lower_limit_altitude or 2000,
+            'min_altitude_ft': lower_limit_altitude,
             'max_altitude_ft': upper_limit_altitude,
-            'speed_limit_kts': speed_limit_kts or 230,
+            'speed_limit_kts': speed_limit_kts,
             'source_reference': f'{proc_name} / Coding Table Leg {seq_num}',
             'is_procedural': True
         }
@@ -645,11 +645,11 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
         for hold in proc_holdings:
             compiled_holdings.append({
                 'fix': hold.get('fix_ident'),
-                'inboundMag': hold.get('inbound_mag_course', 0),
-                'turn': hold.get('turn_direction', 'R'),
-                'legTimeMin': hold.get('leg_time_min', 1.0),
-                'minAltFt': hold.get('min_altitude_ft', 2000),
-                'speedKts': hold.get('speed_limit_kts', 230),
+                'inboundMag': hold.get('inbound_mag_course'),
+                'turn': hold.get('turn_direction'),
+                'legTimeMin': hold.get('leg_time_min'),
+                'minAltFt': hold.get('min_altitude_ft'),
+                'speedKts': hold.get('speed_limit_kts'),
                 'isProcedural': True
             })
             total_holdings_count += 1
@@ -884,16 +884,6 @@ def main():
                             if raw_text:
                                 waypoints = parse_waypoints_section(raw_text, name_val)
 
-                                # Salvar fixos em enroute_fixes
-                                if waypoints:
-                                    fixes_to_upsert = list(waypoints.values())
-                                    requests.post(
-                                        f'{SUPABASE_URL}/rest/v1/enroute_fixes?on_conflict=ident',
-                                        headers=HEADERS_REST,
-                                        json=fixes_to_upsert,
-                                        timeout=15
-                                    )
-
                                 # Deletar pernas e holdings antigos antes de inserir
                                 # (evita duplicatas em execuções sucessivas do robô)
                                 requests.delete(
@@ -926,20 +916,47 @@ def main():
                                                     if len(c_row) >= 2:
                                                         w_id = c_row[0].strip().upper()
                                                         w_co = c_row[1].strip()
-                                                        if re.match(r'^[A-Z0-9]{3,7}$', w_id) and ('S ' in w_co or 'N ' in w_co):
+
+                                                        # 🛡️ Suporte universal à Tabela de DER do DECEA (ex: "30", "10", "DER 30")
+                                                        m_der = re.match(r'^(?:DER\s*)?(\d{2}[LRC]?)$', w_id, re.I)
+                                                        if m_der and ('S ' in w_co or 'N ' in w_co):
+                                                            der_rwy = m_der.group(1)
+                                                            w_id = f"DER{der_rwy}"
+
+                                                        if (re.match(r'^[A-Z0-9]{3,7}$', w_id) or w_id.startswith('DER')) and ('S ' in w_co or 'N ' in w_co):
                                                             lat_m = re.search(r'([NS]\s*\d{2}:\d{2}:[\d\.]+)', w_co, re.I)
                                                             lng_m = re.search(r'([EW]\s*\d{2,3}:\d{2}:[\d\.]+)', w_co, re.I)
                                                             if lat_m and lng_m:
                                                                 lat_v = convert_dms_to_dd(lat_m.group(1))
                                                                 lng_v = convert_dms_to_dd(lng_m.group(1))
+                                                                elev_v = None
+                                                                if len(c_row) > 2 and re.match(r'^[\d\.]+$', c_row[2].strip()):
+                                                                    try: elev_v = float(c_row[2].strip())
+                                                                    except: pass
                                                                 if lat_v is not None and lng_v is not None:
                                                                     waypoints[w_id] = {
                                                                         'ident': w_id,
                                                                         'lat_dd': lat_v,
                                                                         'lng_dd': lng_v,
+                                                                        'elev_ft': elev_v,
                                                                         'dms_coord': f"{lat_m.group(1)} {lng_m.group(1)}",
                                                                         'source': f'DECEA CODING TABLE {name_val}'
                                                                     }
+
+                                        # Salvar todos os fixos (inclusive DERxx) em enroute_fixes
+                                        if waypoints:
+                                            fixes_to_upsert = [
+                                                {'ident': w['ident'], 'lat_dd': w['lat_dd'], 'lng_dd': w['lng_dd']}
+                                                for w in waypoints.values()
+                                                if w.get('lat_dd') is not None and w.get('lng_dd') is not None
+                                            ]
+                                            if fixes_to_upsert:
+                                                requests.post(
+                                                    f'{SUPABASE_URL}/rest/v1/enroute_fixes?on_conflict=ident',
+                                                    headers=HEADERS_REST,
+                                                    json=fixes_to_upsert,
+                                                    timeout=15
+                                                )
                                         # 2. Busca pernas da Coding Table
                                         for p_tab in doc_tab:
                                             tf = p_tab.find_tables()
@@ -999,7 +1016,7 @@ def main():
                                                                 except: pass
 
                                                             if (not fx_id or fx_id == 'N/A') and p_term == 'CA':
-                                                                fx_id = f"({lw_alt or up_alt or '1800'})"
+                                                                fx_id = f"({lw_alt or up_alt})" if (lw_alt or up_alt) else "(CA)"
 
                                                             # Identificação do tipo canônico de restrição
                                                             c_type = None
@@ -1042,13 +1059,13 @@ def main():
                                                                 holdings_batch.append({
                                                                     'fix_ident': fx_id,
                                                                     'icao_associated': icao,
-                                                                    'inbound_mag_course': mg_crs or 0,
-                                                                    'turn_direction': trn_str if trn_str in ('R', 'L') else 'R',
-                                                                    'leg_time_min': 1.0,
+                                                                    'inbound_mag_course': mg_crs,
+                                                                    'turn_direction': trn_str if trn_str in ('R', 'L') else None,
+                                                                    'leg_time_min': None,
                                                                     'leg_distance_nm': dst_nm,
-                                                                    'min_altitude_ft': lw_alt or 2000,
+                                                                    'min_altitude_ft': lw_alt,
                                                                     'max_altitude_ft': up_alt,
-                                                                    'speed_limit_kts': spd_lim or 230,
+                                                                    'speed_limit_kts': spd_lim,
                                                                     'source_reference': f'{name_val} / Coding Table Leg {seq_val}',
                                                                     'is_procedural': True
                                                                 })
@@ -1132,7 +1149,7 @@ def main():
                                             'distance_nm': leg.get('distance_nm'),
                                             'vertical_angle': leg.get('vertical_angle'),
                                             'role_of_fix': leg.get('role_of_fix'),
-                                            'nav_spec': leg.get('nav_spec') or 'RNP APCH',
+                                            'nav_spec': leg.get('nav_spec'),
                                             'raw_row_text': leg.get('raw_row_text')
                                         })
                                     r_legs = requests.post(

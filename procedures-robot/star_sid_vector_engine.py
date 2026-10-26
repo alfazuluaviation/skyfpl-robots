@@ -1001,20 +1001,16 @@ def extract_sid_procedure_spatial_2d(doc, icao: str, nome_carta: str, full_text:
     def build_legs(root_name, n_path, e_path):
         legs = []
         seq = 10
-        # Se for partida com curva condicional (ex: MEVUP com subida inicial até 1800')
-        if root_name == 'MEVUP':
-            ca_val = 1800
-            for ca in unassigned_climb_alts:
-                if ca['val'] in (1800, 2000, 2500):
-                    ca_val = ca['val']
-                    break
+        # Se for partida com curva condicional identificada por altitude inicial de subida
+        if root_name == 'MEVUP' and unassigned_climb_alts:
+            ca_val = unassigned_climb_alts[0]['val']
             legs.append({
                 'seq': seq,
                 'type': 'CA',
                 'fix': None,
                 'role': 'DER_CLIMB',
                 'fly_over': False,
-                'course': 102 if 'PABUK' in nome_carta.upper() else 99,
+                'course': None,
                 'distance_nm': None,
                 'altitude': f"+{ca_val} FT",
                 'altitude_min': ca_val
