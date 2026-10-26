@@ -949,7 +949,7 @@ def main():
                                                     if len(c_row) >= 6:
                                                         s_num = c_row[0].strip()
                                                         p_term = c_row[5].strip().upper()
-                                                        if s_num.isdigit() and p_term in ('IF', 'TF', 'CF', 'DF', 'FA', 'FC', 'FD', 'FM', 'HA', 'HF', 'HM', 'PI', 'RF', 'VA', 'VD', 'VI', 'VM', 'VR'):
+                                                        if s_num.isdigit() and p_term in ('IF', 'TF', 'CF', 'DF', 'FA', 'FC', 'FD', 'FM', 'HA', 'HF', 'HM', 'PI', 'RF', 'VA', 'VD', 'VI', 'VM', 'VR', 'CA', 'CD', 'CI', 'CR'):
                                                             seq_val = int(s_num)
                                                             tr_id = c_row[1].strip() or 'ALL'
                                                             fl_ov = c_row[2].strip().upper() == 'Y'
@@ -973,8 +973,10 @@ def main():
                                                             if m_tr: tr_crs = float(m_tr.group(1))
 
                                                             lw_alt = None
-                                                            m_lw = re.search(r'(\d{3,5})', l_alt_str)
-                                                            if m_lw: lw_alt = int(m_lw.group(1))
+                                                            m_lw = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', l_alt_str, re.I)
+                                                            if m_lw:
+                                                                if m_lw.group(1): lw_alt = int(m_lw.group(1)) * 100
+                                                                elif m_lw.group(2): lw_alt = int(m_lw.group(2))
 
                                                             up_alt = None
                                                             m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', u_alt_str, re.I)
@@ -996,6 +998,20 @@ def main():
                                                                 try: v_ang = float(va_str)
                                                                 except: pass
 
+                                                            if (not fx_id or fx_id == 'N/A') and p_term == 'CA':
+                                                                fx_id = f"({lw_alt or up_alt or '1800'})"
+
+                                                            # Identificação do tipo canônico de restrição
+                                                            c_type = None
+                                                            if 'B' in l_alt_str.upper() or 'B' in u_alt_str.upper() or (lw_alt and up_alt):
+                                                                c_type = 'B'
+                                                            elif '@' in l_alt_str or '@' in u_alt_str:
+                                                                c_type = '@'
+                                                            elif lw_alt and not up_alt:
+                                                                c_type = '+'
+                                                            elif up_alt and not lw_alt:
+                                                                c_type = '-'
+
                                                             wp_obj = waypoints.get(fx_id)
                                                             leg_entry = {
                                                                 'procedure_id': proc_id,
@@ -1007,7 +1023,7 @@ def main():
                                                                 'mag_course': mg_crs,
                                                                 'true_course': tr_crs,
                                                                 'turn_direction': trn_str if trn_str in ('R', 'L') else None,
-                                                                'altitude_constraint_type': None,
+                                                                'altitude_constraint_type': c_type,
                                                                 'lower_limit_altitude_ft': lw_alt,
                                                                 'upper_limit_altitude_ft': up_alt,
                                                                 'speed_limit_kts': spd_lim,
