@@ -229,6 +229,42 @@ def send_telegram_notification(
 
 # ─── PARSER ARINC 424 ─────────────────────────────────────────────────────────
 
+def extract_transition_altitude_from_pdf(pdf_bytes: bytes) -> Optional[int]:
+    """
+    Extrai dinamicamente a Altitude de Transição (TA) do cabeçalho ou notas de uma carta IFR oficial do DECEA
+    """
+    if not (fitz and pdf_bytes):
+        return None
+    try:
+        doc = fitz.open(stream=pdf_bytes, filetype='pdf')
+        if len(doc) == 0:
+            return None
+        text = doc[0].get_text()
+        
+        # 1. Padrão "TA 4000'" ou "TA 10000'" ou "TA: 7000"
+        m = re.search(r'\bTA\s*[:\.]?\s*(\d{4,5})\'?', text, re.I)
+        if m:
+            val = int(m.group(1))
+            if 1000 <= val <= 25000:
+                return val
+                
+        # 2. Padrão "TRANSITION ALTITUDE 4000" ou "TRANSITION ALT: 4000"
+        m2 = re.search(r'TRANSITION\s+ALT(?:ITUDE)?\s*[:\.]?\s*(\d{4,5})\'?', text, re.I)
+        if m2:
+            val = int(m2.group(1))
+            if 1000 <= val <= 25000:
+                return val
+                
+        # 3. Padrão "ALTITUDE DE TRANSIÇÃO: 4000"
+        m3 = re.search(r'ALTITUDE\s+DE\s+TRANSI[CÇ][AÃ]O\s*[:\.]?\s*(\d{4,5})\'?', text, re.I)
+        if m3:
+            val = int(m3.group(1))
+            if 1000 <= val <= 25000:
+                return val
+    except Exception:
+        pass
+    return None
+
 def clean_cdata(val: str) -> str:
     if not val:
         return ''
@@ -424,7 +460,7 @@ def extract_text_from_pdf_stream(pdf_bytes: bytes) -> str:
 
 # ─── MOTOR DE COMPILACAO STAGING PARA O APP MOVEL ────────────────────────────
 
-def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryManager, in_memory_procedures: List[dict] = None) -> Tuple[dict, str]:
+def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryManager, in_memory_procedures: List[dict] = None, airport_ta_map: Dict[str, int] = None) -> Tuple[dict, str]:
     telemetry.log('📦 Iniciando compilação do pacote consolidado ARINC 424...', level='INFO')
 
     # 1. Carrega todas as pernas, cabeçalhos e órbitas do Supabase
@@ -476,11 +512,15 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             if not p_icao or not p_legs:
                 continue
 
+            ta_mem = p.get('transition_altitude') or (airport_ta_map or {}).get(p_icao)
             if p_icao not in airports_map:
                 airports_map[p_icao] = {
                     'icao': p_icao,
+                    'transitionAltitude': ta_mem,
                     'procedures': []
                 }
+            elif ta_mem and not airports_map[p_icao].get('transitionAltitude'):
+                airports_map[p_icao]['transitionAltitude'] = ta_mem
 
             transitions_p: Dict[str, list] = {}
             for l in p_legs:
@@ -654,6 +694,10 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             })
             total_holdings_count += 1
 
+        ta_db = (airport_ta_map or {}).get(icao)
+        if not ta_db and isinstance(h.get('raw_metadata'), dict):
+            ta_db = h.get('raw_metadata', {}).get('transition_altitude')
+
         compiled_proc = {
             'id': pid,
             'name': p_name,
@@ -661,6 +705,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             'rwy': rwy,
             'amdt': h.get('amdt_number'),
             'effectiveDate': h.get('effective_date'),
+            'transitionAltitude': ta_db,
             'icp': h.get('icp_code'),
             'chartUrl': h.get('chart_pdf_url'),
             'codingTableUrl': h.get('coding_table_pdf_url'),
@@ -669,7 +714,13 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
         }
 
         if icao not in airports_map:
-            airports_map[icao] = {'icao': icao, 'procedures': []}
+            airports_map[icao] = {
+                'icao': icao,
+                'transitionAltitude': ta_db,
+                'procedures': []
+            }
+        elif ta_db and not airports_map[icao].get('transitionAltitude'):
+            airports_map[icao]['transitionAltitude'] = ta_db
 
         # Evita duplicidade se o procedimento já foi adicionado da memória recente
         existing_names = {pr['name'].strip().upper() for pr in airports_map[icao]['procedures']}
@@ -800,6 +851,7 @@ def main():
 
     telemetry = TelemetryManager(s3, target_icaos)
     in_memory_procs: List[dict] = []
+    airport_ta_cache: Dict[str, int] = {}
     telemetry.log(f'🚀 Robô ARINC 424 iniciado para {len(target_icaos)} aeródromo(s): {", ".join(target_icaos)}', 1, 0)
 
     total_procs_ingested = 0
@@ -849,6 +901,19 @@ def main():
 
                 telemetry.tables_detected += 1
 
+                # 🎯 Extração dinâmica de Altitude de Transição (TA) da primeira carta oficial IFR do aeródromo
+                if icao not in airport_ta_cache and chart_link and t_val in ('SID', 'IAC'):
+                    try:
+                        clean_chart_link = chart_link.replace('aisweb.decea.gov.br', 'aisweb.decea.mil.br')
+                        c_resp = requests.get(clean_chart_link, headers={'User-Agent': 'SkyFPL/ARINC424-Robot'}, timeout=12)
+                        if c_resp.status_code == 200 and len(c_resp.content) > 1000:
+                            ta_found = extract_transition_altitude_from_pdf(c_resp.content)
+                            if ta_found:
+                                airport_ta_cache[icao] = ta_found
+                                telemetry.log(f'🎯 [{icao}] TA oficial identificada na carta ({t_val} {name_val}): {ta_found} FT', idx, level='SUCCESS')
+                    except Exception:
+                        pass
+
                 # Upsert em procedure_headers com ID deterministico
                 p_slug = re.sub(r'[^A-Z0-9]', '_', name_val.upper())
                 p_slug = re.sub(r'_+', '_', p_slug).strip('_')
@@ -863,6 +928,7 @@ def main():
                     'coding_table_pdf_url': tab_link if has_table else None,
                     'chart_pdf_url': chart_link or None,
                     'parsing_status': 'PENDING' if has_table else 'NO_CODING_TABLE',
+                    'raw_metadata': {'transition_altitude': airport_ta_cache.get(icao)} if airport_ta_cache.get(icao) else None,
                     'updated_at': datetime.now(timezone.utc).isoformat()
                 }
 
@@ -1186,6 +1252,7 @@ def main():
                                     'id': proc_id or f"{icao}_{name_val}",
                                     'name': name_val,
                                     'type': t_val,
+                                    'transition_altitude': airport_ta_cache.get(icao),
                                     'chart_url': chart_link,
                                     'coding_table_url': tab_link,
                                     'legs': legs_batch,
@@ -1204,7 +1271,7 @@ def main():
 
     # ── FASE FINAL: COMPILACAO AUTOMATICA E ENTREGA NO STAGING DO R2 ───────────
     try:
-        pkg, staging_url = compile_arinc_staging_package(s3, args.airac, telemetry, in_memory_procedures=in_memory_procs)
+        pkg, staging_url = compile_arinc_staging_package(s3, args.airac, telemetry, in_memory_procedures=in_memory_procs, airport_ta_map=airport_ta_cache)
         size_kb = pkg['metadata']['fileSizeBytes'] / 1024.0
 
         telemetry.log(
