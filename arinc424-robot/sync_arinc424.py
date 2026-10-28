@@ -919,242 +919,283 @@ def main():
                 p_slug = re.sub(r'_+', '_', p_slug).strip('_')
                 calc_id = f'{icao}_{t_val}_{p_slug}'
 
-                header_payload = {
-                    'id': calc_id,
-                    'icao_code': icao,
-                    'procedure_name': name_val,
-                    'procedure_type': t_val,
-                    'has_coding_table': has_table,
-                    'coding_table_pdf_url': tab_link if has_table else None,
-                    'chart_pdf_url': chart_link or None,
-                    'parsing_status': 'PENDING' if has_table else 'NO_CODING_TABLE',
-                    'raw_metadata': {'transition_altitude': airport_ta_cache.get(icao)} if airport_ta_cache.get(icao) else None,
-                    'updated_at': datetime.now(timezone.utc).isoformat()
-                }
-
-                h_resp = requests.post(
-                    f'{SUPABASE_URL}/rest/v1/procedure_headers?on_conflict=id',
-                    headers={**HEADERS_REST, 'Prefer': 'return=representation,resolution=merge-duplicates'},
-                    json=header_payload,
-                    timeout=15
-                )
-
-                proc_id = calc_id
-
                 # Se tem tabela de codificação, baixa e decodifica pernas
-                if has_table and proc_id:
+                if has_table:
                     try:
                         pdf_r = requests.get(tab_link, headers={'User-Agent': 'SkyFPL/ARINC424-Robot'}, timeout=30)
                         if pdf_r.status_code == 200:
                             raw_text = extract_text_from_pdf_stream(pdf_r.content)
-                            if raw_text:
-                                waypoints = parse_waypoints_section(raw_text, name_val)
+                            waypoints = parse_waypoints_section(raw_text, name_val) if raw_text else {}
 
-                                # Deletar pernas e holdings antigos antes de inserir
-                                # (evita duplicatas em execuções sucessivas do robô)
-                                requests.delete(
-                                    f'{SUPABASE_URL}/rest/v1/procedure_legs?procedure_id=eq.{proc_id}',
-                                    headers=HEADERS_REST,
+                            # Estruturacao via tabelas PyMuPDF (fitz)
+                            procedures_in_pdf = []
+                            current_proc_data = None
+
+                            if fitz:
+                                try:
+                                    doc_tab = fitz.open(stream=pdf_r.content, filetype='pdf')
+                                    # 1. Busca waypoints em tabelas
+                                    for p_tab in doc_tab:
+                                        tf = p_tab.find_tables()
+                                        for t_item in getattr(tf, 'tables', []):
+                                            for r_row in t_item.extract():
+                                                c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
+                                                if len(c_row) >= 2:
+                                                    w_id = c_row[0].strip().upper()
+                                                    w_co = c_row[1].strip()
+
+                                                    # 🛡️ Suporte universal à Tabela de DER do DECEA (ex: "30", "10", "DER 30")
+                                                    m_der = re.match(r'^(?:DER\s*)?(\d{2}[LRC]?)$', w_id, re.I)
+                                                    if m_der and ('S ' in w_co or 'N ' in w_co):
+                                                        der_rwy = m_der.group(1)
+                                                        w_id = f"DER{der_rwy}"
+
+                                                    if (re.match(r'^[A-Z0-9]{3,7}$', w_id) or w_id.startswith('DER')) and ('S ' in w_co or 'N ' in w_co):
+                                                        lat_m = re.search(r'([NS]\s*\d{2}:\d{2}:[\d\.]+)', w_co, re.I)
+                                                        lng_m = re.search(r'([EW]\s*\d{2,3}:\d{2}:[\d\.]+)', w_co, re.I)
+                                                        if lat_m and lng_m:
+                                                            lat_v = convert_dms_to_dd(lat_m.group(1))
+                                                            lng_v = convert_dms_to_dd(lng_m.group(1))
+                                                            elev_v = None
+                                                            if len(c_row) > 2 and re.match(r'^[\d\.]+$', c_row[2].strip()):
+                                                                try: elev_v = float(c_row[2].strip())
+                                                                except: pass
+                                                            if lat_v is not None and lng_v is not None:
+                                                                waypoints[w_id] = {
+                                                                    'ident': w_id,
+                                                                    'lat_dd': lat_v,
+                                                                    'lng_dd': lng_v,
+                                                                    'elev_ft': elev_v,
+                                                                    'dms_coord': f"{lat_m.group(1)} {lng_m.group(1)}",
+                                                                    'source': f'DECEA CODING TABLE {name_val}'
+                                                                }
+
+                                    # Salvar todos os fixos (inclusive DERxx) em enroute_fixes
+                                    if waypoints:
+                                        fixes_to_upsert = [
+                                            {'ident': w['ident'], 'lat_dd': w['lat_dd'], 'lng_dd': w['lng_dd']}
+                                            for w in waypoints.values()
+                                            if w.get('lat_dd') is not None and w.get('lng_dd') is not None
+                                        ]
+                                        if fixes_to_upsert:
+                                            requests.post(
+                                                f'{SUPABASE_URL}/rest/v1/enroute_fixes?on_conflict=ident',
+                                                headers=HEADERS_REST,
+                                                json=fixes_to_upsert,
+                                                timeout=15
+                                            )
+
+                                    # 2. Decomposição de procedimentos e busca de pernas ARINC 424
+                                    for p_tab in doc_tab:
+                                        tf = p_tab.find_tables()
+                                        for t_item in getattr(tf, 'tables', []):
+                                            r_rows = t_item.extract()
+                                            if not r_rows:
+                                                continue
+
+                                            header_title = None
+                                            for row in r_rows[:3]:
+                                                for cell in row:
+                                                    if cell and re.search(r'\b(STAR|SID|IAC)\b', cell, re.I):
+                                                        m_title = re.search(r'((?:STAR|SID|IAC)\s+[^\n\r]+)', cell, re.I)
+                                                        if m_title:
+                                                            header_title = m_title.group(1).strip()
+                                                            break
+                                                if header_title:
+                                                    break
+
+                                            leg_rows = []
+                                            for r_row in r_rows:
+                                                c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
+                                                if len(c_row) >= 6:
+                                                    s_num = c_row[0].strip()
+                                                    p_term = c_row[5].strip().upper()
+                                                    if s_num.isdigit() and p_term in ('IF', 'TF', 'CF', 'DF', 'FA', 'FC', 'FD', 'FM', 'HA', 'HF', 'HM', 'PI', 'RF', 'VA', 'VD', 'VI', 'VM', 'VR', 'CA', 'CD', 'CI', 'CR'):
+                                                        leg_rows.append(c_row)
+
+                                            if header_title:
+                                                current_proc_data = {'name': header_title, 'raw_leg_rows': []}
+                                                procedures_in_pdf.append(current_proc_data)
+
+                                            if leg_rows:
+                                                if current_proc_data is None:
+                                                    current_proc_data = {'name': name_val, 'raw_leg_rows': []}
+                                                    procedures_in_pdf.append(current_proc_data)
+                                                current_proc_data['raw_leg_rows'].extend(leg_rows)
+                                except Exception as ex_t:
+                                    print(f'  [Aviso] Falha na extracao por tabelas PyMuPDF: {ex_t}', flush=True)
+
+                            # Fallback para regex caso não tenha extraído pernas via tabelas
+                            if not procedures_in_pdf or not any(p.get('raw_leg_rows') for p in procedures_in_pdf):
+                                fallback_legs = []
+                                fallback_holds = []
+                                if raw_text:
+                                    for line in [l.strip() for l in raw_text.split('\n') if l.strip()]:
+                                        leg, hold = parse_leg_line(line, waypoints, icao, name_val)
+                                        if leg: fallback_legs.append(leg)
+                                        if hold: fallback_holds.append(hold)
+                                procedures_in_pdf = [{
+                                    'name': name_val,
+                                    'raw_leg_rows': [],
+                                    'parsed_legs': fallback_legs,
+                                    'parsed_holds': fallback_holds
+                                }]
+
+                            # Se o PDF decompôs em múltiplos procedimentos, limpa o cabeçalho composto antigo caso exista
+                            if len(procedures_in_pdf) > 1:
+                                requests.delete(f'{SUPABASE_URL}/rest/v1/procedure_legs?procedure_id=eq.{calc_id}', headers=HEADERS_REST, timeout=10)
+                                requests.delete(f'{SUPABASE_URL}/rest/v1/procedure_headers?id=eq.{calc_id}', headers=HEADERS_REST, timeout=10)
+
+                            # Processa e ingere cada procedimento atômico identificado
+                            for proc_item in procedures_in_pdf:
+                                sub_name = proc_item['name']
+                                sub_type = 'STAR' if 'STAR' in sub_name.upper() else ('SID' if 'SID' in sub_name.upper() else ('IAC' if 'IAC' in sub_name.upper() else t_val))
+                                clean_name_for_slug = re.sub(r'^(?:STAR|SID|IAC)\s+', '', sub_name, flags=re.I).strip()
+                                sub_slug = re.sub(r'[^A-Z0-9]', '_', clean_name_for_slug.upper())
+                                sub_slug = re.sub(r'_+', '_', sub_slug).strip('_')
+                                proc_id = f'{icao}_{sub_type}_{sub_slug}'
+
+                                header_payload = {
+                                    'id': proc_id,
+                                    'icao_code': icao,
+                                    'procedure_name': sub_name,
+                                    'procedure_type': sub_type,
+                                    'has_coding_table': True,
+                                    'coding_table_pdf_url': tab_link,
+                                    'chart_pdf_url': chart_link or None,
+                                    'parsing_status': 'PENDING',
+                                    'raw_metadata': {'transition_altitude': airport_ta_cache.get(icao)} if airport_ta_cache.get(icao) else None,
+                                    'updated_at': datetime.now(timezone.utc).isoformat()
+                                }
+                                requests.post(
+                                    f'{SUPABASE_URL}/rest/v1/procedure_headers?on_conflict=id',
+                                    headers={**HEADERS_REST, 'Prefer': 'return=representation,resolution=merge-duplicates'},
+                                    json=header_payload,
                                     timeout=15
                                 )
-                                # Holdings não têm procedure_id: deletar pelo nome do procedimento via source_reference
+
+                                # Deleta pernas e holdings antigos deste proc_id
+                                requests.delete(f'{SUPABASE_URL}/rest/v1/procedure_legs?procedure_id=eq.{proc_id}', headers=HEADERS_REST, timeout=15)
                                 import urllib.parse as _up
-                                _encoded_name = _up.quote(name_val.upper())
-                                requests.delete(
-                                    f'{SUPABASE_URL}/rest/v1/holding_patterns?icao_associated=eq.{icao}&source_reference=ilike.{_encoded_name}%25',
-                                    headers=HEADERS_REST,
-                                    timeout=15
-                                )
+                                _enc_name = _up.quote(sub_name.upper())
+                                requests.delete(f'{SUPABASE_URL}/rest/v1/holding_patterns?icao_associated=eq.{icao}&source_reference=ilike.{_enc_name}%25', headers=HEADERS_REST, timeout=15)
 
                                 legs_batch = []
                                 holdings_batch = []
 
-                                # Estruturacao via tabelas PyMuPDF (fitz)
-                                if fitz:
-                                    try:
-                                        doc_tab = fitz.open(stream=pdf_r.content, filetype='pdf')
-                                        # 1. Busca waypoints em tabelas
-                                        for p_tab in doc_tab:
-                                            tf = p_tab.find_tables()
-                                            for t_item in getattr(tf, 'tables', []):
-                                                for r_row in t_item.extract():
-                                                    c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
-                                                    if len(c_row) >= 2:
-                                                        w_id = c_row[0].strip().upper()
-                                                        w_co = c_row[1].strip()
+                                if proc_item.get('raw_leg_rows'):
+                                    for c_row in proc_item['raw_leg_rows']:
+                                        seq_val = int(c_row[0].strip())
+                                        tr_id = c_row[1].strip() or 'ALL'
+                                        fl_ov = c_row[2].strip().upper() == 'Y'
+                                        fx_id = c_row[4].strip()
+                                        crs_str = c_row[6].strip() if len(c_row) > 6 else ''
+                                        trn_str = c_row[7].strip().upper() if len(c_row) > 7 else ''
+                                        u_alt_str = c_row[8].strip() if len(c_row) > 8 else ''
+                                        l_alt_str = c_row[9].strip() if len(c_row) > 9 else ''
+                                        spd_str = c_row[10].strip() if len(c_row) > 10 else ''
+                                        dst_str = c_row[12].strip() if len(c_row) > 12 else ''
+                                        va_str = c_row[13].strip() if len(c_row) > 13 else ''
+                                        rol_str = c_row[14].strip() if len(c_row) > 14 else ''
+                                        nav_str = c_row[15].strip() if len(c_row) > 15 else ''
+                                        p_term = c_row[5].strip().upper()
 
-                                                        # 🛡️ Suporte universal à Tabela de DER do DECEA (ex: "30", "10", "DER 30")
-                                                        m_der = re.match(r'^(?:DER\s*)?(\d{2}[LRC]?)$', w_id, re.I)
-                                                        if m_der and ('S ' in w_co or 'N ' in w_co):
-                                                            der_rwy = m_der.group(1)
-                                                            w_id = f"DER{der_rwy}"
+                                        mg_crs = None
+                                        m_mg = re.search(r'([\d\.]+)\s*°?\s*Mag', crs_str, re.I)
+                                        if m_mg: mg_crs = float(m_mg.group(1))
 
-                                                        if (re.match(r'^[A-Z0-9]{3,7}$', w_id) or w_id.startswith('DER')) and ('S ' in w_co or 'N ' in w_co):
-                                                            lat_m = re.search(r'([NS]\s*\d{2}:\d{2}:[\d\.]+)', w_co, re.I)
-                                                            lng_m = re.search(r'([EW]\s*\d{2,3}:\d{2}:[\d\.]+)', w_co, re.I)
-                                                            if lat_m and lng_m:
-                                                                lat_v = convert_dms_to_dd(lat_m.group(1))
-                                                                lng_v = convert_dms_to_dd(lng_m.group(1))
-                                                                elev_v = None
-                                                                if len(c_row) > 2 and re.match(r'^[\d\.]+$', c_row[2].strip()):
-                                                                    try: elev_v = float(c_row[2].strip())
-                                                                    except: pass
-                                                                if lat_v is not None and lng_v is not None:
-                                                                    waypoints[w_id] = {
-                                                                        'ident': w_id,
-                                                                        'lat_dd': lat_v,
-                                                                        'lng_dd': lng_v,
-                                                                        'elev_ft': elev_v,
-                                                                        'dms_coord': f"{lat_m.group(1)} {lng_m.group(1)}",
-                                                                        'source': f'DECEA CODING TABLE {name_val}'
-                                                                    }
+                                        tr_crs = None
+                                        m_tr = re.search(r'([\d\.]+)\s*°?\s*True', crs_str, re.I)
+                                        if m_tr: tr_crs = float(m_tr.group(1))
 
-                                        # Salvar todos os fixos (inclusive DERxx) em enroute_fixes
-                                        if waypoints:
-                                            fixes_to_upsert = [
-                                                {'ident': w['ident'], 'lat_dd': w['lat_dd'], 'lng_dd': w['lng_dd']}
-                                                for w in waypoints.values()
-                                                if w.get('lat_dd') is not None and w.get('lng_dd') is not None
-                                            ]
-                                            if fixes_to_upsert:
-                                                requests.post(
-                                                    f'{SUPABASE_URL}/rest/v1/enroute_fixes?on_conflict=ident',
-                                                    headers=HEADERS_REST,
-                                                    json=fixes_to_upsert,
-                                                    timeout=15
-                                                )
-                                        # 2. Busca pernas da Coding Table
-                                        for p_tab in doc_tab:
-                                            tf = p_tab.find_tables()
-                                            for t_item in getattr(tf, 'tables', []):
-                                                for r_row in t_item.extract():
-                                                    c_row = [c.replace('\n', ' ').strip() if c else '' for c in r_row]
-                                                    if len(c_row) >= 6:
-                                                        s_num = c_row[0].strip()
-                                                        p_term = c_row[5].strip().upper()
-                                                        if s_num.isdigit() and p_term in ('IF', 'TF', 'CF', 'DF', 'FA', 'FC', 'FD', 'FM', 'HA', 'HF', 'HM', 'PI', 'RF', 'VA', 'VD', 'VI', 'VM', 'VR', 'CA', 'CD', 'CI', 'CR'):
-                                                            seq_val = int(s_num)
-                                                            tr_id = c_row[1].strip() or 'ALL'
-                                                            fl_ov = c_row[2].strip().upper() == 'Y'
-                                                            fx_id = c_row[4].strip()
-                                                            crs_str = c_row[6].strip() if len(c_row) > 6 else ''
-                                                            trn_str = c_row[7].strip().upper() if len(c_row) > 7 else ''
-                                                            u_alt_str = c_row[8].strip() if len(c_row) > 8 else ''
-                                                            l_alt_str = c_row[9].strip() if len(c_row) > 9 else ''
-                                                            spd_str = c_row[10].strip() if len(c_row) > 10 else ''
-                                                            dst_str = c_row[12].strip() if len(c_row) > 12 else ''
-                                                            va_str = c_row[13].strip() if len(c_row) > 13 else ''
-                                                            rol_str = c_row[14].strip() if len(c_row) > 14 else ''
-                                                            nav_str = c_row[15].strip() if len(c_row) > 15 else ''
+                                        lw_alt = None
+                                        m_lw = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', l_alt_str, re.I)
+                                        if m_lw:
+                                            if m_lw.group(1): lw_alt = int(m_lw.group(1)) * 100
+                                            elif m_lw.group(2): lw_alt = int(m_lw.group(2))
 
-                                                            mg_crs = None
-                                                            m_mg = re.search(r'([\d\.]+)\s*°?\s*Mag', crs_str, re.I)
-                                                            if m_mg: mg_crs = float(m_mg.group(1))
+                                        up_alt = None
+                                        m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', u_alt_str, re.I)
+                                        if m_up:
+                                            if m_up.group(1): up_alt = int(m_up.group(1)) * 100
+                                            elif m_up.group(2): up_alt = int(m_up.group(2))
 
-                                                            tr_crs = None
-                                                            m_tr = re.search(r'([\d\.]+)\s*°?\s*True', crs_str, re.I)
-                                                            if m_tr: tr_crs = float(m_tr.group(1))
+                                        spd_lim = None
+                                        m_sp = re.search(r'(\d{2,3})', spd_str)
+                                        if m_sp: spd_lim = int(m_sp.group(1))
 
-                                                            lw_alt = None
-                                                            m_lw = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', l_alt_str, re.I)
-                                                            if m_lw:
-                                                                if m_lw.group(1): lw_alt = int(m_lw.group(1)) * 100
-                                                                elif m_lw.group(2): lw_alt = int(m_lw.group(2))
+                                        dst_nm = None
+                                        if dst_str and dst_str != 'N/A':
+                                            try: dst_nm = float(dst_str)
+                                            except: pass
 
-                                                            up_alt = None
-                                                            m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', u_alt_str, re.I)
-                                                            if m_up:
-                                                                if m_up.group(1): up_alt = int(m_up.group(1)) * 100
-                                                                elif m_up.group(2): up_alt = int(m_up.group(2))
+                                        v_ang = None
+                                        if va_str and va_str != 'N/A':
+                                            try: v_ang = float(va_str)
+                                            except: pass
 
-                                                            spd_lim = None
-                                                            m_sp = re.search(r'(\d{2,3})', spd_str)
-                                                            if m_sp: spd_lim = int(m_sp.group(1))
+                                        if (not fx_id or fx_id == 'N/A') and p_term == 'CA':
+                                            fx_id = f"({lw_alt or up_alt})" if (lw_alt or up_alt) else "(CA)"
 
-                                                            dst_nm = None
-                                                            if dst_str and dst_str != 'N/A':
-                                                                try: dst_nm = float(dst_str)
-                                                                except: pass
+                                        # Identificação do tipo canônico de restrição
+                                        c_type = None
+                                        if 'B' in l_alt_str.upper() or 'B' in u_alt_str.upper() or (lw_alt and up_alt):
+                                            c_type = 'B'
+                                        elif '@' in l_alt_str or '@' in u_alt_str:
+                                            c_type = '@'
+                                        elif lw_alt and not up_alt:
+                                            c_type = '+'
+                                        elif up_alt and not lw_alt:
+                                            c_type = '-'
 
-                                                            v_ang = None
-                                                            if va_str and va_str != 'N/A':
-                                                                try: v_ang = float(va_str)
-                                                                except: pass
+                                        wp_obj = waypoints.get(fx_id)
+                                        leg_entry = {
+                                            'procedure_id': proc_id,
+                                            'seq_num': seq_val,
+                                            'transition_ident': tr_id,
+                                            'fix_ident': fx_id,
+                                            'path_terminator': p_term,
+                                            'is_fly_over': fl_ov,
+                                            'mag_course': mg_crs,
+                                            'true_course': tr_crs,
+                                            'turn_direction': trn_str if trn_str in ('R', 'L') else None,
+                                            'altitude_constraint_type': c_type,
+                                            'lower_limit_altitude_ft': lw_alt,
+                                            'upper_limit_altitude_ft': up_alt,
+                                            'speed_limit_kts': spd_lim,
+                                            'distance_nm': dst_nm,
+                                            'leg_time_min': None,
+                                            'vertical_angle': v_ang,
+                                            'role_of_fix': rol_str if rol_str and rol_str != 'N/A' else None,
+                                            'nav_spec': nav_str,
+                                            'lat_dd': wp_obj['lat_dd'] if wp_obj else None,
+                                            'lng_dd': wp_obj['lng_dd'] if wp_obj else None,
+                                            'raw_row_text': ' | '.join(c_row)
+                                        }
+                                        legs_batch.append(leg_entry)
 
-                                                            if (not fx_id or fx_id == 'N/A') and p_term == 'CA':
-                                                                fx_id = f"({lw_alt or up_alt})" if (lw_alt or up_alt) else "(CA)"
-
-                                                            # Identificação do tipo canônico de restrição
-                                                            c_type = None
-                                                            if 'B' in l_alt_str.upper() or 'B' in u_alt_str.upper() or (lw_alt and up_alt):
-                                                                c_type = 'B'
-                                                            elif '@' in l_alt_str or '@' in u_alt_str:
-                                                                c_type = '@'
-                                                            elif lw_alt and not up_alt:
-                                                                c_type = '+'
-                                                            elif up_alt and not lw_alt:
-                                                                c_type = '-'
-
-                                                            wp_obj = waypoints.get(fx_id)
-                                                            leg_entry = {
-                                                                'procedure_id': proc_id,
-                                                                'seq_num': seq_val,
-                                                                'transition_ident': tr_id,
-                                                                'fix_ident': fx_id,
-                                                                'path_terminator': p_term,
-                                                                'is_fly_over': fl_ov,
-                                                                'mag_course': mg_crs,
-                                                                'true_course': tr_crs,
-                                                                'turn_direction': trn_str if trn_str in ('R', 'L') else None,
-                                                                'altitude_constraint_type': c_type,
-                                                                'lower_limit_altitude_ft': lw_alt,
-                                                                'upper_limit_altitude_ft': up_alt,
-                                                                'speed_limit_kts': spd_lim,
-                                                                'distance_nm': dst_nm,
-                                                                'leg_time_min': None,
-                                                                'vertical_angle': v_ang,
-                                                                'role_of_fix': rol_str if rol_str and rol_str != 'N/A' else None,
-                                                                'nav_spec': nav_str,
-                                                                'lat_dd': wp_obj['lat_dd'] if wp_obj else None,
-                                                                'lng_dd': wp_obj['lng_dd'] if wp_obj else None,
-                                                                'raw_row_text': ' | '.join(c_row)
-                                                            }
-                                                            legs_batch.append(leg_entry)
-
-                                                            if p_term in ('HM', 'HF', 'HA'):
-                                                                holdings_batch.append({
-                                                                    'fix_ident': fx_id,
-                                                                    'icao_associated': icao,
-                                                                    'inbound_mag_course': mg_crs,
-                                                                    'turn_direction': trn_str if trn_str in ('R', 'L') else None,
-                                                                    'leg_time_min': None,
-                                                                    'leg_distance_nm': dst_nm,
-                                                                    'min_altitude_ft': lw_alt,
-                                                                    'max_altitude_ft': up_alt,
-                                                                    'speed_limit_kts': spd_lim,
-                                                                    'source_reference': f'{name_val} / Coding Table Leg {seq_val}',
-                                                                    'is_procedural': True
-                                                                })
-                                    except Exception as ex_t:
-                                        print(f'  [Aviso] Falha na extracao por tabelas PyMuPDF: {ex_t}', flush=True)
-
-                                # Fallback para regex linha a linha se a tabela nao tiver retornado pernas
-                                if not legs_batch:
-                                    lines_f = [l.strip() for l in raw_text.split('\n') if l.strip()]
-                                    for line in lines_f:
-                                        leg, hold = parse_leg_line(line, waypoints, icao, name_val)
-                                        if leg:
-                                            leg['procedure_id'] = proc_id
-                                            legs_batch.append(leg)
-                                        if hold:
-                                            holdings_batch.append(hold)
+                                        if p_term in ('HM', 'HF', 'HA'):
+                                            holdings_batch.append({
+                                                'fix_ident': fx_id,
+                                                'icao_associated': icao,
+                                                'inbound_mag_course': mg_crs,
+                                                'turn_direction': trn_str if trn_str in ('R', 'L') else None,
+                                                'leg_time_min': None,
+                                                'leg_distance_nm': dst_nm,
+                                                'min_altitude_ft': lw_alt,
+                                                'max_altitude_ft': up_alt,
+                                                'speed_limit_kts': spd_lim,
+                                                'source_reference': f'{sub_name} / Coding Table Leg {seq_val}',
+                                                'is_procedural': True
+                                            })
+                                elif proc_item.get('parsed_legs'):
+                                    for leg in proc_item['parsed_legs']:
+                                        leg['procedure_id'] = proc_id
+                                        legs_batch.append(leg)
+                                    holdings_batch.extend(proc_item.get('parsed_holds', []))
 
                                 if legs_batch:
                                     # ── PATCH_IAF_DB_EXPAND (v4 - ordem PDF) ────────────────────
-                                    # Estrutura DECEA (intercalada, seq reinicia por IAF):
-                                    #   seq10/MO008/IAF → seq20/MO004/TF(192°) → seq10/MO006/IAF → seq20/MO004/TF(122°) ...
-                                    # CRÍTICO: NÃO ordenar por seq_num. A ordem de aparecimento no PDF
-                                    # é a correspondência correta entre cada IAF e sua leg privada.
                                     expanded_legs = []
                                     raw_trans_map = {}
                                     for leg in legs_batch:
@@ -1162,8 +1203,7 @@ def main():
                                         raw_trans_map.setdefault(t_key, []).append(leg)
 
                                     for t_key, t_legs in raw_trans_map.items():
-                                        # NÃO reordenar - preservar ordem de leitura do PDF
-                                        iaf_pairs_db = []  # [(iaf_fix, [iaf_leg, priv_leg]), ...]
+                                        iaf_pairs_db = []
                                         i_db = 0
                                         last_end = 0
                                         while i_db < len(t_legs):
@@ -1171,7 +1211,6 @@ def main():
                                             if (leg.get('role_of_fix') or '').upper() == 'IAF':
                                                 iaf_fix = leg.get('fix_ident') or t_key
                                                 pair = [leg]
-                                                # A leg seguinte (se não for IAF) é a leg privada deste IAF
                                                 if i_db + 1 < len(t_legs) and (t_legs[i_db+1].get('role_of_fix') or '').upper() != 'IAF':
                                                     pair.append(t_legs[i_db + 1])
                                                     i_db += 2
@@ -1225,7 +1264,7 @@ def main():
                                         timeout=20
                                     )
                                     if r_legs.status_code not in (200, 201):
-                                        print(f'  [Aviso DB] Erro ao gravar pernas de {name_val}: {r_legs.status_code} - {r_legs.text}', flush=True)
+                                        print(f'  [Aviso DB] Erro ao gravar pernas de {sub_name}: {r_legs.status_code} - {r_legs.text}', flush=True)
                                     telemetry.legs_decoded += len(legs_batch)
                                     total_legs_ingested += len(legs_batch)
 
@@ -1249,9 +1288,9 @@ def main():
                                 total_procs_ingested += 1
                                 in_memory_procs.append({
                                     'icao': icao,
-                                    'id': proc_id or f"{icao}_{name_val}",
-                                    'name': name_val,
-                                    'type': t_val,
+                                    'id': proc_id or f"{icao}_{sub_name}",
+                                    'name': sub_name,
+                                    'type': sub_type,
                                     'transition_altitude': airport_ta_cache.get(icao),
                                     'chart_url': chart_link,
                                     'coding_table_url': tab_link,
