@@ -365,16 +365,22 @@ def parse_leg_line(line: str, waypoints: Dict[str, dict], icao_code: str, proc_n
     leg_time_min = None
     if len(tokens) > 12:
         dst = tokens[12]
-        if dst.endswith('_min'):
+        m_time = re.search(r'([\d\.]+)\s*(?:_min|min)', dst, re.I)
+        if m_time:
             try:
-                leg_time_min = float(dst.replace('_min', ''))
+                leg_time_min = float(m_time.group(1))
             except ValueError:
                 pass
-        elif re.match(r'^\d+\.\d{2}$', dst):
-            try:
-                distance_nm = float(dst)
-            except ValueError:
-                pass
+        else:
+            m_dst = re.search(r'([\d\.]+)', dst)
+            if m_dst:
+                try:
+                    distance_nm = float(m_dst.group(1))
+                except ValueError:
+                    pass
+
+    if path_terminator in ('HM', 'HF', 'HA') and not leg_time_min and not distance_nm:
+        leg_time_min = 1.0
 
     vertical_angle = None
     if len(tokens) > 13 and re.match(r'^-?\d+\.\d{2}$', tokens[13]):
@@ -422,12 +428,12 @@ def parse_leg_line(line: str, waypoints: Dict[str, dict], icao_code: str, proc_n
             'fix_ident': fix_ident,
             'icao_associated': icao_code,
             'inbound_mag_course': mag_course,
-            'turn_direction': turn_direction,
-            'leg_time_min': leg_time_min,
+            'turn_direction': turn_direction or 'R',
+            'leg_time_min': leg_time_min or 1.0,
             'leg_distance_nm': distance_nm,
             'min_altitude_ft': lower_limit_altitude,
             'max_altitude_ft': upper_limit_altitude,
-            'speed_limit_kts': speed_limit_kts,
+            'speed_limit_kts': speed_limit_kts or 230,
             'source_reference': f'{proc_name} / Coding Table Leg {seq_num}',
             'is_procedural': True
         }
@@ -633,44 +639,20 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             }
             raw_transitions.setdefault(t_ident, []).append(compiled_leg)
 
-        # ── Expandir transições com múltiplos IAFs em sub-transições individuais ──
-        # Estrutura DECEA (intercalada): seq reinicia por IAF, cada IAF é seguido
-        # imediatamente pela sua leg privada na ORDEM DE APARECIMENTO NO PDF.
-        # NÃO reordenar por seq - preservar ordem de inserção (= ordem do PDF).
+        # ── Preservação Canônica de Transições ARINC 424 (IAFs, FINAL e MA) ──
         transitions: Dict[str, list] = {}
         for t_key, t_legs in raw_transitions.items():
-            # NÃO reordenar - preservar ordem de aparecimento do PDF
-            iaf_pairs_r2 = []  # [(iaf_fix, [iaf_leg, priv_leg]), ...]
-            i_r2 = 0
-            last_r2 = 0
-            while i_r2 < len(t_legs):
-                leg = t_legs[i_r2]
-                if (leg.get('role') or '').upper() == 'IAF':
-                    iaf_fix = leg.get('fix') or t_key
-                    pair = [leg]
-                    if i_r2 + 1 < len(t_legs) and (t_legs[i_r2 + 1].get('role') or '').upper() != 'IAF':
-                        pair.append(t_legs[i_r2 + 1])
-                        i_r2 += 2
-                    else:
-                        i_r2 += 1
-                    last_r2 = i_r2
-                    iaf_pairs_r2.append((iaf_fix, pair))
-                else:
-                    i_r2 += 1
-            common_r2 = t_legs[last_r2:]
-            if len(iaf_pairs_r2) > 1:
-                # Múltiplos IAFs: cada sub-transição = legs privadas do IAF + comuns
-                for iaf_fix, priv_r2 in iaf_pairs_r2:
-                    sub_key = iaf_fix  # 'MO008', 'MO006', 'MO007'
-                    sub_legs = []
-                    for idx, sl in enumerate(priv_r2 + common_r2):
-                        patched = dict(sl)
-                        patched['seq'] = (idx + 1) * 10
-                        patched['trans'] = sub_key
-                        sub_legs.append(patched)
-                    transitions[sub_key] = sub_legs
+            if t_key == 'APCH' and any((leg.get('role') or '').upper() == 'IAF' for leg in t_legs):
+                # Compatibilidade com dados legados que agruparam IAFs sob 'APCH': particiona por IAF
+                current_sub = None
+                for leg in t_legs:
+                    if (leg.get('role') or '').upper() == 'IAF':
+                        current_sub = leg.get('fix') or 'APCH'
+                    sub_name = current_sub or 'APCH'
+                    patched = dict(leg)
+                    patched['trans'] = sub_name
+                    transitions.setdefault(sub_name, []).append(patched)
             else:
-                # Transição simples: manter como está
                 transitions[t_key] = t_legs
         total_legs_count += sum(len(v) for v in transitions.values())
 
@@ -1084,9 +1066,10 @@ def main():
                                 holdings_batch = []
 
                                 if proc_item.get('raw_leg_rows'):
+                                    current_iaf = None
                                     for c_row in proc_item['raw_leg_rows']:
                                         seq_val = int(c_row[0].strip())
-                                        tr_id = c_row[1].strip() or 'ALL'
+                                        raw_tr_id = c_row[1].strip() or 'ALL'
                                         fl_ov = c_row[2].strip().upper() == 'Y'
                                         fx_id = c_row[4].strip()
                                         crs_str = c_row[6].strip() if len(c_row) > 6 else ''
@@ -1100,6 +1083,27 @@ def main():
                                         nav_str = c_row[15].strip() if len(c_row) > 15 else ''
                                         p_term = c_row[5].strip().upper()
 
+                                        # Resolução Determinística da Transição Canônica ARINC 424
+                                        if sub_type == 'IAC':
+                                            if raw_tr_id.upper() in ('APCH', 'ALL'):
+                                                if rol_str.upper() == 'IAF' or (seq_val == 10 and p_term == 'IF'):
+                                                    current_iaf = fx_id
+                                                    tr_id = fx_id
+                                                elif current_iaf:
+                                                    tr_id = current_iaf
+                                                else:
+                                                    tr_id = fx_id or 'APCH'
+                                            elif raw_tr_id.upper() == 'FINAL':
+                                                current_iaf = None
+                                                tr_id = 'FINAL'
+                                            elif raw_tr_id.upper() in ('MA', 'MISSED', 'MAPCH', 'MISSED APCH'):
+                                                current_iaf = None
+                                                tr_id = 'MA'
+                                            else:
+                                                tr_id = raw_tr_id.upper()
+                                        else:
+                                            tr_id = raw_tr_id.upper()
+
                                         mg_crs = None
                                         m_mg = re.search(r'([\d\.]+)\s*°?\s*Mag', crs_str, re.I)
                                         if m_mg: mg_crs = float(m_mg.group(1))
@@ -1109,13 +1113,13 @@ def main():
                                         if m_tr: tr_crs = float(m_tr.group(1))
 
                                         lw_alt = None
-                                        m_lw = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', l_alt_str, re.I)
+                                        m_lw = re.search(r'(?:FL\s*(\d{2,3})|(\d{2,5}))', l_alt_str, re.I)
                                         if m_lw:
                                             if m_lw.group(1): lw_alt = int(m_lw.group(1)) * 100
                                             elif m_lw.group(2): lw_alt = int(m_lw.group(2))
 
                                         up_alt = None
-                                        m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{3,5}))', u_alt_str, re.I)
+                                        m_up = re.search(r'(?:FL\s*(\d{2,3})|(\d{2,5}))', u_alt_str, re.I)
                                         if m_up:
                                             if m_up.group(1): up_alt = int(m_up.group(1)) * 100
                                             elif m_up.group(2): up_alt = int(m_up.group(2))
@@ -1124,10 +1128,22 @@ def main():
                                         m_sp = re.search(r'(\d{2,3})', spd_str)
                                         if m_sp: spd_lim = int(m_sp.group(1))
 
+                                        # Resolução Precisa de Distância (NM) ou Tempo de Espera (min)
                                         dst_nm = None
+                                        leg_time_min = None
                                         if dst_str and dst_str != 'N/A':
-                                            try: dst_nm = float(dst_str)
-                                            except: pass
+                                            m_time = re.search(r'([\d\.]+)\s*(?:_min|min)', dst_str, re.I)
+                                            if m_time:
+                                                try: leg_time_min = float(m_time.group(1))
+                                                except ValueError: pass
+                                            else:
+                                                m_dst = re.search(r'([\d\.]+)', dst_str)
+                                                if m_dst:
+                                                    try: dst_nm = float(m_dst.group(1))
+                                                    except ValueError: pass
+
+                                        if p_term in ('HM', 'HF', 'HA') and not leg_time_min and not dst_nm:
+                                            leg_time_min = 1.0
 
                                         v_ang = None
                                         if va_str and va_str != 'N/A':
@@ -1164,7 +1180,7 @@ def main():
                                             'upper_limit_altitude_ft': up_alt,
                                             'speed_limit_kts': spd_lim,
                                             'distance_nm': dst_nm,
-                                            'leg_time_min': None,
+                                            'leg_time_min': leg_time_min,
                                             'vertical_angle': v_ang,
                                             'role_of_fix': rol_str if rol_str and rol_str != 'N/A' else None,
                                             'nav_spec': nav_str,
@@ -1179,12 +1195,12 @@ def main():
                                                 'fix_ident': fx_id,
                                                 'icao_associated': icao,
                                                 'inbound_mag_course': mg_crs,
-                                                'turn_direction': trn_str if trn_str in ('R', 'L') else None,
-                                                'leg_time_min': None,
+                                                'turn_direction': trn_str if trn_str in ('R', 'L') else 'R',
+                                                'leg_time_min': leg_time_min or 1.0,
                                                 'leg_distance_nm': dst_nm,
                                                 'min_altitude_ft': lw_alt,
                                                 'max_altitude_ft': up_alt,
-                                                'speed_limit_kts': spd_lim,
+                                                'speed_limit_kts': spd_lim or 230,
                                                 'source_reference': f'{sub_name} / Coding Table Leg {seq_val}',
                                                 'is_procedural': True
                                             })
@@ -1193,47 +1209,6 @@ def main():
                                         leg['procedure_id'] = proc_id
                                         legs_batch.append(leg)
                                     holdings_batch.extend(proc_item.get('parsed_holds', []))
-
-                                if legs_batch:
-                                    # ── PATCH_IAF_DB_EXPAND (v4 - ordem PDF) ────────────────────
-                                    expanded_legs = []
-                                    raw_trans_map = {}
-                                    for leg in legs_batch:
-                                        t_key = (leg.get('transition_ident') or 'COMMON').upper()
-                                        raw_trans_map.setdefault(t_key, []).append(leg)
-
-                                    for t_key, t_legs in raw_trans_map.items():
-                                        iaf_pairs_db = []
-                                        i_db = 0
-                                        last_end = 0
-                                        while i_db < len(t_legs):
-                                            leg = t_legs[i_db]
-                                            if (leg.get('role_of_fix') or '').upper() == 'IAF':
-                                                iaf_fix = leg.get('fix_ident') or t_key
-                                                pair = [leg]
-                                                if i_db + 1 < len(t_legs) and (t_legs[i_db+1].get('role_of_fix') or '').upper() != 'IAF':
-                                                    pair.append(t_legs[i_db + 1])
-                                                    i_db += 2
-                                                else:
-                                                    i_db += 1
-                                                last_end = i_db
-                                                iaf_pairs_db.append((iaf_fix, pair))
-                                            else:
-                                                i_db += 1
-                                        common_db = t_legs[last_end:]
-                                        if len(iaf_pairs_db) > 1:
-                                            print(f'    [IAF-EXPAND v4] "{t_key}" {len(iaf_pairs_db)} IAFs (ordem PDF) + {len(common_db)} comuns', flush=True)
-                                            for iaf_fix, priv_legs in iaf_pairs_db:
-                                                for idx, sl in enumerate(priv_legs + common_db):
-                                                    patched = dict(sl)
-                                                    patched['transition_ident'] = iaf_fix
-                                                    patched['seq_num'] = (idx + 1) * 10
-                                                    expanded_legs.append(patched)
-                                        else:
-                                            expanded_legs.extend(t_legs)
-
-                                    legs_batch = expanded_legs
-                                    # ── FIM PATCH_IAF_DB_EXPAND ──────────────────────────────────
 
                                     db_legs = []
                                     for leg in legs_batch:
