@@ -518,6 +518,14 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
             if not p_icao or not p_legs:
                 continue
 
+            # Sanitização canônica de pista e nome
+            rwy_p = p.get('rwy')
+            m_rwy = re.search(r'\s*RWY\s*(\d{2}[LRC]?(?:\s*[/]\s*\d{2}[LRC]?)?)', p_name, re.I)
+            if m_rwy:
+                if not rwy_p or rwy_p == 'ALL':
+                    rwy_p = f"RWY {m_rwy.group(1).upper().replace(' ', '')}"
+                p_name = re.sub(r'\s*RWY\s*\d{2}[LRC]?(?:\s*[/]\s*\d{2}[LRC]?)?', '', p_name, flags=re.I).strip()
+
             ta_mem = p.get('transition_altitude') or (airport_ta_map or {}).get(p_icao)
             if p_icao not in airports_map:
                 airports_map[p_icao] = {
@@ -579,6 +587,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                 'id': p.get('id') or f"{p_icao}_{p_type}_{p_name}",
                 'name': p_name,
                 'type': p_type,
+                'rwy': rwy_p or 'ALL',
                 'chartUrl': p.get('chart_url'),
                 'codingTableUrl': p.get('coding_table_url'),
                 'transitions': transitions_p,
@@ -656,11 +665,13 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
                 transitions[t_key] = t_legs
         total_legs_count += sum(len(v) for v in transitions.values())
 
-        # Extrair pista da carta
+        # Extrair pista da carta (suporta simples e paralelas)
         rwy = ''
-        m_rwy = re.search(r'RWY\s*(\d{2}[LRC]?)', p_name, re.I)
+        clean_p_name = p_name
+        m_rwy = re.search(r'\s*RWY\s*(\d{2}[LRC]?(?:\s*[/]\s*\d{2}[LRC]?)?)', p_name, re.I)
         if m_rwy:
-            rwy = m_rwy.group(1).upper()
+            rwy = f"RWY {m_rwy.group(1).upper().replace(' ', '')}"
+            clean_p_name = re.sub(r'\s*RWY\s*\d{2}[LRC]?(?:\s*[/]\s*\d{2}[LRC]?)?', '', p_name, flags=re.I).strip()
 
         proc_holdings = holdings_by_proc.get(p_name.strip().upper(), [])
         compiled_holdings = []
@@ -682,7 +693,7 @@ def compile_arinc_staging_package(s3, airac_cycle: str, telemetry: TelemetryMana
 
         compiled_proc = {
             'id': pid,
-            'name': p_name,
+            'name': clean_p_name,
             'type': p_type,
             'rwy': rwy,
             'amdt': h.get('amdt_number'),
