@@ -1,0 +1,82 @@
+name: "🏔️ SkyFPL - Robô Processador de Relevo 3D (DEM / SVS)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      airac_cycle:
+        description: '📅 Ciclo AIRAC (ex: 2611)'
+        required: false
+        default: '2611'
+      min_zoom:
+        description: '🔍 Zoom Mínimo (padrão: 0)'
+        required: false
+        default: '0'
+      max_zoom:
+        description: '🔍 Zoom Máximo (padrão: 8)'
+        required: false
+        default: '8'
+      force_upload:
+        description: '☁️ Forçar sobrescrita no Cloudflare R2'
+        required: false
+        default: 'true'
+  repository_dispatch:
+    types: [trigger-svs-dem-sync]
+
+concurrency:
+  group: svs-dem-processor
+  cancel-in-progress: false
+
+jobs:
+  process-and-upload-dem:
+    name: Compilar e Publicar Relevo 3D (Terrain-RGB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: svs-dem-robot/requirements.txt
+
+      - name: 📦 Instalar Dependências de Sistema e Python
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sqlite3
+          python -m pip install --upgrade pip
+          pip install -r svs-dem-robot/requirements.txt
+
+      - name: 🏔️ Executar Robô SVS DEM Processor
+        working-directory: svs-dem-robot
+        env:
+          AIRAC_CYCLE: ${{ github.event.inputs.airac_cycle || '2611' }}
+          MIN_ZOOM: ${{ github.event.inputs.min_zoom || '0' }}
+          MAX_ZOOM: ${{ github.event.inputs.max_zoom || '8' }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          R2_BUCKET_BRAIN: ${{ secrets.R2_BUCKET_BRAIN || 'skyfpl-brain-vault' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY || secrets.SUPABASE_ANON_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python build_svs_dem.py
+
+      - name: 📊 Registrar Sumário da Execução
+        if: always()
+        run: |
+          echo "## 🏔️ Relatório de Execução — Robô SVS DEM (Relevo 3D)" >> $GITHUB_STEP_SUMMARY
+          echo "| Parâmetro | Valor Configurado |" >> $GITHUB_STEP_SUMMARY
+          echo "| :--- | :--- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Ciclo AIRAC** | \`${{ github.event.inputs.airac_cycle || '2611' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Níveis de Zoom** | \`Z${{ github.event.inputs.min_zoom || '0' }} a Z${{ github.event.inputs.max_zoom || '8' }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Destino R2** | \`skyfpl-charts/terrain/relevo_brasil_dem.mbtiles\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Segundo Cérebro** | \`skyfpl-brain-vault/07_ELEVATION_TOPOGRAPHY/\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Status** | **${{ job.status }}** |" >> $GITHUB_STEP_SUMMARY
+
