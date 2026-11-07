@@ -59,6 +59,8 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_BRAIN_ACCESS_KEY_ID: ${{ secrets.R2_BRAIN_ACCESS_KEY_ID }}
+          R2_BRAIN_SECRET_ACCESS_KEY: ${{ secrets.R2_BRAIN_SECRET_ACCESS_KEY }}
           R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
           R2_BUCKET_BRAIN: ${{ secrets.R2_BUCKET_BRAIN || 'skyfpl-brain-vault' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
