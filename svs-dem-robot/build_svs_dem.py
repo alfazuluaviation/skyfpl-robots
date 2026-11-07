@@ -388,17 +388,34 @@ def upload_to_r2(mbtiles_path: str, manifest_path: str):
     )
     print("  ✅ Upload do MBTiles concluído com sucesso!")
 
-    # 2. Upload do Manifesto para o Segundo Cérebro (skyfpl-brain-vault)
+    # 2. Upload do Manifesto público para o bucket de cartas do app (skyfpl-charts)
+    manifest_key = f"terrain/{os.path.basename(manifest_path)}"
+    print(f"  📄 Enviando manifesto para bucket [{R2_BUCKET}] em {manifest_key}...")
+    try:
+        s3.upload_file(
+            manifest_path,
+            R2_BUCKET,
+            manifest_key,
+            ExtraArgs={'ContentType': 'application/json'}
+        )
+        print("  ✅ Manifesto público publicado no R2 com sucesso!")
+    except Exception as e_man:
+        print(f"  ⚠️ Aviso no upload do manifesto público: {e_man}")
+
+    # 3. Upload opcional do Manifesto para o Segundo Cérebro (skyfpl-brain-vault)
     if R2_BUCKET_BRAIN:
         brain_key = f"07_ELEVATION_TOPOGRAPHY/{os.path.basename(manifest_path)}"
         print(f"  🧠 Enviando manifesto para bucket [{R2_BUCKET_BRAIN}] em {brain_key}...")
-        s3.upload_file(
-            manifest_path,
-            R2_BUCKET_BRAIN,
-            brain_key,
-            ExtraArgs={'ContentType': 'application/json'}
-        )
-        print("  ✅ Manifesto registrado no Segundo Cérebro!")
+        try:
+            s3.upload_file(
+                manifest_path,
+                R2_BUCKET_BRAIN,
+                brain_key,
+                ExtraArgs={'ContentType': 'application/json'}
+            )
+            print("  ✅ Manifesto registrado no Segundo Cérebro!")
+        except Exception as e_vault:
+            print(f"  ⚠️ Aviso: Não foi possível subir para {R2_BUCKET_BRAIN} ({e_vault}). Continuando...")
 
     return True
 
