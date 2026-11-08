@@ -376,7 +376,7 @@ def generate_second_brain_artifacts(output_dir: str):
                 (lat_i + 0.9, lng_i + 0.9),
             ]
             
-            alts_m = [sample_elevation_m(pt[0], pt[1]) for pt in sample_points]
+            alts_m = [calculate_elevation(pt[0], pt[1]) for pt in sample_points]
             max_m = max(alts_m)
             max_ft = int(round(max_m * 3.28084))
             
