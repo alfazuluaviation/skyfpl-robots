@@ -524,7 +524,7 @@ def upload_to_r2(mbtiles_path: str, manifest_path: str, json_mora_path: str = No
         endpoint_url=R2_ENDPOINT,
         aws_access_key_id=R2_ACCESS_KEY_ID,
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
-        config=Config(signature_version='s3v4')
+        region_name='auto'
     )
 
     # 1. Upload do MBTiles para o bucket de cartas do app (skyfpl-charts)
@@ -588,7 +588,7 @@ def upload_to_r2(mbtiles_path: str, manifest_path: str, json_mora_path: str = No
                 endpoint_url=R2_ENDPOINT,
                 aws_access_key_id=R2_BRAIN_ACCESS_KEY_ID,
                 aws_secret_access_key=R2_BRAIN_SECRET_ACCESS_KEY,
-                config=Config(signature_version='s3v4')
+                region_name='auto'
             )
         else:
             s3_brain = s3
