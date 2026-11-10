@@ -24,7 +24,8 @@ import json
 import sqlite3
 import io
 import re
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import requests
@@ -37,6 +38,18 @@ R2_SECRET_ACCESS_KEY = os.environ.get('R2_SECRET_ACCESS_KEY')
 R2_ENDPOINT = os.environ.get('R2_ENDPOINT')
 R2_BUCKET = os.environ.get('R2_BUCKET', 'skyfpl-charts')
 R2_BUCKET_BRAIN = os.environ.get('R2_BUCKET_BRAIN', 'skyfpl-brain-vault')
+R2_BRAIN_ACCESS_KEY_ID = os.environ.get('R2_BRAIN_ACCESS_KEY_ID')
+R2_BRAIN_SECRET_ACCESS_KEY = os.environ.get('R2_BRAIN_SECRET_ACCESS_KEY')
+R2_PUBLIC_BASE_URL = os.environ.get(
+    'R2_PUBLIC_BASE_URL',
+    'https://pub-1b4a512269cb4fc496e8badb21acf51c.r2.dev'
+).rstrip('/')
+
+# Limiares da Trava Atômica na Nuvem (Cloud Guardrail)
+MIN_AIRWAY_SEGMENTS = int(os.environ.get('MIN_AIRWAY_SEGMENTS', '3500'))
+MIN_PREFERRED_ROUTES = int(os.environ.get('MIN_PREFERRED_ROUTES', '300'))
+MIN_DB_SIZE_BYTES = int(os.environ.get('MIN_DB_SIZE_BYTES', '500000'))
+DRY_RUN = os.environ.get('DRY_RUN', 'false').strip().lower() == 'true'
 
 # Proxy Supabase (GeoServer DECEA)
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://gongoqjjpwphhttumdjm.supabase.co')
@@ -57,7 +70,7 @@ DASA_PLAYBOOK_API_URL = 'https://dasa.decea.mil.br/playbook/busca/filtros'
 
 
 def init_s3():
-    """Inicializa cliente S3/Cloudflare R2."""
+    """Inicializa cliente S3/Cloudflare R2 para o bucket principal do app."""
     if not all([R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT]):
         print("⚠️ Aviso: Credenciais R2 não configuradas no ambiente local.")
         return None
@@ -68,6 +81,130 @@ def init_s3():
         aws_secret_access_key=R2_SECRET_ACCESS_KEY,
         region_name='auto'
     )
+
+
+def init_s3_brain(primary_s3):
+    """Inicializa cliente R2 dedicado para o vault do Segundo Cérebro, quando configurado."""
+    if all([R2_BRAIN_ACCESS_KEY_ID, R2_BRAIN_SECRET_ACCESS_KEY, R2_ENDPOINT]):
+        return boto3.client(
+            's3',
+            endpoint_url=R2_ENDPOINT,
+            aws_access_key_id=R2_BRAIN_ACCESS_KEY_ID,
+            aws_secret_access_key=R2_BRAIN_SECRET_ACCESS_KEY,
+            region_name='auto'
+        )
+    return primary_s3
+
+
+def sha256_file(file_path):
+    """Calcula hash SHA-256 hexadecimal do arquivo em chunks de 64KB."""
+    digest = hashlib.sha256()
+    with open(file_path, 'rb') as f_bin:
+        for chunk in iter(lambda: f_bin.read(65536), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def resolve_airac_cycle(target_dt=None):
+    """
+    Determina o ciclo AIRAC alvo respeitando AIRAC_CYCLE manual ou a janela
+    oficial ICAO D-14 com base no calendário compartilhado de navdata-robot.
+    """
+    manual_cycle = os.environ.get('AIRAC_CYCLE', '').strip()
+    if manual_cycle:
+        return manual_cycle
+
+    now = target_dt if target_dt is not None else datetime.now(timezone.utc)
+    calendar_path = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', 'navdata-robot', 'calendar.json')
+    )
+    all_cycles = []
+    if os.path.exists(calendar_path):
+        try:
+            with open(calendar_path, 'r', encoding='utf-8') as f_cal:
+                master_cal = json.load(f_cal)
+            for _year, cycles in master_cal.items():
+                for cycle_id, date_str in cycles.items():
+                    parts = [int(p) for p in str(date_str).split('/')]
+                    dt = datetime(parts[2], parts[1], parts[0], tzinfo=timezone.utc)
+                    all_cycles.append({'cycle': str(cycle_id), 'effective_dt': dt})
+        except Exception as e_cal:
+            print(f"⚠️ Aviso ao ler calendar.json ({e_cal}). Usando cálculo algorítmico AIRAC.")
+
+    all_cycles.sort(key=lambda item: item['effective_dt'])
+    if all_cycles:
+        current_c = all_cycles[0]
+        next_c = None
+        for idx, entry in enumerate(all_cycles):
+            if entry['effective_dt'] <= now:
+                current_c = entry
+                next_c = all_cycles[idx + 1] if idx + 1 < len(all_cycles) else None
+        if next_c:
+            days_until_next = (next_c['effective_dt'] - now).days
+            if 0 <= days_until_next <= 14:
+                return next_c['cycle']
+        return current_c['cycle']
+
+    # Fallback algorítmico 28 dias a partir do ciclo 2601 (22/01/2026)
+    epoch = datetime(2026, 1, 22, tzinfo=timezone.utc)
+    lookahead_dt = now + timedelta(days=14)
+    diff_days = (lookahead_dt - epoch).days
+    step_dt = epoch + timedelta(days=(diff_days // 28) * 28)
+    first_of_year = epoch
+    while first_of_year >= datetime(step_dt.year, 1, 1, tzinfo=timezone.utc):
+        first_of_year -= timedelta(days=28)
+    first_of_year += timedelta(days=28)
+    ordinal = ((step_dt - first_of_year).days // 28) + 1
+    return f"{step_dt.year % 100:02d}{ordinal:02d}"
+
+
+def fetch_previous_telemetry(s3):
+    """Consulta o manifesto airways_telemetry.json vigente no R2 para incrementar versão."""
+    if s3:
+        try:
+            obj = s3.get_object(Bucket=R2_BUCKET, Key='navdata/airways_telemetry.json')
+            return json.loads(obj['Body'].read().decode('utf-8'))
+        except Exception:
+            pass
+    try:
+        resp = requests.get(
+            f"{R2_PUBLIC_BASE_URL}/navdata/airways_telemetry.json?t={int(time.time())}",
+            timeout=10
+        )
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
+
+def resolve_package_version(airac_cycle, prev_telemetry):
+    """Resolve versão semântica <AIRAC>.<patch>, incrementando quando já existe publicação no ciclo."""
+    manual_ver = os.environ.get('PACKAGE_VERSION', '').strip()
+    if manual_ver:
+        return manual_ver
+
+    if isinstance(prev_telemetry, dict) and str(prev_telemetry.get('airac_cycle', '')) == str(airac_cycle):
+        prev_ver = str(prev_telemetry.get('version', ''))
+        m = re.match(rf'^{re.escape(str(airac_cycle))}\.(\d+)$', prev_ver)
+        if m:
+            return f"{airac_cycle}.{int(m.group(1)) + 1}"
+
+    return f"{airac_cycle}.1"
+
+
+def parse_em_vigor_flag(raw_val):
+    """Normaliza coluna booleana/textual de vigência do Playbook DECEA para 1 ou 0."""
+    if raw_val is None:
+        return 1
+    if isinstance(raw_val, bool):
+        return 1 if raw_val else 0
+    if isinstance(raw_val, (int, float)):
+        return 1 if int(raw_val) != 0 else 0
+    txt = str(raw_val).strip().lower()
+    if txt in ('0', 'false', 'não', 'nao', 'no', 'n', 'inativa', 'inativo', 'cancelada', 'suspensa'):
+        return 0
+    return 1
 
 
 def download_layer(layer_id):
@@ -203,7 +340,10 @@ def download_playbook_preferred_routes():
                 adep_str = str(adep).strip().upper()
                 ades_str = str(ades).strip().upper()
                 ident_str = str(ident).strip().upper()
-                rota_clean = str(rota_txt).strip().replace('\r', '').replace('\n', ' ')
+                if adep_str in ('ADEP', 'ORIGEM') or ades_str in ('ADES', 'DESTINO') or ident_str in ('IDENT', 'ROTA'):
+                    continue
+
+                rota_clean = re.sub(r'\s+', ' ', str(rota_txt).strip().replace('\r', '').replace('\n', ' '))
 
                 # Coordenadas geográficas DECEA (coluna 11 - índice 10)
                 coords_str = row[10] if len(row) > 10 else None
@@ -211,7 +351,7 @@ def download_playbook_preferred_routes():
 
                 adep_iata = str(row[20]).strip().upper() if len(row) > 20 and row[20] else None
                 ades_iata = str(row[21]).strip().upper() if len(row) > 21 and row[21] else None
-                em_vigor = bool(row[22]) if len(row) > 22 and row[22] is not None else True
+                em_vigor_flag = parse_em_vigor_flag(row[22] if len(row) > 22 else 1)
                 status_str = str(row[23]).strip() if len(row) > 23 and row[23] else 'Ativa'
                 updated_at_str = str(row[9]).strip() if len(row) > 9 and row[9] else datetime.now(timezone.utc).isoformat()
 
@@ -226,7 +366,7 @@ def download_playbook_preferred_routes():
                     'ades_iata': ades_iata,
                     'route_text': rota_clean,
                     'geom_json': json.dumps(geom) if geom else None,
-                    'em_vigor': 1 if em_vigor else 0,
+                    'em_vigor': em_vigor_flag,
                     'status': status_str,
                     'updated_at': updated_at_str
                 }
@@ -399,11 +539,12 @@ def slice_linestring(coords, fraction_start, fraction_end):
     return sliced
 
 
-def build_db(all_airways, waypoints_list, preferred_routes):
+def build_db(all_airways, waypoints_list, preferred_routes, airac_cycle, package_version):
     """
-    Compila o banco SQLite Multi-Tabela airways_v1.db:
+    Compila o banco SQLite Multi-Tabela airways_v1.db + manifesto airways_telemetry.json:
     1. airway_segments: Aerovias de Alta e Baixa particionadas topologicamente.
     2. preferred_routes: Rotas Preferenciais Oficiais (DECEA Playbook / CGNA).
+    3. app_metadata: Metadados canônicos (versão, ciclo AIRAC, contagens e carimbo UTC).
     """
     db_path = "airways_v1.db"
     if os.path.exists(db_path):
@@ -411,6 +552,8 @@ def build_db(all_airways, waypoints_list, preferred_routes):
 
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
+    cursor.execute('PRAGMA journal_mode = OFF')
+    cursor.execute('PRAGMA synchronous = OFF')
 
     # Tabela 1: Segmentos de Aerovias
     cursor.execute('''
@@ -443,6 +586,14 @@ def build_db(all_airways, waypoints_list, preferred_routes):
             em_vigor INTEGER DEFAULT 1,
             status TEXT,
             updated_at TEXT
+        )
+    ''')
+
+    # Tabela 3: Metadados Canônicos do Pacote R2
+    cursor.execute('''
+        CREATE TABLE app_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT
         )
     ''')
 
@@ -554,26 +705,147 @@ def build_db(all_airways, waypoints_list, preferred_routes):
     cursor.execute('CREATE INDEX idx_pref_ades ON preferred_routes(ades)')
     cursor.execute('CREATE INDEX idx_pref_ident ON preferred_routes(ident)')
 
+    # 3. Gravação de app_metadata antes da auditoria e compactação
+    generated_iso = datetime.now(timezone.utc).isoformat()
+    active_routes_count = sum(1 for r in preferred_routes if int(r.get('em_vigor', 1)) == 1)
+    metadata_rows = [
+        ('airways_version', str(package_version)),
+        ('airac_cycle', str(airac_cycle)),
+        ('airway_segments_count', str(inserted_airways)),
+        ('preferred_routes_count', str(inserted_routes)),
+        ('preferred_routes_active_count', str(active_routes_count)),
+        ('updated_at', generated_iso),
+    ]
+    cursor.executemany(
+        'INSERT OR REPLACE INTO app_metadata (key, value) VALUES (?, ?)',
+        metadata_rows
+    )
+
     conn.commit()
+    cursor.execute('VACUUM')
+
+    # Auditoria obrigatória pós-construção dentro do SQLite compilado
+    integrity_row = cursor.execute('PRAGMA integrity_check').fetchone()
+    integrity_status = integrity_row[0] if integrity_row else 'unknown'
+    final_seg_count = cursor.execute('SELECT COUNT(*) FROM airway_segments').fetchone()[0]
+    final_pref_count = cursor.execute('SELECT COUNT(*) FROM preferred_routes').fetchone()[0]
+    final_active_pref_count = cursor.execute(
+        'SELECT COUNT(*) FROM preferred_routes WHERE em_vigor = 1'
+    ).fetchone()[0]
+
     conn.close()
 
-    # 3. Exportação de Artefato Cognitivo em JSON para o Segundo Cérebro
+    db_size_bytes = os.path.getsize(db_path)
+    db_sha256 = sha256_file(db_path)
+
+    # 4. Manifesto Leve airways_telemetry.json (Contrato App / Sentinel R2)
+    telemetry_manifest_path = "airways_telemetry.json"
+    manifest_payload = {
+        'version': str(package_version),
+        'airac_cycle': str(airac_cycle),
+        'updated_at': generated_iso,
+        'status': 'active',
+        'airway_segments_count': final_seg_count,
+        'preferred_routes_count': final_pref_count,
+        'preferred_routes_active_count': final_active_pref_count,
+        'db_url': f"{R2_PUBLIC_BASE_URL}/navdata/airways_v1.db",
+        'db_size_bytes': db_size_bytes,
+        'sha256': db_sha256,
+    }
+    with open(telemetry_manifest_path, 'w', encoding='utf-8') as f_tel:
+        json.dump(manifest_payload, f_tel, ensure_ascii=False, indent=2)
+        f_tel.write('\n')
+
+    # 5. Exportação de Artefato Cognitivo em JSON para o Segundo Cérebro
     json_pref_path = "preferred_routes.json"
     with open(json_pref_path, 'w', encoding='utf-8') as f_json:
         json.dump({
             'source': 'DECEA/CGNA Playbook de Rotas',
-            'extracted_at': datetime.now(timezone.utc).isoformat(),
+            'airac_cycle': str(airac_cycle),
+            'version': str(package_version),
+            'extracted_at': generated_iso,
             'total_routes': len(preferred_routes),
             'routes': preferred_routes
         }, f_json, ensure_ascii=False, indent=2)
 
-    db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
-    print(f"✅ Banco SQLite {db_path} ({db_size_mb:.2f} MB) gerado com sucesso!")
-    print(f"   ✈️ Segmentos de aerovias: {inserted_airways} (Particionamentos: {split_count})")
-    print(f"   🧭 Rotas preferenciais DECEA: {inserted_routes}")
-    print(f"   🧠 Artefato cognitivo: {json_pref_path} gerado para o Segundo Cérebro.")
+    build_report = {
+        'db_path': db_path,
+        'telemetry_path': telemetry_manifest_path,
+        'json_pref_path': json_pref_path,
+        'integrity_check': integrity_status,
+        'db_size_bytes': db_size_bytes,
+        'sha256': db_sha256,
+        'airway_segments_count': final_seg_count,
+        'preferred_routes_count': final_pref_count,
+        'preferred_routes_active_count': final_active_pref_count,
+        'split_count': split_count,
+        'manifest': manifest_payload,
+    }
 
-    return db_path, json_pref_path
+    db_size_mb = db_size_bytes / (1024 * 1024)
+    print(f"✅ Banco SQLite {db_path} ({db_size_mb:.2f} MB | {db_size_bytes} bytes) compilado!")
+    print(f"   🏷️ Versão: {package_version} (AIRAC {airac_cycle})")
+    print(f"   🔐 SHA-256: {db_sha256}")
+    print(f"   🛡️ PRAGMA integrity_check: {integrity_status}")
+    print(f"   ✈️ Segmentos de aerovias: {final_seg_count} (Particionamentos: {split_count})")
+    print(f"   🧭 Rotas preferenciais DECEA: {final_pref_count} (em_vigor=1: {final_active_pref_count})")
+    print(f"   📄 Manifesto gerado: {telemetry_manifest_path}")
+    print(f"   🧠 Artefato cognitivo: {json_pref_path}")
+
+    return build_report
+
+
+def validate_cloud_guardrail(build_report, prev_telemetry):
+    """
+    Trava Atômica na Nuvem (Cloud Guardrail):
+    Impede sobrescrita do bucket de produção no R2 caso integridade SQLite falhe ou
+    qualquer tabela fique vazia / abaixo dos limiares mínimos operacionais.
+    """
+    reasons = []
+    if build_report.get('integrity_check') != 'ok':
+        reasons.append(f"PRAGMA integrity_check falhou ({build_report.get('integrity_check')})")
+    if build_report.get('db_size_bytes', 0) < MIN_DB_SIZE_BYTES:
+        reasons.append(
+            f"Tamanho do SQLite abaixo do mínimo ({build_report.get('db_size_bytes', 0)} < {MIN_DB_SIZE_BYTES} bytes)"
+        )
+    if build_report.get('airway_segments_count', 0) < MIN_AIRWAY_SEGMENTS:
+        reasons.append(
+            f"airway_segments abaixo do mínimo ({build_report.get('airway_segments_count', 0)} < {MIN_AIRWAY_SEGMENTS})"
+        )
+    if build_report.get('preferred_routes_active_count', 0) < MIN_PREFERRED_ROUTES:
+        reasons.append(
+            f"preferred_routes (em_vigor=1) abaixo do mínimo ({build_report.get('preferred_routes_active_count', 0)} < {MIN_PREFERRED_ROUTES})"
+        )
+
+    passed = len(reasons) == 0
+    guardrail_report = {
+        'passed': passed,
+        'checked_at': datetime.now(timezone.utc).isoformat(),
+        'airac_cycle': build_report['manifest']['airac_cycle'],
+        'package_version': build_report['manifest']['version'],
+        'thresholds': {
+            'min_airway_segments': MIN_AIRWAY_SEGMENTS,
+            'min_preferred_routes': MIN_PREFERRED_ROUTES,
+            'min_db_size_bytes': MIN_DB_SIZE_BYTES,
+        },
+        'metrics': {
+            'integrity_check': build_report.get('integrity_check'),
+            'db_size_bytes': build_report.get('db_size_bytes'),
+            'airway_segments_count': build_report.get('airway_segments_count'),
+            'preferred_routes_count': build_report.get('preferred_routes_count'),
+            'preferred_routes_active_count': build_report.get('preferred_routes_active_count'),
+            'sha256': build_report.get('sha256'),
+        },
+        'reasons': reasons,
+        'previous_manifest_preserved': not passed,
+        'previous_version': prev_telemetry.get('version') if isinstance(prev_telemetry, dict) else None,
+    }
+
+    with open('guardrail_report.json', 'w', encoding='utf-8') as f_guard:
+        json.dump(guardrail_report, f_guard, ensure_ascii=False, indent=2)
+        f_guard.write('\n')
+
+    return passed, guardrail_report
 
 
 def main():
@@ -581,9 +853,15 @@ def main():
     print("🚦 INICIANDO ROBÔ UNIFICADO DE MALHA AÉREA & ROTAS PREFERENCIAIS SKYFPL", flush=True)
     print("=" * 75, flush=True)
     s3 = init_s3()
+    s3_brain = init_s3_brain(s3)
+
+    airac_cycle = resolve_airac_cycle()
+    prev_telemetry = fetch_previous_telemetry(s3)
+    package_version = resolve_package_version(airac_cycle, prev_telemetry)
+    print(f"📅 Ciclo AIRAC Alvo: {airac_cycle} | 🏷️ Versão Pacote: {package_version} | DRY_RUN={DRY_RUN}", flush=True)
 
     # 1. Download dos waypoints de referência para o particionamento geométrico
-    print("\n[PASSO 1/4] 🌐 Baixando base de waypoints DECEA para particionamento topológico...")
+    print("\n[PASSO 1/5] 🌐 Baixando base de waypoints DECEA para particionamento topológico...")
     waypoint_features = download_layer('ICA:waypoint')
     waypoints_list = []
     for wf in waypoint_features:
@@ -596,38 +874,84 @@ def main():
     print(f"📍 {len(waypoints_list)} waypoints carregados para análise espacial.")
 
     # 2. Download das aerovias
-    print("\n[PASSO 2/4] 🛰️ Baixando malha oficial de aerovias (Baixa e Alta)...")
+    print("\n[PASSO 2/5] 🛰️ Baixando malha oficial de aerovias (Baixa e Alta)...")
     all_airways = {}
     for layer in LAYERS:
         all_airways[layer['name']] = download_layer(layer['id'])
 
     # 3. Coleta das rotas preferenciais oficiais do Playbook DECEA
-    print("\n[PASSO 3/4] 🧭 Baixando Rotas Preferenciais Oficiais do Playbook DECEA (CGNA)...")
+    print("\n[PASSO 3/5] 🧭 Baixando Rotas Preferenciais Oficiais do Playbook DECEA (CGNA)...")
     preferred_routes = download_playbook_preferred_routes()
 
-    # 4. Construção do banco de dados SQLite unificado e exportação para o Cérebro
-    print("\n[PASSO 4/4] 🏗️ Construindo banco SQLite multi-tabela e artefatos cognitivos...")
-    db_file, json_file = build_db(all_airways, waypoints_list, preferred_routes)
+    # 4. Construção do banco de dados SQLite unificado e manifesto JSON
+    print("\n[PASSO 4/5] 🏗️ Construindo banco SQLite multi-tabela, manifesto e artefatos cognitivos...")
+    build_report = build_db(all_airways, waypoints_list, preferred_routes, airac_cycle, package_version)
 
-    # 5. Sincronização Cloudflare R2
-    if s3:
-        print(f"\n📦 Sincronizando artefatos com Cloudflare R2...")
+    # 5. Trava Atômica na Nuvem (Cloud Guardrail) ANTES de tocar no R2
+    print("\n[PASSO 5/5] 🛡️ Executando Auditoria Atômica (Cloud Guardrail)...")
+    passed, guardrail_report = validate_cloud_guardrail(build_report, prev_telemetry)
+    if not passed:
+        print("=" * 75, flush=True)
+        print("🛑 ABORTADO PELO CLOUD GUARDRAIL — UPLOAD R2 BLOQUEADO PARA PROTEGER PRODUÇÃO!", flush=True)
+        for reason in guardrail_report['reasons']:
+            print(f"   ❌ Motivo: {reason}", flush=True)
+        print(
+            f"   🔒 Pacote anterior no R2 ({guardrail_report.get('previous_version') or 'desconhecido'}) foi 100% preservado.",
+            flush=True
+        )
+        print("=" * 75, flush=True)
+        sys.exit(2)
+
+    print("✅ Cloud Guardrail APROVADO! Todas as tabelas e integridade SQLite validadas.", flush=True)
+
+    if DRY_RUN:
+        print("\n🧪 Modo DRY_RUN ativo: artefatos validados localmente sem sobrescrever o Cloudflare R2.", flush=True)
+    elif s3:
+        db_file = build_report['db_path']
+        telemetry_file = build_report['telemetry_path']
+        json_file = build_report['json_pref_path']
+        print(f"\n📦 Sincronizando artefatos atômicos com Cloudflare R2...")
         try:
-            # R2 App Bucket (skyfpl-charts)
+            # 1) Sobe primeiro o SQLite completo; 2) Só depois publica o manifesto apontando para ele
             print(f"  ☁️ Enviando {db_file} para bucket [{R2_BUCKET}] em navdata/{db_file}...")
-            s3.upload_file(db_file, R2_BUCKET, f"navdata/{db_file}")
-            print("  ✅ Upload do SQLite concluído com sucesso!")
+            s3.upload_file(
+                db_file,
+                R2_BUCKET,
+                f"navdata/{db_file}",
+                ExtraArgs={
+                    'ContentType': 'application/x-sqlite3',
+                    'CacheControl': 'no-cache, must-revalidate',
+                }
+            )
+            print("  ✅ Upload do SQLite concluído!")
 
-            # R2 Brain Vault Bucket (skyfpl-brain-vault)
-            if R2_BUCKET_BRAIN:
+            print(f"  📄 Publicando manifesto {telemetry_file} em [{R2_BUCKET}] navdata/{telemetry_file}...")
+            s3.upload_file(
+                telemetry_file,
+                R2_BUCKET,
+                f"navdata/{telemetry_file}",
+                ExtraArgs={
+                    'ContentType': 'application/json',
+                    'CacheControl': 'no-cache, no-store, must-revalidate',
+                }
+            )
+            print("  ✅ Manifesto airways_telemetry.json publicado!")
+
+            # R2 Brain Vault Bucket (skyfpl-brain-vault) — não bloqueante
+            if R2_BUCKET_BRAIN and s3_brain:
                 try:
                     print(f"  🧠 Enviando {json_file} para bucket [{R2_BUCKET_BRAIN}] em 03_AIRSPACE_TOPOLOGY/{json_file}...")
-                    s3.upload_file(json_file, R2_BUCKET_BRAIN, f"03_AIRSPACE_TOPOLOGY/{json_file}")
+                    s3_brain.upload_file(
+                        json_file,
+                        R2_BUCKET_BRAIN,
+                        f"03_AIRSPACE_TOPOLOGY/{json_file}",
+                        ExtraArgs={'ContentType': 'application/json'}
+                    )
                     print("  ✅ Upload para o Segundo Cérebro concluído!")
                 except Exception as e_vault:
                     print(f"  ⚠️ Aviso: Não foi possível subir para {R2_BUCKET_BRAIN}: {e_vault}")
 
-            print("🚀 ✅ Sincronização com Cloudflare R2 finalizada!")
+            print("🚀 ✅ Sincronização atômica com Cloudflare R2 finalizada!")
         except Exception as e:
             print(f"❌ Erro fatal no upload: {e}", flush=True)
             sys.exit(1)

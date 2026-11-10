@@ -1,34 +1,81 @@
-name: "🛣️ SkyFPL - Robô Processador de Aerovias (H/L)"
+name: "🛣️ SkyFPL - Robô Processador de Aerovias (H/L) & Rotas Preferenciais"
 
 on:
+  schedule:
+    - cron: '0 4 * * 4' # Toda quinta-feira às 04:00 UTC (acompanha janela oficial AIRAC ICAO)
   workflow_dispatch:
     inputs:
-      force_sync:
-        description: 'Forçar sincronização completa'
+      airac_cycle:
+        description: '📅 Ciclo AIRAC específico (vazio = cálculo automático D-14)'
+        required: false
+        default: ''
+      package_version:
+        description: '🏷️ Versão explícita do pacote (ex: 2611.2, vazio = auto-incremento)'
+        required: false
+        default: ''
+      dry_run:
+        description: '🧪 Simulação local (gera e valida SQLite/Guardrails sem enviar ao R2)'
         required: false
         default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+  repository_dispatch:
+    types: [trigger-airways-sync]
+
+concurrency:
+  group: airways-robot-builder
+  cancel-in-progress: false
 
 jobs:
   build:
+    name: Compilar e Publicar airways_v1.db + Manifesto R2
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
+    timeout-minutes: 30
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
+    steps:
+      - name: 📥 Checkout do Repositório
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurar Python 3.10
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: airways-robot/requirements.txt
 
-      - name: Install dependencies
+      - name: 📦 Instalar Dependências
         run: |
-          pip install requests boto3
+          python -m pip install --upgrade pip
+          pip install -r airways-robot/requirements.txt
 
-      - name: Run Airway Robot
+      - name: 🛣️ Executar Robô Unificado de Aerovias & Playbook DECEA
         env:
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY || secrets.R2_ACCESS_KEY_ID || secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY || secrets.R2_SECRET_ACCESS_KEY || secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT || secrets.CLOUDFLARE_R2_ENDPOINT }}
+          R2_BRAIN_ACCESS_KEY_ID: ${{ secrets.R2_BRAIN_ACCESS_KEY_ID }}
+          R2_BRAIN_SECRET_ACCESS_KEY: ${{ secrets.R2_BRAIN_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET || secrets.CLOUDFLARE_R2_BUCKET || 'skyfpl-charts' }}
+          R2_BUCKET_BRAIN: ${{ secrets.R2_BUCKET_BRAIN || 'skyfpl-brain-vault' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          AIRAC_CYCLE: ${{ github.event.inputs.airac_cycle || github.event.client_payload.airac_cycle || '' }}
+          PACKAGE_VERSION: ${{ github.event.inputs.package_version || '' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
           PYTHONUNBUFFERED: 1
         run: |
           python airways-robot/build_airways.py
+
+      - name: 📋 Publicar Relatório de Guardrail / Manifesto (se existir)
+        if: always()
+        run: |
+          if [ -f airways_telemetry.json ]; then
+            echo "=== AIRWAYS TELEMETRY MANIFEST ==="
+            cat airways_telemetry.json
+          fi
+          if [ -f guardrail_report.json ]; then
+            echo "=== GUARDRAIL REPORT ==="
+            cat guardrail_report.json
+          fi
