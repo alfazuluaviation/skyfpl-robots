@@ -61,9 +61,12 @@ jobs:
           R2_BUCKET_BRAIN: ${{ secrets.R2_BUCKET_BRAIN || 'skyfpl-brain-vault' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          MASTER_BRAIN_URL: ${{ secrets.MASTER_BRAIN_URL || 'https://uzpkjteanhmkgnefftut.supabase.co/functions/v1/dov-master-agent' }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
           AIRAC_CYCLE: ${{ github.event.inputs.airac_cycle || github.event.client_payload.airac_cycle || '' }}
           PACKAGE_VERSION: ${{ github.event.inputs.package_version || '' }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || (github.event.client_payload.dry_run == true && 'true') || 'false' }}
           PYTHONUNBUFFERED: 1
         run: |
           python airways-robot/build_airways.py

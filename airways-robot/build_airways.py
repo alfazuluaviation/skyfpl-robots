@@ -51,10 +51,17 @@ MIN_PREFERRED_ROUTES = int(os.environ.get('MIN_PREFERRED_ROUTES', '300'))
 MIN_DB_SIZE_BYTES = int(os.environ.get('MIN_DB_SIZE_BYTES', '500000'))
 DRY_RUN = os.environ.get('DRY_RUN', 'false').strip().lower() == 'true'
 
-# Proxy Supabase (GeoServer DECEA)
+# Proxy Supabase (GeoServer DECEA) e Cérebro Soberano (Master Supervisor / Sala de Situação)
 SUPABASE_URL = os.environ.get('SUPABASE_URL', 'https://gongoqjjpwphhttumdjm.supabase.co')
 SUPABASE_ANON_KEY = os.environ.get('SUPABASE_ANON_KEY', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdvbmdvcWpqcHdwaGh0dHVtZGptIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0MTUyMDcsImV4cCI6MjA4Mjk5MTIwN30.XhdrWma90JeoQdGfeqCoXgGVnyiTZ5GXHszEHw3Ce2o')
 PROXY_URL = f"{SUPABASE_URL}/functions/v1/proxy-geoserver"
+MASTER_BRAIN_URL = os.environ.get(
+    'MASTER_BRAIN_URL',
+    'https://uzpkjteanhmkgnefftut.supabase.co/functions/v1/dov-master-agent'
+).strip()
+ROBOT_ID = 'robot-airways-playbook'
+ROBOT_NAME = 'Robô Malha de Aerovias & Playbook DECEA'
+ROBOT_DESC = 'Compilação unificada de aerovias (LOW/HIGH) e rotas preferenciais CGNA/DECEA em airways_v1.db + manifesto R2 com trava atômica'
 
 WFS_URL = 'https://geoaisweb.decea.mil.br/geoserver/ICA/wfs'
 
@@ -848,6 +855,87 @@ def validate_cloud_guardrail(build_report, prev_telemetry):
     return passed, guardrail_report
 
 
+def call_master_brain(payload):
+    """Despacha telemetria/mensagens ao Cérebro Soberano (dov-master-agent) de forma resiliente."""
+    if not MASTER_BRAIN_URL:
+        return None
+    try:
+        resp = requests.post(
+            MASTER_BRAIN_URL,
+            json=payload,
+            headers={'Content-Type': 'application/json'},
+            timeout=12
+        )
+        if resp.status_code >= 400:
+            print(f"⚠️ Master Brain HTTP {resp.status_code}: {resp.text[:180]}", flush=True)
+            return None
+        return resp.json()
+    except Exception as e_brain:
+        print(f"⚠️ Telemetria Master Brain indisponível no momento: {e_brain}", flush=True)
+        return None
+
+
+def report_robot_heartbeat(status, airac_cycle, records_processed=None, error_message="", metadata=None):
+    """Atualiza o cartão vivo deste robô na Sala de Situação (robot_telemetry)."""
+    payload = {
+        'action': 'robot_heartbeat',
+        'robot_id': ROBOT_ID,
+        'name': ROBOT_NAME,
+        'description': ROBOT_DESC,
+        'icon': 'git-branch',
+        'status': status,
+        'current_cycle': f"AIRAC {airac_cycle}",
+        'error_message': error_message,
+        'metadata': metadata or {},
+    }
+    if records_processed is not None:
+        payload['records_processed'] = int(records_processed)
+    return call_master_brain(payload)
+
+
+def post_war_room_message(
+    channel_id,
+    message_text,
+    recipient_id='@MasterSupervisor',
+    metadata=None,
+    requires_approval=False,
+    approval_status='NONE'
+):
+    """Registra ocorrência/relatório no chat persistente inter-agentes (agent_messages)."""
+    return call_master_brain({
+        'action': 'post_agent_message',
+        'message': {
+            'channel_id': channel_id,
+            'sender_id': ROBOT_ID,
+            'sender_name': ROBOT_NAME,
+            'sender_role': 'ROBOT',
+            'sender_avatar': '🛣️',
+            'recipient_id': recipient_id,
+            'message': message_text,
+            'metadata': metadata or {},
+            'requires_approval': requires_approval,
+            'approval_status': approval_status,
+        }
+    })
+
+
+def create_war_room_task(title, description, assigned_to='AiracSentinel', priority='NORMAL', status='DONE', progress=100, result=None):
+    """Abre tarefa auditável na esteira da empresa (agent_tasks) visível no MasterWarRoomModal."""
+    return call_master_brain({
+        'action': 'create_agent_task',
+        'task': {
+            'title': title,
+            'description': description,
+            'assigned_to': assigned_to,
+            'created_by': ROBOT_ID,
+            'priority': priority,
+            'status': status,
+            'progress_percent': progress,
+            'result': result or {},
+        }
+    })
+
+
 def main():
     print("=" * 75, flush=True)
     print("🚦 INICIANDO ROBÔ UNIFICADO DE MALHA AÉREA & ROTAS PREFERENCIAIS SKYFPL", flush=True)
@@ -858,60 +946,113 @@ def main():
     airac_cycle = resolve_airac_cycle()
     prev_telemetry = fetch_previous_telemetry(s3)
     package_version = resolve_package_version(airac_cycle, prev_telemetry)
+    trigger_src = os.environ.get('GITHUB_EVENT_NAME', 'manual').strip() or 'manual'
+    github_run_id = os.environ.get('GITHUB_RUN_ID', '').strip()
     print(f"📅 Ciclo AIRAC Alvo: {airac_cycle} | 🏷️ Versão Pacote: {package_version} | DRY_RUN={DRY_RUN}", flush=True)
 
-    # 1. Download dos waypoints de referência para o particionamento geométrico
-    print("\n[PASSO 1/5] 🌐 Baixando base de waypoints DECEA para particionamento topológico...")
-    waypoint_features = download_layer('ICA:waypoint')
-    waypoints_list = []
-    for wf in waypoint_features:
-        p = wf.get('properties', {})
-        ident = p.get('ident')
-        lat = p.get('latitude')
-        lng = p.get('longitude')
-        if ident and lat is not None and lng is not None:
-            waypoints_list.append((ident.strip().upper(), float(lng), float(lat)))
-    print(f"📍 {len(waypoints_list)} waypoints carregados para análise espacial.")
+    # Batimento inicial SYNCING para o Agente Gestor (Sala de Situação)
+    report_robot_heartbeat(
+        status='SYNCING',
+        airac_cycle=airac_cycle,
+        error_message='',
+        metadata={
+            'phase': 'STARTING',
+            'target_version': package_version,
+            'dry_run': DRY_RUN,
+            'trigger': trigger_src,
+            'github_run_id': github_run_id,
+        }
+    )
 
-    # 2. Download das aerovias
-    print("\n[PASSO 2/5] 🛰️ Baixando malha oficial de aerovias (Baixa e Alta)...")
-    all_airways = {}
-    for layer in LAYERS:
-        all_airways[layer['name']] = download_layer(layer['id'])
+    try:
+        # 1. Download dos waypoints de referência para o particionamento geométrico
+        print("\n[PASSO 1/5] 🌐 Baixando base de waypoints DECEA para particionamento topológico...")
+        waypoint_features = download_layer('ICA:waypoint')
+        waypoints_list = []
+        for wf in waypoint_features:
+            p = wf.get('properties', {})
+            ident = p.get('ident')
+            lat = p.get('latitude')
+            lng = p.get('longitude')
+            if ident and lat is not None and lng is not None:
+                waypoints_list.append((ident.strip().upper(), float(lng), float(lat)))
+        print(f"📍 {len(waypoints_list)} waypoints carregados para análise espacial.")
 
-    # 3. Coleta das rotas preferenciais oficiais do Playbook DECEA
-    print("\n[PASSO 3/5] 🧭 Baixando Rotas Preferenciais Oficiais do Playbook DECEA (CGNA)...")
-    preferred_routes = download_playbook_preferred_routes()
+        # 2. Download das aerovias
+        print("\n[PASSO 2/5] 🛰️ Baixando malha oficial de aerovias (Baixa e Alta)...")
+        all_airways = {}
+        for layer in LAYERS:
+            all_airways[layer['name']] = download_layer(layer['id'])
 
-    # 4. Construção do banco de dados SQLite unificado e manifesto JSON
-    print("\n[PASSO 4/5] 🏗️ Construindo banco SQLite multi-tabela, manifesto e artefatos cognitivos...")
-    build_report = build_db(all_airways, waypoints_list, preferred_routes, airac_cycle, package_version)
+        # 3. Coleta das rotas preferenciais oficiais do Playbook DECEA
+        print("\n[PASSO 3/5] 🧭 Baixando Rotas Preferenciais Oficiais do Playbook DECEA (CGNA)...")
+        preferred_routes = download_playbook_preferred_routes()
 
-    # 5. Trava Atômica na Nuvem (Cloud Guardrail) ANTES de tocar no R2
-    print("\n[PASSO 5/5] 🛡️ Executando Auditoria Atômica (Cloud Guardrail)...")
-    passed, guardrail_report = validate_cloud_guardrail(build_report, prev_telemetry)
-    if not passed:
-        print("=" * 75, flush=True)
-        print("🛑 ABORTADO PELO CLOUD GUARDRAIL — UPLOAD R2 BLOQUEADO PARA PROTEGER PRODUÇÃO!", flush=True)
-        for reason in guardrail_report['reasons']:
-            print(f"   ❌ Motivo: {reason}", flush=True)
-        print(
-            f"   🔒 Pacote anterior no R2 ({guardrail_report.get('previous_version') or 'desconhecido'}) foi 100% preservado.",
-            flush=True
-        )
-        print("=" * 75, flush=True)
-        sys.exit(2)
+        # 4. Construção do banco de dados SQLite unificado e manifesto JSON
+        print("\n[PASSO 4/5] 🏗️ Construindo banco SQLite multi-tabela, manifesto e artefatos cognitivos...")
+        build_report = build_db(all_airways, waypoints_list, preferred_routes, airac_cycle, package_version)
 
-    print("✅ Cloud Guardrail APROVADO! Todas as tabelas e integridade SQLite validadas.", flush=True)
+        # 5. Trava Atômica na Nuvem (Cloud Guardrail) ANTES de tocar no R2
+        print("\n[PASSO 5/5] 🛡️ Executando Auditoria Atômica (Cloud Guardrail)...")
+        passed, guardrail_report = validate_cloud_guardrail(build_report, prev_telemetry)
+        if not passed:
+            print("=" * 75, flush=True)
+            print("🛑 ABORTADO PELO CLOUD GUARDRAIL — UPLOAD R2 BLOQUEADO PARA PROTEGER PRODUÇÃO!", flush=True)
+            for reason in guardrail_report['reasons']:
+                print(f"   ❌ Motivo: {reason}", flush=True)
+            prev_ver = guardrail_report.get('previous_version') or 'desconhecido'
+            print(
+                f"   🔒 Pacote anterior no R2 ({prev_ver}) foi 100% preservado.",
+                flush=True
+            )
+            print("=" * 75, flush=True)
 
-    if DRY_RUN:
-        print("\n🧪 Modo DRY_RUN ativo: artefatos validados localmente sem sobrescrever o Cloudflare R2.", flush=True)
-    elif s3:
-        db_file = build_report['db_path']
-        telemetry_file = build_report['telemetry_path']
-        json_file = build_report['json_pref_path']
-        print(f"\n📦 Sincronizando artefatos atômicos com Cloudflare R2...")
-        try:
+            reasons_txt = "; ".join(guardrail_report['reasons'])
+            report_robot_heartbeat(
+                status='ERROR',
+                airac_cycle=airac_cycle,
+                records_processed=build_report.get('preferred_routes_active_count', 0),
+                error_message=reasons_txt,
+                metadata={**guardrail_report, 'trigger': trigger_src, 'github_run_id': github_run_id}
+            )
+            post_war_room_message(
+                channel_id='data-integrity',
+                recipient_id='@MasterSupervisor',
+                requires_approval=True,
+                approval_status='PENDING',
+                message_text=(
+                    f"🛑 CLOUD GUARDRAIL ABORTOU UPLOAD ({package_version} / AIRAC {airac_cycle}): "
+                    f"{reasons_txt}. Pacote anterior saudável no R2 ({prev_ver}) mantido 100% íntegro. "
+                    f"Aprovar para disparar nova tentativa remota."
+                ),
+                metadata={
+                    **guardrail_report,
+                    'remote_action': 'dispatch_airways_robot',
+                    'trigger': trigger_src,
+                    'github_run_id': github_run_id,
+                }
+            )
+            create_war_room_task(
+                title=f"Guardrail Abortou Upload de Aerovias ({package_version})",
+                description=f"Motivos: {reasons_txt}. Versão anterior ({prev_ver}) preservada no R2.",
+                assigned_to='AiracSentinel',
+                priority='CRITICAL',
+                status='WAITING_APPROVAL',
+                progress=0,
+                result=guardrail_report
+            )
+            sys.exit(2)
+
+        print("✅ Cloud Guardrail APROVADO! Todas as tabelas e integridade SQLite validadas.", flush=True)
+
+        published_to_r2 = False
+        if DRY_RUN:
+            print("\n🧪 Modo DRY_RUN ativo: artefatos validados localmente sem sobrescrever o Cloudflare R2.", flush=True)
+        elif s3:
+            db_file = build_report['db_path']
+            telemetry_file = build_report['telemetry_path']
+            json_file = build_report['json_pref_path']
+            print(f"\n📦 Sincronizando artefatos atômicos com Cloudflare R2...")
             # 1) Sobe primeiro o SQLite completo; 2) Só depois publica o manifesto apontando para ele
             print(f"  ☁️ Enviando {db_file} para bucket [{R2_BUCKET}] em navdata/{db_file}...")
             s3.upload_file(
@@ -936,6 +1077,7 @@ def main():
                 }
             )
             print("  ✅ Manifesto airways_telemetry.json publicado!")
+            published_to_r2 = True
 
             # R2 Brain Vault Bucket (skyfpl-brain-vault) — não bloqueante
             if R2_BUCKET_BRAIN and s3_brain:
@@ -952,15 +1094,80 @@ def main():
                     print(f"  ⚠️ Aviso: Não foi possível subir para {R2_BUCKET_BRAIN}: {e_vault}")
 
             print("🚀 ✅ Sincronização atômica com Cloudflare R2 finalizada!")
-        except Exception as e:
-            print(f"❌ Erro fatal no upload: {e}", flush=True)
-            sys.exit(1)
-    else:
-        print("\n⚠️ Upload ignorado (credenciais R2 ausentes neste ambiente).")
+        else:
+            print("\n⚠️ Upload ignorado (credenciais R2 ausentes neste ambiente).")
 
-    print("\n" + "=" * 75)
-    print("🎉 EXECUÇÃO DO ROBÔ UNIFICADO CONCLUÍDA COM SUCESSO!")
-    print("=" * 75, flush=True)
+        # Telemetria Final ONLINE + Relatório no Chat Inter-Agentes + Tarefa Auditável
+        seg_count = build_report['airway_segments_count']
+        pref_count = build_report['preferred_routes_count']
+        pref_active = build_report['preferred_routes_active_count']
+        manifest_meta = {
+            **build_report['manifest'],
+            'split_count': build_report.get('split_count', 0),
+            'dry_run': DRY_RUN,
+            'published_to_r2': published_to_r2,
+            'trigger': trigger_src,
+            'github_run_id': github_run_id,
+        }
+        report_robot_heartbeat(
+            status='ONLINE',
+            airac_cycle=airac_cycle,
+            records_processed=seg_count,
+            error_message='',
+            metadata=manifest_meta
+        )
+        mode_label = "SIMULAÇÃO (DRY_RUN)" if DRY_RUN else ("PUBLICADO EM PRODUÇÃO (R2)" if published_to_r2 else "COMPILADO LOCALMENTE")
+        post_war_room_message(
+            channel_id='airac-audits',
+            recipient_id='@MasterSupervisor',
+            message_text=(
+                f"✅ [{mode_label}] Malha de Aerovias & Playbook DECEA v{package_version} (AIRAC {airac_cycle}) validada: "
+                f"{seg_count} segmentos de aerovia + {pref_active} rotas preferenciais ativas | "
+                f"PRAGMA integrity_check=ok | SHA-256 {build_report['sha256'][:12]}..."
+            ),
+            metadata=manifest_meta
+        )
+        if published_to_r2:
+            create_war_room_task(
+                title=f"Publicação R2 Aerovias & Playbook v{package_version} (AIRAC {airac_cycle})",
+                description=f"{seg_count} segmentos de aerovia e {pref_active} rotas preferenciais publicados e verificados no R2.",
+                assigned_to='AiracSentinel',
+                priority='NORMAL',
+                status='DONE',
+                progress=100,
+                result=manifest_meta
+            )
+
+        print("\n" + "=" * 75)
+        print("🎉 EXECUÇÃO DO ROBÔ UNIFICADO CONCLUÍDA COM SUCESSO!")
+        print("=" * 75, flush=True)
+
+    except SystemExit:
+        raise
+    except Exception as e_fatal:
+        print(f"❌ Erro fatal inesperado na execução do robô: {e_fatal}", flush=True)
+        report_robot_heartbeat(
+            status='ERROR',
+            airac_cycle=airac_cycle,
+            error_message=str(e_fatal)[:300],
+            metadata={'trigger': trigger_src, 'github_run_id': github_run_id, 'dry_run': DRY_RUN}
+        )
+        post_war_room_message(
+            channel_id='data-integrity',
+            recipient_id='@MasterSupervisor',
+            message_text=f"❌ Falha inesperada no Robô de Aerovias (AIRAC {airac_cycle}): {str(e_fatal)[:300]}",
+            metadata={'trigger': trigger_src, 'github_run_id': github_run_id}
+        )
+        create_war_room_task(
+            title=f"Erro na Execução do Robô de Aerovias (AIRAC {airac_cycle})",
+            description=str(e_fatal)[:400],
+            assigned_to='AiracSentinel',
+            priority='HIGH',
+            status='FAILED',
+            progress=0,
+            result={'error': str(e_fatal)}
+        )
+        sys.exit(1)
 
 
 if __name__ == "__main__":
